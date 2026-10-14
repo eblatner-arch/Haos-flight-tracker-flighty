@@ -74,9 +74,11 @@ def inbound_close(leg, cfg):
     return (our_out - inb_in) / 60 <= limit
 
 
-def problems(leg, cfg, nas_items):
+def problems(leg, cfg, nas_items, rules=None):
     """Current issues on a leg, for the dashboard and the problem sensor."""
     out = []
+    min_turn = ((rules or {}).get("inbound_late") or {}).get("params", {}).get("min_turn") \
+        or int(cfg.get("min_turn_minutes", 35))
     f, inb = leg.get("flight"), leg.get("inbound")
     ph = fa.phase(f, 0)
     if ph == "cancelled":
@@ -92,9 +94,9 @@ def problems(leg, cfg, nas_items):
             if iph in ("cancelled", "diverted"):
                 out.append({"level": "critical", "text": f"Inbound {inb.get('display_ident') or ''} {iph}".strip()})
             t = turn_minutes(leg)
-            if t is not None and t < int(cfg.get("min_turn_minutes", 35)) and iph != "arrived":
+            if t is not None and t < min_turn and iph != "arrived":
                 out.append({"level": "warn" if t >= 0 else "critical",
-                            "text": f"Inbound late: {mins(t)} turn"})
+                            "text": f"Short turn: {mins(t)}"})
     if ph not in ("arrived", "cancelled"):
         for n in nas_for(leg, nas_items):
             out.append({"level": "warn", "text": f"{n['airport']}: {n['label']}"})
@@ -305,7 +307,7 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
         if t is not None and t < (P("inbound_late", "min_turn") or 35) and iph not in ("arrived", "cancelled", "diverted") \
                 and (last is None or t <= last - 10) and close("inbound_late"):
             nt["turn"] = t
-            add("inbound_late", f"{ident}: inbound running late",
+            add("inbound_late", f"{ident}: short turn, {mins(t)}",
                 f"{iid} from {ifrom} due {hhmm(fa.best_time(inb['times'], 'in'), dep_tz)} at {dep} — "
                 f"{mins(t)} turn for your {hhmm(out_now, dep_tz)} departure", "critical" if t < 0 else "warn")
         if iph in ("airborne", "landed", "arrived") and not nt.get("inbound_off") and close("inbound_departed"):

@@ -62,9 +62,10 @@ CATALOG = [
     ("inbound_delayed", "Inbound", "Inbound departure delayed", "Your inbound left (or will leave) its origin late.",
      dict(on=True, hours=None, mine=True, dh=False, followed=False, ts=True),
      {"threshold": ("Late by at least", 15, "min"), "max_sched_turn": ("Only if scheduled turn under", 60, "min")}),
-    ("inbound_late", "Inbound", "Inbound running late", "The expected turn is shorter than the minimum.",
+    ("inbound_late", "Inbound", "Short turn",
+     "The time between your inbound's arrival and your departure is under the minimum, whether or not the inbound is late.",
      dict(on=True, hours=None, mine=True, dh=True, followed=False, ts=True),
-     {"min_turn": ("Turn shorter than", 35, "min"), "max_sched_turn": ("Only if scheduled turn under", 60, "min")}),
+     {"min_turn": ("Turn shorter than", 35, "min")}),
     ("inbound_at_gate", "Inbound", "Inbound at the gate", "Your aircraft has arrived at your departure airport.",
      dict(on=True, hours=None, mine=True, dh=False, followed=False, ts=False),
      {"max_sched_turn": ("Only if scheduled turn under", 60, "min")}),
@@ -149,7 +150,7 @@ def seed_from_config(cfg):
     if cfg.get("min_turn_minutes"):
         r["inbound_late"]["params"]["min_turn"] = int(cfg["min_turn_minutes"])
     if cfg.get("inbound_alert_minutes") is not None:
-        for k in ("inbound_departed", "inbound_delayed", "inbound_late", "inbound_at_gate"):
+        for k in ("inbound_departed", "inbound_delayed", "inbound_at_gate"):
             r[k]["params"]["max_sched_turn"] = int(cfg["inbound_alert_minutes"])
     if cfg.get("time_sensitive") is False:
         for v in r.values():

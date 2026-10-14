@@ -493,9 +493,10 @@ class InboundWindow(unittest.TestCase):
             inb["times"]["in"].update(scheduled=sched_in, estimated=est_in)
             return inb
 
-        L["inbound"] = inbound(out - 3 * H, out - 10 * 60)      # scheduled 3 h before: late, but no push
+        L["inbound"] = inbound(out - 3 * H, out - 10 * 60)      # scheduled 3 h before: progress pushes stay quiet...
         keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
-        self.assertFalse(any(k.startswith("inbound") for k in keys))
+        self.assertEqual([k for k in keys if k.startswith("inbound")], ["inbound_late"])  # ...but a short turn always pushes
+        L["notified"] = {"watch": True}
         L["notified"] = {"watch": True, "dep_gate": "C71"}
         L["inbound"] = inbound(out - 45 * 60, out - 10 * 60)    # scheduled 45 min before: pushes
         keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
@@ -660,7 +661,8 @@ class Rules(unittest.TestCase):
         seeded = self.rules.seed_from_config({"notify_watch_start": False, "inbound_alert_minutes": 45,
                                               "swap_alert_hours": 2, "min_turn_minutes": 35})
         self.assertFalse(seeded["watch_start"]["on"])
-        self.assertEqual(seeded["inbound_late"]["params"]["max_sched_turn"], 45)
+        self.assertEqual(seeded["inbound_delayed"]["params"]["max_sched_turn"], 45)
+        self.assertNotIn("max_sched_turn", seeded["inbound_late"]["params"])
 
 
 class ScheduleChange(unittest.TestCase):

@@ -267,7 +267,7 @@
     return `<div class="t ${right ? "right" : ""}">
       <div class="lbl">${label}</div>
       <div><span class="big ${cls}">${hm(shown || s, tz)}</span>${Math.abs(diff) >= 5 ? `<span class="was">${hm(s, tz)}</span>` : ""}</div>
-      <div class="sub">${kind} · ${tzAbbr(shown || s, tz)} · ${dayLabel(shown || s, tz)}</div>
+      <div class="sub">${shown || s ? `${kind} · ${tzAbbr(shown || s, tz)} · ${dayLabel(shown || s, tz)}` : "Not known yet"}</div>
     </div>`;
   }
 
@@ -333,7 +333,8 @@
     const cell = (lbl, x, tz) => {
       const v = x ? (x.actual || x.estimated || x.scheduled) : null;
       const k = x && x.actual ? "actual" : x && x.estimated ? "estimated" : x && x.scheduled ? "scheduled" : "";
-      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v">${hm(v, tz)}</div><div class="s">${k}${x && x.scheduled && v && Math.abs(v - x.scheduled) >= 300 ? ` · sched ${hm(x.scheduled, tz)}` : ""}</div></div>`;
+      const d = x && x.scheduled && v ? (v - x.scheduled) / 60 : 0;
+      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${d >= 5 ? "late" : d <= -5 ? "early" : ""}">${hm(v, tz)}</div><div class="s">${k}${x && x.scheduled && v && Math.abs(v - x.scheduled) >= 300 ? ` · sched ${hm(x.scheduled, tz)}` : ""}</div></div>`;
     };
     const finished = ["arrived", "cancelled", "diverted"].includes(h.phase);
     const flying = ["taxi_out", "airborne", "landed"].includes(h.phase);
@@ -517,7 +518,8 @@
     const cell = (lbl, t, tz) => {
       const v = t ? (t.actual || t.estimated || t.scheduled) : null;
       const k = t && t.actual ? "actual" : t && t.estimated ? "estimated" : t && t.scheduled ? "scheduled" : "";
-      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v">${hm(v, tz)}</div><div class="s">${k}${t && t.scheduled && v && Math.abs(v - t.scheduled) >= 300 ? ` · sched ${hm(t.scheduled, tz)}` : ""}</div></div>`;
+      const d = x && x.scheduled && v ? (v - x.scheduled) / 60 : 0;
+      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${d >= 5 ? "late" : d <= -5 ? "early" : ""}">${hm(v, tz)}</div><div class="s">${k}${t && t.scheduled && v && Math.abs(v - t.scheduled) >= 300 ? ` · sched ${hm(t.scheduled, tz)}` : ""}</div></div>`;
     };
     const wx = Object.entries(leg.wx || {}).filter(([, w]) => w).map(([c, w]) =>
       `<div style="margin-top:8px"><b>${esc(c)}</b>${w.category ? `<span class="cat ${esc(w.category)}">${esc(w.category)}</span>` : ""}
@@ -547,15 +549,17 @@
         <div class="hero-top"><div class="flightno">${esc(leg.display || leg.ident || "")}${leg.dh ? '<span class="tag">DH</span>' : ""}</div>${statusPill(leg)}</div>
         <div class="route">
           <div class="ap"><div class="code">${esc(leg.dep)}</div><div class="city">${esc(leg.dep_ap.name || "")}</div></div>
-          <div class="mid"><span class="dur">${dur(leg.sched_in - leg.sched_out)}</span></div>
+          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${dur(leg.sched_in - leg.sched_out)}</span></div>
           <div class="ap right"><div class="code">${esc(leg.arr)}</div><div class="city">${esc(leg.arr_ap.name || "")}</div></div>
         </div>
         ${progress(leg)}
-        <div class="grid4" style="margin-top:14px">
-          ${cell(`Gate out · ${tzAbbr(best(f.times, "out") || leg.sched_out, tzA)}`, f.times.out.scheduled ? f.times.out : { scheduled: leg.sched_out }, tzA)}
-          ${cell(`Gate in · ${tzAbbr(best(f.times, "in") || leg.sched_in, tzB)}`, f.times.in.scheduled ? f.times.in : { scheduled: leg.sched_in }, tzB)}
-          ${cell("Takeoff", f.times.off, tzA)}
-          ${cell("Landing", f.times.on, tzB)}
+        <div class="times">
+          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, leg.sched_out, tzA)}
+          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : "Arrives", f.times.in, leg.sched_in, tzB, true)}
+        </div>
+        <div class="times sm">
+          ${timeBlock(f.times.off && f.times.off.actual ? "Took off" : "Takeoff", f.times.off, null, tzA)}
+          ${timeBlock(f.times.on && f.times.on.actual ? "Landed" : "Landing", f.times.on, null, tzB, true)}
         </div>
         ${chips(leg)}
         ${countdown(leg)}

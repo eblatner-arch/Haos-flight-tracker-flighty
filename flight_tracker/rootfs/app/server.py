@@ -273,7 +273,7 @@ def publish():
                 "aircraft": f.get("aircraft_type"), "tail": f.get("tail"),
                 "inbound": (nxt.get("inbound") or {}).get("display_ident"),
                 "inbound_turn_minutes": round(alerting.turn_minutes(nxt)) if alerting.turn_minutes(nxt) is not None else None,
-                "problems": [p["text"] for p in alerting.problems(nxt, CFG, nas if watched(nxt, now) else [])],
+                "problems": [p["text"] for p in alerting.problems(nxt, CFG, nas if watched(nxt, now) else [], rules=STATE['rules'])],
                 "watching": watched(nxt, now),
                 "last_update": iso(nxt.get("updated")),
             })
@@ -283,7 +283,7 @@ def publish():
         probs = []
         for L in upcoming:
             if watched(L, now):
-                probs += [f"{L.get('display') or L['dep']}: {p['text']}" for p in alerting.problems(L, CFG, nas)]
+                probs += [f"{L.get('display') or L['dep']}: {p['text']}" for p in alerting.problems(L, CFG, nas, rules=STATE['rules'])]
         post_state("binary_sensor.flight_tracker_problem", "on" if probs else "off",
                    {"friendly_name": "Flight problem", "device_class": "problem", "problems": probs})
         mine = []
@@ -1291,7 +1291,7 @@ def leg_summary(L, now, nas, full=False):
         out["status"] = "Completed"
     elif out["finished"] and out["phase"] in ("airborne", "landed"):
         out["status"] = "Departed"
-    out["problems"] = alerting.problems(L, CFG, nas if out["watching"] else [])
+    out["problems"] = alerting.problems(L, CFG, nas if out["watching"] else [], rules=STATE['rules'])
     out["delay"] = fa.delay_minutes(f, L["sched_out"]) if f else None
     out["arr_delay"] = fa.arrival_delay_minutes(f, L["sched_in"]) if f else None
     t = alerting.turn_minutes(L)

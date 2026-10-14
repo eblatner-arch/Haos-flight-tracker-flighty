@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.10.1
+- Flight page shows times the same way as the Flights screen: big Departs/Arrives with green (early) or amber (late) and the scheduled time struck through; takeoff and landing below in the same style
+- "Inbound running late" is now "Short turn": it pushes whenever the turn is under your minimum, even if the inbound is on time or early and however long the scheduled turn was. The banner reads "Short turn: 58 min"
+
 ## 2.10.0
 - The first AeroAPI lookup is followed immediately by the FlightAware page check (comparison and inbound aircraft) instead of waiting for the next cycle, so the inbound shows up right away
 
