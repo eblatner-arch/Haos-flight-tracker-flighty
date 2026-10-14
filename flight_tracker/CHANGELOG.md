@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0
+- Adding a flight asks for From and To (and an optional date), so a flight number that flies several legs picks the right one
+- One timeline in departure order: your legs and followed flights together, in Flighty-style cards with Today / Tomorrow headings
+- NAS status and NAS alerts only for airports on your own flights in the watch window (not followed flights); the NAS sensor counts only those
+- `track_flights` entries accept `from`, `to` and `date`
+
 ## 2.2.0
 - Finds your tail number without FlightAware showing it: follows the airplane's day back
   (inbound, its inbound, …) to the leg that's flying and reads the registration from ADS-B (adsb.lol)

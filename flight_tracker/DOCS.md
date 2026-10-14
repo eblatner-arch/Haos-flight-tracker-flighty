@@ -72,9 +72,12 @@ appear once the airplane's previous flight is in the air.
 
 ## Following other flights
 
-Tap **+** to follow any flight by number (UA1234 or UAL1234), optionally on a
-given date. You can also list flights in `track_flights` on the Configuration
-tab. Followed flights get gate, delay, pushback and takeoff pushes.
+Tap **+** to follow any flight: flight number (UA1234 or UAL1234), From and To
+airports, and optionally a date (blank means the next departure). The airports
+matter because one flight number often flies several legs. Followed flights
+appear in the timeline in departure order. You can also list them in
+`track_flights` on the Configuration tab with `ident`, `from`, `to` and `date`.
+NAS programs are only shown and pushed for your own flights, not followed ones. Followed flights get gate, delay, pushback and takeoff pushes.
 
 ## Tools
 

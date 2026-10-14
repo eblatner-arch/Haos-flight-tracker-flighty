@@ -27,6 +27,13 @@
     } catch { return ""; }
   };
   const dayLabel = (ts, tz) => fmt(ts, tz, { weekday: "short", day: "numeric", month: "short" });
+  const relDay = (ts, tz) => {
+    const d = (x) => fmt(x, tz, { year: "numeric", month: "2-digit", day: "2-digit" });
+    const now = Date.now() / 1000;
+    if (d(ts) === d(now)) return "Today";
+    if (d(ts) === d(now + 86400)) return "Tomorrow";
+    return "";
+  };
   function dur(sec) {
     if (sec == null || !isFinite(sec)) return "";
     const neg = sec < 0; sec = Math.abs(Math.round(sec / 60));
@@ -253,24 +260,42 @@
     </a>`;
   }
 
+  // Flighty-style flight card for the timeline.
   function row(leg) {
-    const f = leg.flight, tz = leg.dep_ap.tz;
-    const out = (f && best(f.times, "out")) || leg.sched_out;
-    const sub = [leg.dep_ap.city && leg.arr_ap.city ? `${leg.dep_ap.city} → ${leg.arr_ap.city}` : "",
-      f && f.origin && f.origin.gate ? `Gate ${f.origin.gate}` : ""].filter(Boolean).join(" · ");
-    return `<a class="row ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
-      <div class="when">${hm(out, tz)}<small>${tzAbbr(out, tz)}</small></div>
-      <div class="what"><div class="r">${esc(leg.dep)} → ${esc(leg.arr)} <span class="faint small">${esc(leg.display || "")}${leg.dh ? " · DH" : ""}</span>${leg.problems.length ? '<span class="warnmark">!</span>' : ""}</div>
-        <div class="s">${esc(sub || leg.summary || "")}</div></div>
-      ${statusPill(leg)}
+    const f = leg.flight || null, tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
+    const t = f ? f.times : { out: {}, in: {} };
+    const out = best(t, "out") || leg.sched_out, inn = best(t, "in") || leg.sched_in;
+    const outS = (t.out && t.out.scheduled) || leg.sched_out, inS = (t.in && t.in.scheduled) || leg.sched_in;
+    const late = (a, b) => a && b && Math.abs(a - b) >= 300;
+    const known = leg.extra ? !!f : true;
+    const timeCell = (ts, sched, tz, right) => `<div class="fc-ap ${right ? "right" : ""}">
+        <div class="fc-time ${late(ts, sched) ? (ts > sched ? "late" : "early") : ""}">${known ? hm(ts, tz) : "—"}</div>
+        <div class="fc-sub">${late(ts, sched) ? `<s>${hm(sched, tz)}</s> ` : ""}${known ? tzAbbr(ts, tz) : ""}</div></div>`;
+    const now = Date.now() / 1000;
+    let foot = [];
+    if (f && f.origin && f.origin.gate) foot.push(`Gate ${esc(f.origin.terminal ? f.origin.terminal + f.origin.gate.replace(f.origin.terminal, "") : f.origin.gate)}`);
+    if (f && f.tail) foot.push(esc(f.tail));
+    if (leg.note && !f) foot.push(`<span class="faint">${esc(leg.note)}</span>`);
+    if (!leg.finished && leg.phase === "scheduled" && out > now && out - now < 86400) foot.push(`<b>in ${dur(out - now)}</b>`);
+    if (leg.problems.length) foot.push(`<span class="warnmark">${esc(leg.problems[0].text)}</span>`);
+    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + (leg.extra ? '<span class="tag">FOLLOWING</span>' : "");
+    return `<a class="fcard s-${slug(leg.status)} ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
+      <div class="fc-top"><span class="fc-no">${esc(leg.display || leg.ident || "")}</span>${tags}<span class="fc-date">${esc(dayLabel(out, tzA))}</span>${statusPill(leg)}</div>
+      <div class="fc-route">
+        <div class="fc-ap"><div class="fc-code">${esc(leg.dep || "···")}</div></div>
+        <div class="fc-line"><i></i><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><i></i></div>
+        <div class="fc-ap right"><div class="fc-code">${esc(leg.arr || "···")}</div></div>
+        ${timeCell(out, outS, tzA)}
+        <div class="fc-dur">${known && inn > out ? dur(inn - out) : ""}</div>
+        ${timeCell(inn, inS, tzB, true)}
+      </div>
+      ${foot.length ? `<div class="fc-foot">${foot.join(" · ")}</div>` : ""}
     </a>`;
   }
 
-  function nasCard(myAirports) {
-    const items = STATE.nas || [];
-    if (!items.length) return `<div class="card small muted">No ground stops, delay programs or closures reported${STATE.nas_at ? ` · checked ${ago(STATE.nas_at)}` : ""}.</div>`;
-    const sorted = [...items].sort((a, b) => (myAirports.has(b.airport) - myAirports.has(a.airport)) || a.airport.localeCompare(b.airport));
-    return `<div class="card">${sorted.slice(0, 30).map((n) => `<div class="nas-item ${myAirports.has(n.airport) ? "mine" : ""}">
+  function nasCard(items) {
+    const sorted = [...items].sort((a, b) => a.airport.localeCompare(b.airport));
+    return `<div class="card">${sorted.map((n) => `<div class="nas-item mine">
       <div class="apt">${esc(n.airport)}</div>
       <div><div class="lbl">${esc(n.label)}</div><div class="det">${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</div></div></div>`).join("")}
       ${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
@@ -287,42 +312,42 @@
 
   // ---------- views ----------
   function homeView() {
-    const legs = STATE.legs.filter((l) => !l.extra);
-    const extras = STATE.legs.filter((l) => l.extra);
-    const live = legs.filter((l) => !l.finished);
-    const next = live.find((l) => l.watching) || live[0];
-    const myAirports = new Set(live.slice(0, 8).flatMap((l) => [l.dep, l.arr]));
+    const sortKey = (l) => (l.flight && best(l.flight.times, "out")) || l.sched_out;
+    const all = [...STATE.legs].sort((a, b) => sortKey(a) - sortKey(b));
+    const live = all.filter((l) => !l.finished);
+    const next = live[0];
+    // NAS only for airports on your own flights in the watch window.
+    const myAirports = new Set(all.filter((l) => !l.extra && l.watching).flatMap((l) => [l.dep, l.arr]).filter(Boolean));
     let h = "";
     if (STATE.schedule && STATE.schedule.error) h += `<div class="banner critical"><span class="dot critical"></span><div><b>Schedule</b><br>${esc(STATE.schedule.error)}</div></div>`;
     if (next) {
-      const mine = (STATE.nas || []).filter((n) => myAirports.has(n.airport));
       h += problemBanners(next);
       h += hero(next);
       h += inboundCard(next);
       if (next.note) h += `<div class="small muted" style="margin:-4px 4px 10px">${esc(next.note)}</div>`;
       if (next.error) h += `<div class="err" style="margin:-4px 4px 10px">${esc(next.error)}</div>`;
-      if (mine.length && !(next.problems || []).some((p) => p.text.includes(":"))) {
-        h += mine.map((n) => `<div class="banner warn"><span class="dot warn"></span><div><b>${esc(n.airport)} · ${esc(n.label)}</b><br>${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</div></div>`).join("");
-      }
     } else {
-      h += `<div class="card empty"><b>No upcoming flights</b>Nothing in the next three weeks of ${esc(STATE.settings.airline_icao || "your")} schedule${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in the feed)" : ""}.</div>`;
+      h += `<div class="card empty"><b>No upcoming flights</b>Nothing in the next three weeks${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to follow a flight.</div>`;
     }
-    const rest = live.filter((l) => l !== next);
+    const rest = live.slice(1);
+    h += `<h2 class="section"><span>Upcoming</span><a class="small" style="color:var(--accent)" href="#/add">+ Add flight</a></h2>`;
     if (rest.length) {
-      h += `<h2 class="section">Upcoming</h2>`;
       let lastDay = "";
-      for (const l of rest.slice(0, 30)) {
-        const d = dayLabel(l.sched_out, l.dep_ap.tz);
-        if (d !== lastDay) { h += `<div class="day">${esc(d)}</div>`; lastDay = d; }
+      for (const l of rest.slice(0, 40)) {
+        const d = dayLabel(sortKey(l), l.dep_ap.tz);
+        if (d !== lastDay) { h += `<div class="day">${esc(relDay(sortKey(l), l.dep_ap.tz) || d)}</div>`; lastDay = d; }
         h += row(l);
       }
+    } else {
+      h += `<div class="card small muted">Nothing else scheduled.</div>`;
     }
-    h += `<h2 class="section"><span>Following</span><a class="small" style="color:var(--accent)" href="#/add">+ Add flight</a></h2>`;
-    h += extras.length ? extras.map(row).join("")
-      : `<a class="card small muted" style="display:block" href="#/add">Follow any flight by number: family, a commute, a jumpseat option. Tap to add one.</a>`;
-    const done = legs.filter((l) => l.finished).slice(-6).reverse();
+    if (myAirports.size) {
+      const mine = (STATE.nas || []).filter((n) => myAirports.has(n.airport));
+      h += `<h2 class="section"><span>NAS · ${esc([...myAirports].join(" · "))}</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>`;
+      h += mine.length ? nasCard(mine) : `<div class="card small muted">No ground stops, delay programs or closures at your airports.</div>`;
+    }
+    const done = all.filter((l) => l.finished).sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 6);
     if (done.length) h += `<h2 class="section">Recent</h2>` + done.map(row).join("");
-    h += `<h2 class="section"><span>National airspace</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>` + nasCard(myAirports);
     if (STATE.alerts.length) h += `<h2 class="section">Recent alerts</h2>` + alertsCard(STATE.alerts);
     h += `<p class="small faint" style="margin:22px 4px">v${esc(STATE.version)} · alerts go to ${esc(STATE.notify_target)} · watching ${STATE.settings.watch_hours} h before departure${STATE.schedule && STATE.schedule.checked ? ` · schedule read ${ago(STATE.schedule.checked)}` : ""}</p>`;
     destroyMaps();
@@ -421,9 +446,13 @@
       <a class="back" href="#/">‹ Flights</a>
       <div class="card">
         <h3 style="margin:0 0 4px">Follow a flight</h3>
-        <p class="small muted" style="margin:0 0 14px">Flight number with its airline code. Leave the date blank to follow the next departure.</p>
+        <p class="small muted" style="margin:0 0 14px">Flight number with its airline code, and the airports, so a flight number that flies several legs picks the right one. Leave the date blank for the next departure.</p>
         <form id="addform" class="form">
           <label>Flight number<input id="f-ident" placeholder="UA1234" autocapitalize="characters" autocomplete="off" required></label>
+          <div class="form-2">
+            <label>From<input id="f-dep" placeholder="EWR" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
+            <label>To<input id="f-arr" placeholder="SFO" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
+          </div>
           <label>Date (optional)<input id="f-date" type="date" min="${today}"></label>
           <button class="btn primary" type="submit">Follow</button>
           <div id="f-msg" class="small"></div>
@@ -431,7 +460,7 @@
       </div>
       ${manual.length ? `<h2 class="section">Following from the app</h2>` + manual.map((l) => `<div class="row">
           <div class="when">${esc(l.display || l.ident)}<small>${l.date ? esc(new Date(l.date + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "next"}</small></div>
-          <div class="what"><div class="r">${l.dep ? `${esc(l.dep)} → ${esc(l.arr)}` : "Looking up…"}</div><div class="s">${esc(l.note || l.status)}</div></div>
+          <div class="what"><div class="r">${esc(l.dep)} → ${esc(l.arr)}</div><div class="s">${esc(l.flight ? l.status : (l.note || "Looking up…"))}</div></div>
           <button class="btn" data-remove="${esc(l.id)}">Remove</button></div>`).join("") : ""}
       <p class="small faint" style="margin:16px 4px">Followed flights get pushes for gate changes, delays, pushback and takeoff, then tracking stops. App-added flights clear themselves a day and a half after departure.</p>`;
     document.getElementById("addform").onsubmit = async (e) => {
@@ -440,7 +469,8 @@
       msg.className = "small muted"; msg.textContent = "Adding…";
       try {
         const r = await fetch("api/flights", { method: "POST", body: JSON.stringify({
-          ident: document.getElementById("f-ident").value, date: document.getElementById("f-date").value }) });
+          ident: document.getElementById("f-ident").value, dep: document.getElementById("f-dep").value,
+          arr: document.getElementById("f-arr").value, date: document.getElementById("f-date").value }) });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
         msg.textContent = "Added. Looking it up on FlightAware…";

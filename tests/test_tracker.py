@@ -283,3 +283,19 @@ class TailChain(unittest.TestCase):
         server.resolve_tail(FB(), L, f, T0)
         self.assertIsNone(f.get("tail"))
         self.assertEqual(L["tail_info"], {})
+
+
+class Followed(unittest.TestCase):
+    def test_route_picks_the_right_leg(self):
+        a = fa.normalize(list(boot(fa_id="A", out_s=T0 + 2 * H, origin="EWR", dest="ORD")["flights"].values())[0])
+        b = fa.normalize(list(boot(fa_id="B", out_s=T0 + 5 * H, origin="ORD", dest="SFO")["flights"].values())[0])
+        gone = fa.normalize(list(boot(fa_id="C", out_s=T0 - 2 * H, origin="ORD", dest="SFO",
+                                      off_a=T0 - 1.8 * H)["flights"].values())[0])
+        self.assertEqual(fa.pick_followed(gone, [a, b], "ORD", "SFO", "", T0)["fa_id"], "B")
+        self.assertEqual(fa.pick_followed(gone, [a, b], "EWR", "ORD", "", T0)["fa_id"], "A")
+        self.assertIsNone(fa.pick_followed(gone, [a, b], "EWR", "SFO", "", T0))
+
+    def test_nas_only_for_own_legs(self):
+        nas = [{"airport": "EWR", "kind": "gs", "label": "Ground stop", "reason": "", "detail": "", "key": "k"}]
+        self.assertEqual(alerts.nas_for({"dep": "EWR", "arr": "SFO", "extra": True}, nas), [])
+        self.assertEqual(len(alerts.nas_for({"dep": "EWR", "arr": "SFO"}, nas)), 1)

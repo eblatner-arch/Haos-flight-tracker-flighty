@@ -236,3 +236,38 @@ def pick_by_date(cur, activity, date_str):
         if datetime.fromtimestamp(t, tz).strftime("%Y-%m-%d") == date_str:
             return f
     return None
+
+
+def _code_match(ap, code):
+    if not code:
+        return True
+    code = code.upper()
+    return code in {(ap.get("iata") or "").upper(), (ap.get("icao") or "").upper()}
+
+
+def pick_followed(cur, activity, dep, arr, date_str, now):
+    """For a flight added by hand: the instance with this origin/destination, on date_str
+    if given (origin local date), otherwise the next one that hasn't left yet."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    best = None
+    for f in ([cur] if cur else []) + list(activity):
+        if not f or not f.get("fa_id"):
+            continue
+        if not _code_match(f.get("origin") or {}, dep) or not _code_match(f.get("destination") or {}, arr):
+            continue
+        t = f["times"]["out"]["scheduled"] or f["times"]["off"]["scheduled"]
+        if t is None:
+            continue
+        if date_str:
+            try:
+                tz = ZoneInfo(f["origin"].get("tz") or "UTC")
+            except Exception:
+                tz = timezone.utc
+            if datetime.fromtimestamp(t, tz).strftime("%Y-%m-%d") != date_str:
+                continue
+        elif f["times"]["off"]["actual"] or t < now - 3 * 3600:
+            continue  # already gone
+        if best is None or t < (best["times"]["out"]["scheduled"] or best["times"]["off"]["scheduled"]):
+            best = f
+    return best

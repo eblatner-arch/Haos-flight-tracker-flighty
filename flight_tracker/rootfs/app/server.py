@@ -221,9 +221,14 @@ def publish():
                 probs += [f"{L.get('display') or L['dep']}: {p['text']}" for p in alerting.problems(L, CFG, nas)]
         post_state("binary_sensor.flight_tracker_problem", "on" if probs else "off",
                    {"friendly_name": "Flight problem", "device_class": "problem", "problems": probs})
-        post_state("sensor.flight_tracker_nas_programs", len(nas), {
-            "friendly_name": "NAS programs", "icon": "mdi:radar", "unit_of_measurement": "programs",
-            "programs": [f"{n['airport']} {n['label']}" for n in nas[:40]]})
+        mine = []
+        for L in upcoming:
+            if watched(L, now):
+                mine += [n for n in alerting.nas_for(L, nas) if n not in mine]
+        post_state("sensor.flight_tracker_nas_programs", len(mine), {
+            "friendly_name": "NAS programs at my airports", "icon": "mdi:radar", "unit_of_measurement": "programs",
+            "airports": sorted({c for L in upcoming if watched(L, now) for c in (L["dep"], L["arr"]) if c}),
+            "programs": [f"{n['airport']} {n['label']}" for n in mine]})
     except Exception as e:
         log.warning("Could not update sensors: %s", e)
 
@@ -287,58 +292,87 @@ def reload_schedule(force=False):
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
 
 
-def extra_id(ident, date=""):
-    return "x-" + re.sub(r"[^A-Z0-9]", "", ident) + ("-" + date.replace("-", "") if date else "")
+def extra_id(ident, dep="", arr="", date=""):
+    parts = [re.sub(r"[^A-Z0-9]", "", ident), dep, arr, date.replace("-", "")]
+    return "x-" + "-".join(p for p in parts if p)
+
+
+def _ap_code(code):
+    code = (code or "").strip().upper()
+    if len(code) == 4:
+        return airports.iata(code) or code
+    return code
+
+
+def _x(x):
+    """Normalise a followed-flight entry from the config or the app."""
+    if not isinstance(x, dict):
+        x = {"ident": str(x)}
+    return {"ident": (x.get("ident") or "").strip().upper().replace(" ", ""),
+            "dep": _ap_code(x.get("dep") or x.get("from")), "arr": _ap_code(x.get("arr") or x.get("to")),
+            "date": (x.get("date") or "").strip()}
 
 
 def sync_extras():
     """Followed flights: track_flights from the config plus flights added in the app."""
     wanted = {}
-    for x in CFG.get("track_flights") or []:
-        ident = (x.get("ident") if isinstance(x, dict) else str(x)).strip().upper().replace(" ", "")
-        if ident:
-            wanted[extra_id(ident)] = (ident, "", False)
+    for raw in CFG.get("track_flights") or []:
+        x = _x(raw)
+        if x["ident"]:
+            wanted[extra_id(**x)] = (x, False)
     now = time.time()
     with LOCK:
-        for x in STATE["manual"]:
-            wanted[extra_id(x["ident"], x.get("date") or "")] = (x["ident"], x.get("date") or "", True)
+        for raw in STATE["manual"]:
+            x = _x(raw)
+            wanted[extra_id(**x)] = (x, True)
         for lid in [k for k, L in STATE["legs"].items() if L.get("extra") and k not in wanted]:
             del STATE["legs"][lid]
-        for lid, (ident, date, manual) in wanted.items():
+        for lid, (x, manual) in wanted.items():
             if lid in STATE["legs"]:
                 continue
-            m = IDENT_RE.match(ident)
+            m = IDENT_RE.match(x["ident"])
             airline = schedule.IATA_TO_ICAO.get(m.group(1), m.group(1)) if m else ""
+            start = now
+            if x["date"]:  # until FlightAware answers, sort it at midday on that date
+                try:
+                    tz = ZoneInfo(airports.get(x["dep"]).get("tz") or TZNAME)
+                    start = datetime.strptime(x["date"] + " 12:00", "%Y-%m-%d %H:%M").replace(tzinfo=tz).timestamp()
+                except Exception:
+                    pass
             STATE["legs"][lid] = {
-                "id": lid, "extra": True, "manual": manual, "date": date,
-                "ident": (airline + m.group(2)) if m else ident,
-                "display": display_ident(airline, m.group(2)) if m else ident, "airline": airline,
-                "flight_no": m.group(2) if m else "", "dep": "", "arr": "", "dh": False,
-                "sched_out": now, "sched_in": now, "summary": "Added in the app" if manual else "track_flights",
+                "id": lid, "extra": True, "manual": manual, "date": x["date"],
+                "ident": (airline + m.group(2)) if m else x["ident"],
+                "display": display_ident(airline, m.group(2)) if m else x["ident"], "airline": airline,
+                "flight_no": m.group(2) if m else "", "dep": x["dep"], "arr": x["arr"], "dh": False,
+                "sched_out": start, "sched_in": start, "summary": "Added in the app" if manual else "track_flights",
                 "notified": {"watch": True}, "alerts": [], "next_check": 0}
 
 
-def add_manual(ident, date):
-    ident = (ident or "").strip().upper().replace(" ", "")
-    m = IDENT_RE.match(ident)
-    if not m:
+def add_manual(ident, dep, arr, date):
+    x = _x({"ident": ident, "dep": dep, "arr": arr, "date": date})
+    ident, dep, arr, date = x["ident"], x["dep"], x["arr"], x["date"]
+    if not IDENT_RE.match(ident):
         raise ValueError("Enter a flight number like UA1234 or UAL1234")
-    date = (date or "").strip()
+    if not re.fullmatch(r"[A-Z0-9]{3,4}", dep or "") or not re.fullmatch(r"[A-Z0-9]{3,4}", arr or ""):
+        raise ValueError("Enter the From and To airports, like EWR and SFO")
+    if dep == arr:
+        raise ValueError("From and To can't be the same airport")
     if date:
         try:
             datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
             raise ValueError("Date must be YYYY-MM-DD")
     with LOCK:
-        if not any(x["ident"] == ident and (x.get("date") or "") == date for x in STATE["manual"]):
-            STATE["manual"].append({"ident": ident, "date": date, "added": time.time()})
+        lid = extra_id(ident, dep, arr, date)
+        if not any(extra_id(**_x(m)) == lid for m in STATE["manual"]):
+            STATE["manual"].append({"ident": ident, "dep": dep, "arr": arr, "date": date, "added": time.time()})
     sync_extras()
-    return extra_id(ident, date)
+    return lid
 
 
 def remove_manual(lid):
     with LOCK:
-        STATE["manual"] = [x for x in STATE["manual"] if extra_id(x["ident"], x.get("date") or "") != lid]
+        STATE["manual"] = [x for x in STATE["manual"] if extra_id(**_x(x)) != lid]
         STATE["legs"].pop(lid, None)
 
 
@@ -347,7 +381,7 @@ def expire_manual(now):
     with LOCK:
         keep = []
         for x in STATE["manual"]:
-            L = STATE["legs"].get(extra_id(x["ident"], x.get("date") or ""))
+            L = STATE["legs"].get(extra_id(**_x(x)))
             f = (L or {}).get("flight")
             off = f and (f["times"]["off"]["actual"] or f["times"]["out"]["actual"])
             due = L and L.get("flight") and L["sched_in"]
@@ -434,10 +468,13 @@ def fetch_flight(browser, L):
     if not L.get("fa_id"):
         boot, shot = load(browser, fa.ident_url(ident), lid, L, "flight lookup")
         cur, activity = fa.flights_from_bootstrap(boot)
-        if L.get("extra") and L.get("date") and boot is not None:
-            inst = fa.pick_by_date(cur, activity, L["date"])
+        if L.get("extra") and boot is not None:
+            inst = fa.pick_followed(cur, activity, L.get("dep"), L.get("arr"), L.get("date"), time.time())
             if inst is None:
-                return None, None, shot, f"FlightAware doesn't list {ident} on {L['date']} yet"
+                route = f" {L['dep']}→{L['arr']}" if L.get("dep") else ""
+                when = f" on {L['date']}" if L.get("date") else ""
+                return None, None, shot, (f"FlightAware doesn't list {ident}{route}{when} yet" if when
+                                          else f"No upcoming {ident}{route} on FlightAware yet")
             L["fa_id"] = inst["fa_id"]
             if cur and inst["fa_id"] == cur["fa_id"]:
                 return cur, "FlightAware page data", shot, None
@@ -908,7 +945,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/flights":
             body = self._json()
             try:
-                lid = add_manual(body.get("ident"), body.get("date"))
+                lid = add_manual(body.get("ident"), body.get("dep"), body.get("arr"), body.get("date"))
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
             REFRESH_Q.put(lid)

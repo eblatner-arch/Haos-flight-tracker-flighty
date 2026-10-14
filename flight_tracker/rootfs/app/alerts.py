@@ -85,6 +85,9 @@ def problems(leg, cfg, nas_items):
 
 
 def nas_for(leg, nas_items):
+    """NAS programs at either end of a flight you're on. Flights you only follow get none."""
+    if leg.get("extra"):
+        return []
     f = leg.get("flight") or {}
     codes = {(leg.get("dep") or "").upper(), (leg.get("arr") or "").upper(),
              ((f.get("origin") or {}).get("iata") or "").upper(),
