@@ -44,7 +44,7 @@ def boot(fa_id="UAL1234-1760000000-airline-0001", gate="C71", out_s=T0 + 10 * H,
     return {"flights": {fa_id: f}}
 
 
-CFG = {"airline_icao": "UAL", "gate_alert_hours": 0, "delay_threshold_minutes": 15, "delay_step_minutes": 10, "min_turn_minutes": 35,
+CFG = {"airline_icao": "UAL", "gate_alert_hours": 0, "inbound_alert_minutes": 0, "delay_threshold_minutes": 15, "delay_step_minutes": 10, "min_turn_minutes": 35,
        "notify_watch_start": True, "notify_inbound_progress": True, "notify_progress": False,
        "notify_progress_deadhead": True}
 
@@ -459,3 +459,28 @@ class GateWindow(unittest.TestCase):
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C90", out_e=out + 30 * 60))
         a = [x for x in alerts.evaluate(L, cfg, out - 1.0 * H, []) if x["key"] == "dep_gate"]
         self.assertIn("change", a[0]["title"])                           # later changes push
+
+
+
+class InboundWindow(unittest.TestCase):
+    def test_only_tight_scheduled_turns_push(self):
+        cfg = dict(CFG, inbound_alert_minutes=60)
+        out = T0 + 10 * H
+        L = {"id": "i", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO",
+             "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True, "dep_gate": "C71"}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out))
+
+        def inbound(sched_in, est_in):
+            inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN", out_s=sched_in - 2 * H, origin="ORD",
+                                                   dest="EWR", inbound_id=None, off_a=T0))
+            inb["times"]["in"].update(scheduled=sched_in, estimated=est_in)
+            return inb
+
+        L["inbound"] = inbound(out - 3 * H, out - 10 * 60)      # scheduled 3 h before: late, but no push
+        keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
+        self.assertFalse(any(k.startswith("inbound") or k == "turn" for k in keys))
+        L["notified"] = {"watch": True, "dep_gate": "C71"}
+        L["inbound"] = inbound(out - 45 * 60, out - 10 * 60)    # scheduled 45 min before: pushes
+        keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
+        self.assertIn("turn", keys)
+        self.assertIn("inbound_off", keys)

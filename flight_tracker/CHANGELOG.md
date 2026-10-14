@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.2
+- Inbound pushes (departed, running late, at the gate, cancelled) only when the inbound is scheduled to land within
+  60 minutes of your scheduled departure (`inbound_alert_minutes`); the inbound is still tracked and shown in the app
+
 ## 2.5.1
 - Gate pushes wait until 2 hours before departure (`gate_alert_hours`); gates are still tracked and shown all along,
   the first push carries the current gate and later changes push immediately. Delays, cancellations, diversions,

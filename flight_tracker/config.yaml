@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "2.5.1"
+version: "2.5.2"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -30,6 +30,7 @@ options:
   track_deadheads: true
   track_flights: []
   gate_alert_hours: 2
+  inbound_alert_minutes: 60
   delay_threshold_minutes: 15
   delay_step_minutes: 10
   min_turn_minutes: 35
@@ -61,6 +62,7 @@ schema:
       to: str?
       date: str?
   gate_alert_hours: float(0,24)
+  inbound_alert_minutes: int(0,600)
   delay_threshold_minutes: int(1,180)
   delay_step_minutes: int(1,120)
   min_turn_minutes: int(0,180)

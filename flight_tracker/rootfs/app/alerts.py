@@ -57,6 +57,22 @@ def turn_minutes(leg):
     return (our_out - inb_in) / 60
 
 
+def inbound_close(leg, cfg):
+    """Is the inbound scheduled to arrive within inbound_alert_minutes of our scheduled departure?"""
+    inb, f = leg.get("inbound"), leg.get("flight")
+    if not inb:
+        return False
+    limit = float(cfg.get("inbound_alert_minutes", 60) or 0)
+    if limit <= 0:
+        return True
+    t = inb.get("times") or {}
+    inb_in = (t.get("in") or {}).get("scheduled") or (t.get("on") or {}).get("scheduled") or fa.best_time(t, "in")
+    our_out = ((f or {}).get("times") or {}).get("out", {}).get("scheduled") or leg.get("sched_out")
+    if inb_in is None or our_out is None:
+        return False
+    return (our_out - inb_in) / 60 <= limit
+
+
 def problems(leg, cfg, nas_items):
     """Current issues on a leg, for the dashboard and the problem sensor."""
     out = []
@@ -199,8 +215,9 @@ def evaluate(leg, cfg, now, nas_items):
     if tail:
         nt["tail"] = tail
 
-    # 6. Inbound aircraft
-    if inb and ph == "scheduled":
+    # 6. Inbound aircraft: only pushed when it's scheduled to land within
+    #    inbound_alert_minutes of your departure (a tight scheduled turn).
+    if inb and ph == "scheduled" and inbound_close(leg, cfg):
         iid = inb.get("display_ident") or inb.get("ident") or leg.get("inbound_ident") or "Inbound"
         ifrom = (inb.get("origin") or {}).get("iata") or ""
         iph = fa.phase(inb, now)
