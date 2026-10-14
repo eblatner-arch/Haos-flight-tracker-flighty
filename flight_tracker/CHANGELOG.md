@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.7.1
+- New icon and logo (add-on store, browser tab, home-screen icon)
+
 ## 2.7.0
 - New Notifications page (bell button): 37 events, each with on/off, which flights (my legs / deadheads / followed),
   how close to departure it starts pushing, urgent (time-sensitive) and its own thresholds
