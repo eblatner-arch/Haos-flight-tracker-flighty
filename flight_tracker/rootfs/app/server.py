@@ -483,6 +483,77 @@ def inbound_needs_check(L, f):
     return fa.phase(inb, time.time()) not in ("arrived", "cancelled", "diverted")
 
 
+CHAIN_HOPS = 3
+
+
+def walk_chain(browser, L, now):
+    """Follow the airplane's day backwards (inbound, its inbound, ...) to the first leg
+    that's transmitting, and read the registration from its ADS-B. Returns tail info or None."""
+    cur = L.get("inbound")
+    hops = []
+    found = None
+    for hop in range(CHAIN_HOPS + 1):
+        if not cur:
+            break
+        ph = fa.phase(cur, now)
+        route = f"{(cur.get('origin') or {}).get('iata') or '?'}→{(cur.get('destination') or {}).get('iata') or '?'}"
+        name = cur.get("display_ident") or cur.get("ident") or "?"
+        hops.append({"ident": name, "route": route, "phase": ph,
+                     "out": fa.best_time(cur["times"], "out"), "in": fa.best_time(cur["times"], "in")})
+        if ph in ("taxi_out", "airborne", "landed") and cur.get("ident"):
+            try:
+                live = sources.fetch_live(cur["ident"])
+            except Exception as e:
+                log.info("%s chain ADS-B: %s", L.get("display"), e)
+                live = None
+            if live and live.get("tail"):
+                found = {"tail": live["tail"].upper(), "kind": "chain", "at": now,
+                         "root": (L.get("flight") or {}).get("inbound_fa_id"),
+                         "source": f"{'inbound ' if hop == 0 else ''}{name} {route} in flight"}
+            break
+        if ph != "scheduled" or not cur.get("inbound_fa_id") or hop == CHAIN_HOPS:
+            break  # on the ground (no signal to read), or the chain isn't linked further back
+        try:
+            boot, _ = load(browser, fa.id_url(cur["inbound_fa_id"]), f"{L['id']}-chain{hop + 1}", L,
+                           f"aircraft's earlier leg #{hop + 1}")
+            cur, _ = fa.flights_from_bootstrap(boot)
+        except Exception as e:
+            log.info("%s chain hop %d: %s", L.get("display"), hop + 1, e)
+            break
+    L["chain"] = hops
+    return found
+
+
+def resolve_tail(browser, L, f, now):
+    """Which airplane is flying this leg. Trust order: our own transponder, then an earlier
+    leg of the same airplane seen in flight, then whatever FlightAware's page says."""
+    info = dict(L.get("tail_info") or {})
+    if info.get("kind") == "chain" and info.get("root") != f.get("inbound_fa_id"):
+        info = {}  # a different inbound is a different airplane
+    if info.get("kind") == "page":
+        info = {}  # re-read every time
+    ph = fa.phase(f, now)
+    out_t = fa.best_time(f["times"], "out") or L["sched_out"]
+    if L.get("ident") and (ph == "taxi_out" or (ph == "scheduled" and out_t - now < 90 * 60)):
+        try:
+            live = sources.fetch_live(L["ident"])
+            if live and live.get("tail"):
+                info = {"tail": live["tail"].upper(), "kind": "own", "at": now,
+                        "source": "your flight's transponder"}
+        except Exception as e:
+            log.info("%s own ADS-B: %s", L.get("display"), e)
+    if info.get("kind") not in ("own", "chain") and ph == "scheduled":
+        found = walk_chain(browser, L, now)
+        if found:
+            info = found
+    if not info.get("tail") and f.get("tail"):
+        info = {"tail": f["tail"], "kind": "page", "at": now, "source": "FlightAware"}
+    if info.get("tail"):
+        f["tail"] = info["tail"]
+        f["tail_source"] = info["source"]
+    L["tail_info"] = info
+
+
 def update_leg(browser, lid):
     with LOCK:
         L = STATE["legs"].get(lid)
@@ -519,6 +590,10 @@ def update_leg(browser, lid):
 
         # Inbound aircraft
         f = L.get("flight") or {}
+        ti = L.get("tail_info") or {}
+        if f and not f.get("tail") and ti.get("tail") and ti.get("kind") in ("own", "chain") \
+                and (ti.get("kind") == "own" or ti.get("root") == f.get("inbound_fa_id")):
+            f["tail"], f["tail_source"] = ti["tail"], ti["source"]
         if f.get("inbound_fa_id") and ph == "scheduled" and inbound_needs_check(L, f):
             try:
                 boot, _ = load(browser, fa.id_url(f["inbound_fa_id"]), lid + "-inbound", L, "inbound aircraft")
@@ -540,6 +615,10 @@ def update_leg(browser, lid):
             L["inbound"] = L.get("inbound") or {"display_ident": f["inbound_ident"], "times": {
                 k: {"scheduled": None, "estimated": None, "actual": None} for k in fa.TIME_KEYS},
                 "origin": {}, "destination": {}}
+
+        # Which airplane
+        if f and L.get("flight") and not L.get("extra") and ph in ("scheduled", "taxi_out"):
+            resolve_tail(browser, L, f, now)
 
         # Live positions
         if CFG.get("live_positions", True):
@@ -665,7 +744,7 @@ def leg_summary(L, now, nas, full=False):
     f = L.get("flight")
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra",
                                   "sched_out", "sched_in", "summary", "source", "note", "error", "updated",
-                                  "next_check", "shot", "fa_id", "date", "manual")}
+                                  "next_check", "shot", "fa_id", "date", "manual", "tail_info", "chain")}
     out["status"] = alerting.status_label(L, CFG)
     out["phase"] = fa.phase(f, now)
     out["watching"] = watched(L, now)

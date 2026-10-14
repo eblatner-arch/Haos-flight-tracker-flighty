@@ -120,6 +120,7 @@ def evaluate(leg, cfg, now, nas_items):
             bits.append(f"gate {g}")
         if f and f.get("tail"):
             bits.append(f"{f.get('aircraft_type') or ''} {f['tail']}".strip())
+            nt["watch_sent_tail"] = f["tail"]
         add("watch", f"Tracking {ident} {route}", " · ".join(bits))
     nt["watch"] = True
     if not f:
@@ -176,10 +177,15 @@ def evaluate(leg, cfg, now, nas_items):
             add("delay", f"{ident} back on time", f"{route} departs {hhmm(new_out, dep_tz)}")
             nt["delay"] = None
 
-    # 5. Aircraft swap
+    # 5. Aircraft: first sighting, then swaps
     tail = f.get("tail")
+    src = f" · from {f['tail_source']}" if f.get("tail_source") else ""
     if tail and nt.get("tail") and tail != nt["tail"] and ph == "scheduled":
-        add("tail", f"{ident} aircraft swap", f"{nt['tail']} → {tail} {f.get('aircraft_type') or ''}".strip(), "warn")
+        add("tail", f"{ident} aircraft swap",
+            f"{nt['tail']} → {tail} {f.get('aircraft_type') or ''}".strip() + src, "warn")
+    elif tail and not nt.get("tail") and ph == "scheduled" and nt.get("watch_sent_tail") != tail \
+            and f.get("tail_source") and f["tail_source"] != "FlightAware":
+        add("tail", f"{ident} aircraft {tail}", f"{f.get('aircraft_type') or 'Aircraft'} {tail}{src}")
     if tail:
         nt["tail"] = tail
 

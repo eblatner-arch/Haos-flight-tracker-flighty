@@ -57,6 +57,19 @@ are time-sensitive on iPhone (turn off with `time_sensitive`).
   with flight category, filed route, altitude and speed, its alert history and
   the latest page screenshot.
 
+## Tail number
+
+FlightAware often hides the registration on airline flights, so the add-on
+works it out. It follows your airplane's day backwards (your inbound, that
+flight's inbound, up to three legs back) to whichever leg is flying, and reads
+the registration from its ADS-B broadcast via adsb.lol. In the last 90 minutes
+it confirms the tail from your own flight's transponder. You get a push when the
+aircraft is first identified, and a swap alert if it changes. The flight page
+shows where the tail came from.
+
+A parked airplane doesn't transmit, so for an early first leg the tail may only
+appear once the airplane's previous flight is in the air.
+
 ## Following other flights
 
 Tap **+** to follow any flight by number (UA1234 or UAL1234), optionally on a

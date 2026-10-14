@@ -349,6 +349,8 @@
        <div class="metar">${esc(w.raw || "")}</div></div>`).join("");
     const kv = [
       ["Aircraft", [f.aircraft_name || f.aircraft_type, f.tail].filter(Boolean).join(" · ")],
+      ["Tail from", f.tail_source || (leg.phase === "scheduled" ? "not known yet" : "")],
+      ["Aircraft's day", (leg.chain || []).length ? leg.chain.map((c) => `${c.ident} ${c.route} (${c.phase === "scheduled" ? "not flown yet" : c.phase.replace("_", " ")})`).join(" ← ") : ""],
       ["Filed route", f.route],
       ["Filed altitude", f.filed_altitude ? `FL${String(Math.round(f.filed_altitude / (f.filed_altitude > 1000 ? 100 : 1))).padStart(3, "0")}` : ""],
       ["Filed speed", f.filed_speed ? `${Math.round(f.filed_speed)} kt` : ""],

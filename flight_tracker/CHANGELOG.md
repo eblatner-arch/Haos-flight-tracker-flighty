@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.0
+- Finds your tail number without FlightAware showing it: follows the airplane's day back
+  (inbound, its inbound, …) to the leg that's flying and reads the registration from ADS-B (adsb.lol)
+- Confirms it from your own flight's transponder in the last 90 minutes; a different airplane triggers the swap alert
+- Push when your aircraft is first identified; the flight page shows where the tail came from and the airplane's day
+
 ## 2.1.1
 - Stops re-checking the inbound aircraft once it's at the gate; looks again only if your tail number changes or a different inbound is linked
 

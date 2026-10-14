@@ -221,3 +221,65 @@ class Inbound(unittest.TestCase):
         self.assertTrue(server.inbound_needs_check(L, f))           # tail swap: look again
         f["tail"] = "N1"; f["inbound_fa_id"] = "UAL999-x"
         self.assertTrue(server.inbound_needs_check(L, f))           # different inbound linked
+
+
+class TailChain(unittest.TestCase):
+    def test_chain_then_own_transponder(self):
+        import server
+        live_tails = {"UAL890": "N777UA"}
+        sources.fetch_live = lambda cs: {"lat": 1, "lon": 2, "tail": live_tails[cs]} if cs in live_tails else None
+
+        class FB:
+            client = None
+
+            def load(self, url, name):
+                if "UAL890" in url:  # the airplane's earlier leg, flying now
+                    b = boot(fa_id="UAL890-x", out_s=T0 - 2 * H, origin="DEN", dest="ORD", inbound_id=None,
+                             off_a=T0 - 1.8 * H)
+                    b["flights"]["UAL890-x"]["ident"] = "UAL890"
+                    return b, None
+                return {"flights": {}}, None
+
+        L = {"id": "c1", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO",
+             "sched_out": T0 + 6 * H, "sched_in": T0 + 12 * H, "notified": {"watch": True}}
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0 + 6 * H, tail=None, inbound_id="UAL567-x"))
+        L["flight"] = f
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="UAL567-x", out_s=T0 + 2 * H, origin="ORD", dest="EWR",
+                                               inbound_id="UAL890-x"))
+        inb["ident"] = "UAL567"
+        L["inbound"] = inb
+        server.resolve_tail(FB(), L, f, T0)
+        self.assertEqual(f["tail"], "N777UA")
+        self.assertEqual(L["tail_info"]["kind"], "chain")
+        self.assertEqual([c["phase"] for c in L["chain"]], ["scheduled", "airborne"])
+        a = [x for x in alerts.evaluate(L, CFG, T0, []) if x["key"] == "tail"]
+        self.assertEqual(len(a), 1)
+        self.assertIn("in flight", a[0]["message"])
+
+        # 80 minutes out, our own transponder shows a different airplane → swap
+        live_tails["UAL1234"] = "N888UA"
+        f2, _ = fa.flights_from_bootstrap(boot(out_s=T0 + 6 * H, tail=None, inbound_id="UAL567-x"))
+        L["flight"] = f2
+        server.resolve_tail(FB(), L, f2, T0 + 6 * H - 80 * 60)
+        self.assertEqual(f2["tail"], "N888UA")
+        a = [x for x in alerts.evaluate(L, CFG, T0 + 6 * H - 80 * 60, []) if x["key"] == "tail"]
+        self.assertEqual(len(a), 1)
+        self.assertIn("swap", a[0]["title"])
+        self.assertIn("transponder", a[0]["message"])
+
+    def test_new_inbound_forgets_chain_tail(self):
+        import server
+        sources.fetch_live = lambda cs: None
+
+        class FB:
+            client = None
+
+            def load(self, url, name):
+                return {"flights": {}}, None
+
+        L = {"id": "c2", "ident": "UAL1", "sched_out": T0 + 6 * H, "sched_in": T0 + 9 * H, "inbound": None,
+             "tail_info": {"tail": "N1", "kind": "chain", "root": "OLD", "source": "x"}}
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0 + 6 * H, tail=None, inbound_id="NEW"))
+        server.resolve_tail(FB(), L, f, T0)
+        self.assertIsNone(f.get("tail"))
+        self.assertEqual(L["tail_info"], {})
