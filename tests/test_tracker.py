@@ -737,3 +737,13 @@ class Rotation(unittest.TestCase):
         self.server.update_rotation(self.browser, L, T0 + 20 * 60)
         self.assertEqual(self.loads, ["B"])                                   # only the open leg refreshes
         self.assertEqual(len(L["rotation"]), 3)
+
+
+class PollAfterDelay(unittest.TestCase):
+    def test_delay_keeps_fast_checks_from_the_original_time(self):
+        import server
+        server.CFG.update(poll_fast_minutes=3, poll_near_minutes=10, poll_far_minutes=30)
+        out = T0 + 30 * 60                                                      # due out in 30 min
+        L = {"id": "p", "sched_out": out, "sched_in": out + 3 * H}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, out_e=out + 1.5 * H))  # now 2 h out
+        self.assertEqual(server.poll_seconds(L, T0), 180)

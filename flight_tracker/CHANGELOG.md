@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.1
+- Check interval uses the earlier of scheduled and estimated departure, so a delay never slows checks down
+  (e.g. 3-minute checks start 45 min before the original departure even if it's now 1.5 h late)
+- Fix: hairline seam across the map on iPhone; map labels moved to their own layer
+
 ## 2.9.0
 - Live page: the add-on streams a signal whenever anything changes and the open page updates in place — no reloading
   (falls back to checking every 30 s if the stream can't get through)

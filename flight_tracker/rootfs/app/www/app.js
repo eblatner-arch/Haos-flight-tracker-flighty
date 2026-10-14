@@ -102,8 +102,9 @@
     const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
     const base = L.tileLayer(esri(dark ? "World_Dark_Gray_Base" : "World_Light_Gray_Base"),
       { maxZoom: 16, attribution: "Tiles &copy; Esri" }).addTo(map);
+    if (!map.getPane("labels")) { map.createPane("labels"); map.getPane("labels").style.zIndex = 350; map.getPane("labels").style.pointerEvents = "none"; }
     const labels = L.tileLayer(esri(dark ? "World_Dark_Gray_Reference" : "World_Light_Gray_Reference"),
-      { maxZoom: 16, pane: "overlayPane", opacity: 0.85 }).addTo(map);
+      { maxZoom: 16, pane: "labels", opacity: 0.85 }).addTo(map);
     let errors = 0, switched = false;
     base.on("tileerror", () => {
       if (switched || ++errors < 4) return;

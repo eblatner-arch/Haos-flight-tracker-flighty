@@ -553,7 +553,10 @@ def watched(L, now):
 def poll_seconds(L, now):
     f = L.get("flight")
     ph = fa.phase(f, now)
-    out_t = (fa.best_time(f["times"], "out") if f else None) or L["sched_out"]
+    # The earlier of scheduled and estimated departure: a delay never slows the checks down.
+    sched = ((f or {}).get("times", {}).get("out", {}).get("scheduled") if f else None) or L["sched_out"]
+    est = fa.best_time(f["times"], "out") if f else None
+    out_t = min(t for t in (sched, est) if t)
     if ph == "taxi_out":
         m = CFG["poll_fast_minutes"]
     elif out_t - now <= 45 * 60:

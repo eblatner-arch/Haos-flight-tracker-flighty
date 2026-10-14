@@ -348,3 +348,5 @@ a.card.inbound { display: block; }
 /* keep map layers (zoom buttons, markers) under the sticky header */
 .top { z-index: 5000; }
 .leaflet-container { isolation: isolate; z-index: 0; }
+/* close hairline seams between map tiles on high-density screens */
+.leaflet-tile-container img.leaflet-tile { width: 256.6px !important; height: 256.6px !important; }
