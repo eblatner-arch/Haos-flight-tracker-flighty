@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.12
+- Fix (again): a swipe starting just below a map could still drag it on iPhone. Touches that start outside the map's visible box are now ignored by the map before it can react, and the route layer is no bigger than the map
+
 ## 2.11.11
 - Fix: a swipe starting just below a map still dragged it on iPhone. Leaflet's route layer is drawn 10% larger than the map and was catching those touches; routes, markers and labels now ignore touches (dragging the map itself is unchanged)
 

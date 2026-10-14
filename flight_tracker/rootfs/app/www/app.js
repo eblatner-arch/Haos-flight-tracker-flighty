@@ -177,13 +177,24 @@
     }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     el.dataset.cls = el.className;
-    const map = L.map(el, { zoomControl: interactive, attributionControl: true, dragging: interactive,
+    // padding 0: the route layer is exactly the map's size instead of 10% larger
+    const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: interactive, attributionControl: true, dragging: interactive,
       scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
     addTiles(map, dark);
     const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive };
     entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
     MAPS[key] = entry;
     usedMaps.add(key);
+    // iOS can deliver a touch to the map's oversized inner layers even when the finger is outside
+    // the visible map (the strip just below it). Swallow any touch that starts outside the map's box
+    // before Leaflet sees it, so it scrolls the page instead.
+    const guard = (e) => {
+      const p = e.touches ? e.touches[0] : e;
+      if (!p) return;
+      const r = el.getBoundingClientRect();
+      if (p.clientY < r.top || p.clientY > r.bottom || p.clientX < r.left || p.clientX > r.right) e.stopPropagation();
+    };
+    for (const ev of ["pointerdown", "touchstart", "mousedown"]) el.addEventListener(ev, guard, { capture: true, passive: true });
     if (interactive && L.Control) {
       const Btn = L.Control.extend({
         options: { position: "topright" },
