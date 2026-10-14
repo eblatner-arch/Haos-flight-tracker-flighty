@@ -117,7 +117,9 @@ def nas_for(leg, nas_items):
     codes.discard("")
     inb = leg.get("inbound") or {}
     inb_from = ((inb.get("origin") or {}).get("iata") or "").upper()
-    inb_done = fa.phase(inb, 0) in ("arrived", "cancelled", "diverted") if inb else True
+    inb_ph = fa.phase(inb, 0) if inb else None
+    inb_done = inb_ph in ("arrived", "cancelled", "diverted") if inb else True
+    up = ("airborne", "landed")  # a ground stop only holds flights that haven't taken off
     out = []
     for n in nas_items or []:
         if n["airport"] not in codes:
@@ -126,10 +128,13 @@ def nas_for(leg, nas_items):
         impact = []
         if n["kind"] in ("gs", "gdp") and (n.get("scope") or n.get("flights")):
             if n["airport"] == arr and dep:
-                impact.append({"who": "you", "from": dep, "center": artcc.center_of(dep), "hit": artcc.in_scope(n, dep)})
+                air = fa.phase(f, 0) in up if f else False
+                impact.append({"who": "you", "from": dep, "center": artcc.center_of(dep), "airborne": air,
+                               "hit": False if air else artcc.in_scope(n, dep)})
             if n["airport"] == dep and inb_from and not inb_done:
-                impact.append({"who": "inbound", "from": inb_from, "center": artcc.center_of(inb_from),
-                               "hit": artcc.in_scope(n, inb_from)})
+                air = inb_ph in up
+                impact.append({"who": "inbound", "from": inb_from, "center": artcc.center_of(inb_from), "airborne": air,
+                               "hit": False if air else artcc.in_scope(n, inb_from)})
         m["impact"] = impact
         out.append(m)
     return out
@@ -151,7 +156,9 @@ def nas_text(n, tz):
     for i in n.get("impact") or []:
         where = f"{i['from']}" + (f" ({i['center']})" if i.get("center") else "")
         whose = "your departure" if i["who"] == "you" else "your inbound"
-        if i["hit"] is True:
+        if i.get("airborne"):
+            bits.append(f"{whose} from {where} is already airborne, so it isn't held")
+        elif i["hit"] is True:
             bits.append(f"includes {whose} from {where}")
         elif i["hit"] is False:
             bits.append(f"doesn't include {whose} from {where} yet")

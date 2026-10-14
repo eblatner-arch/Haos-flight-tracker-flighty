@@ -321,6 +321,12 @@ class Followed(unittest.TestCase):
         out = alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": inb}, items)
         imp = [n for n in out if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["who"], i["from"], i["center"], i["hit"]) for i in imp], [("inbound", "TPA", "ZJX", True)])
+        air, _ = fa.flights_from_bootstrap(boot(fa_id="IN", out_s=T0, origin="TPA", dest="EWR", inbound_id=None,
+                                               off_a=T0 + 600))
+        imp = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0]["impact"]
+        self.assertEqual([(i["hit"], i["airborne"]) for i in imp], [(False, True)])   # already flying: not held
+        self.assertIn("already airborne", alerts.nas_text([n for n in alerts.nas_for(
+            {"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0], None))
         imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["who"], i["hit"]) for i in imp], [("you", False)])   # ZBW isn't in scope: still shown
 

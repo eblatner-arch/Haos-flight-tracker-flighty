@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.1
+- Ground stops: an inbound (or your own flight) that's already airborne isn't held, so the card says "already airborne — not held" in green instead of "includes", and its center isn't highlighted
+
 ## 2.11.0
 - NAS status now comes from the FAA's live airport-events feed (the same data nasstatus.faa.gov shows), including ground-stop scope, probability of extension and the advisory link. The older XML feed is the fallback
 - Ground stops and delay programs show at the top of the Flights screen and the flight page, with the departure centers in scope. Your departure's (or your inbound's) center is highlighted, and the card says whether the program includes it — or doesn't include it yet

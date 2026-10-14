@@ -464,11 +464,11 @@
     const n = g.n, tz = g.tz;
     const hits = new Set(), lines = [];
     for (const u of g.uses) for (const i of u.impact) {
-      if (i.center) hits.add(i.center);
-      hits.add(i.from);
+      if (!i.airborne) { if (i.center) hits.add(i.center); hits.add(i.from); }
       const who = i.who === "you" ? `${esc(u.leg.display || u.leg.ident || "Your flight")} from ${esc(i.from)}` : `${esc(u.leg.display || "Your flight")}'s inbound from ${esc(i.from)}`;
       const where = i.center ? ` (${esc(i.center)})` : "";
-      lines.push(i.hit === true ? `<div class="na-hit yes">Includes ${who}${where}</div>`
+      lines.push(i.airborne ? `<div class="na-hit air">${who} is already airborne — not held</div>`
+        : i.hit === true ? `<div class="na-hit yes">Includes ${who}${where}</div>`
         : i.hit === false ? `<div class="na-hit no">Doesn't include ${who}${where} — yet</div>`
         : `<div class="na-hit">Can't tell if it includes ${who}</div>`);
     }

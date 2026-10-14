@@ -385,3 +385,4 @@ a.card.inbound { display: block; }
 .na-hit.yes { color: var(--text); } .na-hit.yes::before { background: var(--red); }
 .na-hit.no::before { background: var(--amber); }
 .na-adv { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--accent); font-weight: 600; }
+.na-hit.air::before { background: var(--green); }
