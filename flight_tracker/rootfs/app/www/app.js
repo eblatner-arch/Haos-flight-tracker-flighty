@@ -278,7 +278,8 @@
     if (leg.note && !f) foot.push(`<span class="faint">${esc(leg.note)}</span>`);
     if (!leg.finished && leg.phase === "scheduled" && out > now && out - now < 86400) foot.push(`<b>in ${dur(out - now)}</b>`);
     if (leg.problems.length) foot.push(`<span class="warnmark">${esc(leg.problems[0].text)}</span>`);
-    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + (leg.extra ? '<span class="tag">FOLLOWING</span>' : "");
+    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + (leg.extra ? '<span class="tag">FOLLOWING</span>' : "")
+      + ((leg.source || "").includes("Gemini") ? '<span class="tag gem">GEMINI</span>' : "");
     return `<a class="fcard s-${slug(leg.status)} ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
       <div class="fc-top"><span class="fc-no">${esc(leg.display || leg.ident || "")}</span>${tags}<span class="fc-date">${esc(dayLabel(out, tzA))}</span>${statusPill(leg)}</div>
       <div class="fc-route">
@@ -513,7 +514,10 @@
         <div class="k">Read</div><div>${sch.checked ? ago(sch.checked) : "not yet"}${sch.events != null ? ` · ${sch.events} events, ${sch.count} flights` : ""}</div>
         ${sch.error ? `<div class="k">Error</div><div class="err">${esc(sch.error)}</div>` : ""}
         <div class="k">Airline</div><div>${esc(c.airline_icao)}</div>
-        <div class="k">Screenshot reader</div><div>${c.gemini ? `Gemini (${esc(c.gemini_model)}), fallback only` : "off (no Gemini key)"}</div>
+        <div class="k">Gemini</div><div>${d.gemini.enabled
+          ? `${esc(d.gemini.model)}, only when page data can't be read · <b>${d.gemini.today}</b> today, <b>${d.gemini.month}</b> this month${d.gemini.last ? ` · last ${ago(d.gemini.last)}` : " · never used yet"}`
+          : "off (no API key), never used"}</div>
+        <div class="k">Screenshots</div><div>${d.screenshots.count} files, ${(d.screenshots.bytes / 1048576).toFixed(1)} MB · deleted ${d.screenshots.keep_hours} h after a flight is done</div>
         <div class="k">Worker</div><div>${d.worker.busy ? "checking a flight now" : "idle"}${d.worker.last_cycle ? ` · last cycle ${ago(d.worker.last_cycle)}` : ""}${d.worker.error ? ` · <span class="err">${esc(d.worker.error)}</span>` : ""}</div>
         <div class="k">Browser viewer</div><div>http://&lt;your-ha-ip&gt;:${c.viewer_port}/vnc.html <span class="faint">(needs viewer_password)</span></div>
         <div class="k">Version</div><div>${esc(d.version)}</div>

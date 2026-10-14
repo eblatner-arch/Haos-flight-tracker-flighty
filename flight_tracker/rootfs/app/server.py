@@ -84,8 +84,8 @@ STATE_PATH = os.path.join(DATA_DIR, "state.json")
 STATE = {"legs": {}, "nas": [], "nas_at": None, "nas_error": None, "wx": {}, "wx_at": 0,
          "alerts": [], "schedule": {"mtime": None, "error": None, "count": 0, "checked": None},
          "worker": {"busy": None, "last_cycle": None, "error": None},
-         "manual": [], "debug": []}
-PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual")
+         "manual": [], "debug": [], "gemini_calls": []}
+PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls")
 INGRESS = {"path": None}
 
 ICAO_TO_IATA = {v: k for k, v in schedule.IATA_TO_ICAO.items()}
@@ -376,6 +376,43 @@ def remove_manual(lid):
         STATE["legs"].pop(lid, None)
 
 
+SHOT_KEEP_HOURS = 48
+
+
+def clean_screenshots(now):
+    """Delete screenshots of flights that are gone or finished more than two days ago."""
+    with LOCK:
+        keep = {lid for lid, L in STATE["legs"].items()
+                if not finished(L, now) or now < (L.get("updated") or L["sched_out"]) + SHOT_KEEP_HOURS * HOUR}
+    removed = 0
+    try:
+        for name in os.listdir(SHOT_DIR):
+            if not name.endswith(".png"):
+                continue
+            base = name[:-4]
+            lid = re.sub(r"-(inbound|chain\d+)$", "", base)
+            path = os.path.join(SHOT_DIR, name)
+            if lid in keep:
+                continue
+            if now - os.path.getmtime(path) > SHOT_KEEP_HOURS * HOUR or lid not in STATE["legs"]:
+                os.remove(path)
+                removed += 1
+    except FileNotFoundError:
+        return
+    except Exception as e:
+        log.warning("Screenshot cleanup: %s", e)
+    if removed:
+        log.info("Deleted %d old screenshots", removed)
+
+
+def shot_usage():
+    try:
+        files = [os.path.join(SHOT_DIR, n) for n in os.listdir(SHOT_DIR) if n.endswith(".png")]
+        return len(files), sum(os.path.getsize(p) for p in files)
+    except Exception:
+        return 0, 0
+
+
 def expire_manual(now):
     """Drop app-added flights a day and a half after they took off or were due."""
     with LOCK:
@@ -497,6 +534,8 @@ def fetch_flight(browser, L):
     # No page data: read the screenshot.
     if browser.client:
         when = L.get("date") or datetime.fromtimestamp(L["sched_out"], alerting.tz_for(L.get("dep"))).strftime("%a %d %b %H:%M")
+        with LOCK:
+            STATE["gemini_calls"] = [t for t in STATE["gemini_calls"] if t > time.time() - 40 * 86400] + [time.time()]
         f = browser.read_screenshot(shot, ident, L.get("dep"), when)
         with LOCK:
             STATE["debug"] = (STATE["debug"] + [{"at": time.time(), "leg": L.get("display"), "leg_id": lid,
@@ -746,6 +785,7 @@ def worker():
             if now - last_sched > 300 or "all" in forced:
                 reload_schedule(force="all" in forced)
                 expire_manual(now)
+                clean_screenshots(now)
                 sync_extras()
                 last_sched = now
             if now - (STATE["nas_at"] or 0) > CFG["nas_minutes"] * 60 or "all" in forced:
@@ -875,6 +915,14 @@ def api_debug():
                        "gemini_model": CFG.get("gemini_model"), "watch_hours": CFG["watch_hours"],
                        "home_tz": TZNAME, "viewer_port": 6080},
             "manual": STATE["manual"],
+            "screenshots": dict(zip(("count", "bytes"), shot_usage()), keep_hours=SHOT_KEEP_HOURS),
+            "gemini": {"enabled": bool(CFG.get("gemini_api_key")), "model": CFG.get("gemini_model"),
+                       "last": STATE["gemini_calls"][-1] if STATE["gemini_calls"] else None,
+                       "today": sum(1 for t in STATE["gemini_calls"]
+                                    if datetime.fromtimestamp(t, HOME_TZ).date() == datetime.now(HOME_TZ).date()),
+                       "month": sum(1 for t in STATE["gemini_calls"]
+                                    if datetime.fromtimestamp(t, HOME_TZ).strftime("%Y-%m")
+                                    == datetime.now(HOME_TZ).strftime("%Y-%m"))},
         }
 
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.1
+- Screenshots are deleted 48 hours after a flight is done (or when it leaves the list)
+- Tools shows Gemini use (today, this month, last call) and screenshot storage; flights read by Gemini carry a GEMINI tag
+
 ## 2.3.0
 - Adding a flight asks for From and To (and an optional date), so a flight number that flies several legs picks the right one
 - One timeline in departure order: your legs and followed flights together, in Flighty-style cards with Today / Tomorrow headings

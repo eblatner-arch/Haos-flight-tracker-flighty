@@ -299,3 +299,22 @@ class Followed(unittest.TestCase):
         nas = [{"airport": "EWR", "kind": "gs", "label": "Ground stop", "reason": "", "detail": "", "key": "k"}]
         self.assertEqual(alerts.nas_for({"dep": "EWR", "arr": "SFO", "extra": True}, nas), [])
         self.assertEqual(len(alerts.nas_for({"dep": "EWR", "arr": "SFO"}, nas)), 1)
+
+
+class Cleanup(unittest.TestCase):
+    def test_old_screenshots_deleted(self):
+        import tempfile
+        import time as _t
+        import server
+        d = tempfile.mkdtemp()
+        server.SHOT_DIR = d
+        now = _t.time()
+        live = {"id": "live", "sched_out": now + H, "sched_in": now + 4 * H}
+        done = {"id": "done", "sched_out": now - 80 * H, "sched_in": now - 77 * H, "updated": now - 77 * H}
+        server.STATE["legs"] = {"live": live, "done": done}
+        for n in ("live", "live-inbound", "done", "done-chain1", "gone"):
+            p = os.path.join(d, n + ".png")
+            open(p, "wb").write(b"x")
+            os.utime(p, (now - 72 * H, now - 72 * H))
+        server.clean_screenshots(now)
+        self.assertEqual(sorted(os.listdir(d)), ["live-inbound.png", "live.png"])

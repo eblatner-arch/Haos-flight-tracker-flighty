@@ -281,3 +281,4 @@ h3 { font-size: 18px; letter-spacing: -0.01em; }
 .fc-foot .warnmark { color: var(--amber); font-weight: 700; margin: 0; }
 .form-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .pill.completed, .pill.departed { background: var(--card-2); color: var(--muted); }
+.tag.gem { background: color-mix(in srgb, var(--violet) 20%, transparent); color: var(--violet); }
