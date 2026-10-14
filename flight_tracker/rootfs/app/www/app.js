@@ -42,8 +42,15 @@
   let STATE = null;
   // Maps survive re-renders: keyed, moved back into the new page, layers repainted in place.
   const MAPS = {};
+  const LEGS = {};  // last full copy of each flight, for instant redraws
   let usedMaps = new Set();
   let lastRoute = null;
+  let ROUTE = location.hash && location.hash.length > 2 ? location.hash : "#/";
+  function go(r) {
+    r = r || "#/";
+    ROUTE = r;
+    render(false);
+  }
 
   const PLANE = '<svg viewBox="0 0 24 24"><path fill="currentColor" stroke="#000" stroke-opacity=".35" stroke-width=".6" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>';
 
@@ -314,7 +321,7 @@
   // ---------- the airplane's day: your inbound, its inbound, ... ----------
   async function aircraftView(id, n) {
     let leg;
-    try { leg = await api(`api/leg/${id}`); } catch { location.hash = "#/"; return; }
+    try { leg = await api(`api/leg/${id}`); } catch { go("#/"); return; }
     const rot = (leg.rotation || []).length ? leg.rotation : (leg.inbound ? [leg.inbound] : []);
     n = Math.max(0, Math.min(n, rot.length - 1));
     const h = rot[n];
@@ -493,13 +500,18 @@
     $app.innerHTML = h;
     const hm_ = document.getElementById("hero-map");
     if (hm_ && next) {
-      api(`api/leg/${next.id}`).then((full) => drawMap(hm_, full, { interactive: false, key: `hero-${next.id}` })).catch(() => drawMap(hm_, next, { interactive: false, key: `hero-${next.id}` }));
+      const opt = { interactive: false, key: `hero-${next.id}` };
+      // draw straight away from the last full copy so the map never shows blank, then update
+      if (LEGS[next.id]) drawMap(hm_, LEGS[next.id], opt);
+      api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), full, opt); })
+        .catch(() => { if (!LEGS[next.id]) drawMap(hm_, next, opt); });
     }
   }
 
   async function legView(id) {
     let leg;
     try { leg = await api(`api/leg/${id}`); } catch { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Flight not found</b>It may have dropped off your schedule.</div>`; return; }
+    LEGS[id] = leg;
     const f = leg.flight || { times: { out: {}, off: {}, on: {}, in: {} } };
     const tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
     const cell = (lbl, t, tz) => {
@@ -579,7 +591,7 @@
     const xb = document.getElementById("leg-remove");
     if (xb) xb.onclick = async () => {
       await api("api/flights/remove", { method: "POST", body: JSON.stringify({ id: leg.id }) });
-      location.hash = "#/";
+      go("#/");
     };
   }
 
@@ -621,7 +633,7 @@
         if (!r.ok) throw new Error(d.error || r.status);
         msg.textContent = "Added. Looking it up on FlightAware…";
         await load();
-        setTimeout(() => { location.hash = `#/leg/${d.id}`; }, 600);
+        setTimeout(() => go(`#/leg/${d.id}`), 600);
       } catch (err) { msg.className = "small err"; msg.textContent = err.message; }
     };
     $app.querySelectorAll("[data-remove]").forEach((b) => b.onclick = async () => {
@@ -770,7 +782,7 @@
   }
 
   async function render(force) {
-    const route = location.hash || "#/";
+    const route = ROUTE;
     try {
       if (force || !STATE) await load();
       morphing = route === lastRoute && $root.childElementCount > 0;
@@ -798,12 +810,20 @@
     try { await api("api/refresh", { method: "POST" }); } catch {}
     setTimeout(async () => { await render(true); $refresh.classList.remove("spin"); }, 20000);
   };
-  window.addEventListener("hashchange", () => render(false));
+  // In-page navigation never touches the URL. Changing the address (even just the #hash)
+  // makes Home Assistant reload the panel, which showed as a blank "Loading…" flash.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    go(a.getAttribute("href") || "#/");
+  });
+  window.addEventListener("hashchange", () => { if (location.hash && location.hash !== ROUTE) go(location.hash); });
 
   // ---------- live updates ----------
   // The add-on pushes an event whenever anything changes; the page re-renders in place
   // (maps keep their zoom and pan). Views with forms aren't redrawn under your fingers.
-  const LIVE_VIEW = () => !/^#\/(add|notify|tools)/.test(location.hash || "#/");
+  const LIVE_VIEW = () => !/^#\/(add|notify|tools)/.test(ROUTE);
   let pending = null;
   function liveRefresh() {
     if (pending || document.hidden || !LIVE_VIEW()) return;

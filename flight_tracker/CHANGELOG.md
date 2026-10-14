@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.9.9
+- Fix: changing pages reloaded the whole app (blank "Loading…" flash). Navigation now stays inside the page and never changes the address, so Home Assistant doesn't reload the panel
+- The Flights map draws immediately from the last data instead of appearing blank first
+
 ## 2.9.8
 - Fix: the screen blinked on every live update. Updates now patch only what changed in place, so the page, scroll position and maps stay still
 
