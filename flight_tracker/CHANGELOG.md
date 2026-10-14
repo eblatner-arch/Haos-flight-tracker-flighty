@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.12.1
+- Swipe in from the left edge to go back (to wherever the page's ‹ link goes). The page follows your finger; let go past about a third of the way to go back. Works over the map too
+
 ## 2.12.0
 - The add-on Configuration tab only has setup and API items now: schedule file, airline code, notify service and link, AeroAPI key/budget, Gemini key/model, browser viewer, and the advanced pattern/time zone
 - New Tracking settings in the app (wrench page): watch window, deadheads, check intervals, NAS interval, live ADS-B positions. Your current values carry over

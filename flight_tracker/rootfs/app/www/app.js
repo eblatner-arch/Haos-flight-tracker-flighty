@@ -104,18 +104,48 @@
   // Map dragging is decided per touch: before anything else sees a touch, each map's dragging is
   // switched on only if the finger landed inside that map's visible box. A swipe that starts
   // anywhere else can't move a map, whatever iOS decides the touch hit.
+  const EDGE = 24;  // px from the left edge where a swipe means "back"
   function gateMapDrag(e) {
     const p = e.touches ? e.touches[0] : e;
     if (!p) return;
+    const edge = e.touches && p.clientX <= EDGE && document.querySelector("#app > .back");
     for (const m of Object.values(MAPS)) {
       if (!m.interactive || !m.map.dragging) continue;
       const r = m.el.getBoundingClientRect();
-      const inside = p.clientX >= r.left && p.clientX <= r.right && p.clientY >= r.top && p.clientY <= r.bottom;
+      const inside = !edge && p.clientX >= r.left && p.clientX <= r.right && p.clientY >= r.top && p.clientY <= r.bottom;
       if (inside && !m.map.dragging.enabled()) m.map.dragging.enable();
       else if (!inside && m.map.dragging.enabled()) m.map.dragging.disable();
     }
   }
   for (const ev of ["touchstart", "pointerdown", "mousedown"]) document.addEventListener(ev, gateMapDrag, { capture: true, passive: true });
+
+  // Swipe in from the left edge to go back (to wherever the page's "‹" link points), like iOS.
+  let sw = null;
+  document.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    const back = document.querySelector("#app > .back");
+    sw = e.touches.length === 1 && back && t.clientX <= EDGE ? { x: t.clientX, y: t.clientY, dx: 0, back, horiz: null } : null;
+  }, { capture: true, passive: true });
+  document.addEventListener("touchmove", (e) => {
+    if (!sw) return;
+    const t = e.touches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y;
+    if (sw.horiz === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) sw.horiz = Math.abs(dx) > Math.abs(dy);
+    if (!sw.horiz) { if (sw.horiz === false) { $root.style.transform = ""; sw = null; } return; }
+    if (e.cancelable) e.preventDefault();  // keep the page from scrolling sideways while swiping
+    sw.dx = Math.max(0, dx);
+    $root.style.transition = "none";
+    $root.style.transform = `translateX(${sw.dx * 0.6}px)`;
+    $root.style.opacity = String(1 - Math.min(0.4, sw.dx / 600));
+  }, { capture: true, passive: false });
+  document.addEventListener("touchend", () => {
+    if (!sw) return;
+    const go_ = sw.horiz && sw.dx > Math.min(110, window.innerWidth * 0.28), href = sw.back.getAttribute("href");
+    sw = null;
+    $root.style.transition = "transform .18s ease, opacity .18s ease";
+    $root.style.transform = ""; $root.style.opacity = "";
+    if (go_) go(href);
+  }, { capture: true, passive: true });
+  document.addEventListener("touchcancel", () => { sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
   async function api(path, opts) {
     const r = await fetch(path, { cache: "no-store", ...opts });
