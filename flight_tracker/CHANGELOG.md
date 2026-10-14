@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.9.3
+- Fix: an earlier leg saved while it was still flying could freeze with half a track. A leg is now only frozen once it
+  has been fetched after it arrived
+- "Arrived" now needs an actual arrival time or a status that says Arrived/Landed
+- Each leg of the aircraft's day shows when its data was last fetched
+
 ## 2.9.2
 - Fix: tapping a push opened the default dashboard. It now opens the Flights panel (the same address as the sidebar entry),
   with a fallback when the add-on can't look itself up, and a `notification_url` option to set it by hand

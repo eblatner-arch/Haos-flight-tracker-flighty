@@ -832,6 +832,18 @@ def _fill_airports(fl):
     return fl
 
 
+def final(h, now):
+    """A leg is frozen only once we've fetched it after it finished, so its track is complete."""
+    ph = fa.phase(h, now)
+    if ph in ("cancelled", "diverted"):
+        return True
+    if ph != "arrived":
+        return False
+    t = h.get("times") or {}
+    done_at = (t.get("in") or {}).get("actual") or (t.get("on") or {}).get("actual")
+    return bool(done_at) and (h.get("fetched") or 0) >= done_at
+
+
 def update_rotation(browser, L, now):
     """The airplane's day before your flight: your inbound, its inbound, ... back to the
     first leg that has already arrived (nothing earlier matters). Finished legs are kept
@@ -848,7 +860,7 @@ def update_rotation(browser, L, now):
             break  # this leg has arrived, or the airplane is on it now: nothing earlier matters
         prev_id = cur["inbound_fa_id"]
         cached = old.get(prev_id)
-        if cached and (fa.phase(cached, now) in DONE or now - (cached.get("fetched") or 0) < ROTATION_REFRESH):
+        if cached and (final(cached, now) or now - (cached.get("fetched") or 0) < ROTATION_REFRESH):
             nxt = cached
         else:
             try:

@@ -188,8 +188,8 @@ def phase(f, now):
         return "airborne"
     if t["out"]["actual"]:
         return "taxi_out"
-    st = (f.get("status_text") or "").lower()
-    if "arriv" in st:
+    st = (f.get("status_text") or "").lower().strip()
+    if st.startswith(("arrived", "landed")):
         return "arrived"
     if "en route" in st or "airborne" in st:
         return "airborne"

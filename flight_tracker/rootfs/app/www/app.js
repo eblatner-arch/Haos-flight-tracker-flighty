@@ -321,6 +321,7 @@
         : flying ? `<div class="card small muted">The airplane is on this leg now, so nothing earlier matters.</div>`
         : more ? `<a class="card rot-next" href="#/aircraft/${id}/${n + 1}"><span class="small muted">Before this, the airplane flies</span><b>${esc(rot[n + 1].display_ident || "")} ${esc((rot[n + 1].origin || {}).iata || "")}→${esc((rot[n + 1].destination || {}).iata || "")}</b><span class="pill ${slug(rot[n + 1].status)}">${esc(rot[n + 1].status)}</span></a>`
         : `<div class="card small muted">${h.inbound_fa_id ? "The earlier leg will appear on the next check." : "FlightAware hasn't linked the leg before this one yet."}</div>`}
+      <p class="small faint" style="margin:4px 4px 10px">${h.fetched ? `Data from FlightAware, fetched ${ago(h.fetched)}${finished ? "" : " · refreshes every 10 min"}` : "Data from FlightAware with your flight's last check"}</p>
       ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}`;
     drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: null, live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
   }

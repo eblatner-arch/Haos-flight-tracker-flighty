@@ -767,3 +767,28 @@ class NotifyLink(unittest.TestCase):
         os.environ["HOSTNAME"] = "83459ff1-flight-tracker"
         server.find_ingress()
         self.assertEqual(server.INGRESS["path"], "/83459ff1_flight_tracker")
+
+
+class RotationFreshness(Rotation):
+    def test_leg_saved_mid_flight_is_refetched_after_it_lands(self):
+        self.chain["C"] = dict(out_s=T0 - 3 * H, inbound_id="D", off_a=T0 - 2.8 * H)
+        L = self.leg(dict(out_s=T0 + 3 * H, inbound_id="B"))
+        self.server.update_rotation(self.browser, L, T0 - 2 * H)              # C saved while airborne
+        self.assertEqual(L["rotation"][-1]["fa_id"], "C")
+        # C lands later; the copy we hold says arrived but was fetched before that
+        L["rotation"][2]["times"]["in"]["actual"] = T0 - H
+        self.chain["C"]["off_a"] = T0 - 2.8 * H
+        self.loads.clear()
+        self.server.update_rotation(self.browser, L, T0 - 0.5 * H)           # before: this copy was frozen forever
+        self.assertIn("C", self.loads)
+        L["rotation"][2]["times"]["in"]["actual"] = T0 - H                    # fetched after landing now
+        self.loads.clear()
+        self.server.update_rotation(self.browser, L, T0)
+        self.assertNotIn("C", self.loads)                                     # final: never again
+
+    def test_status_text_alone_does_not_mean_arrived(self):
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0))
+        f["status_text"] = "En Route / Arriving in 30 minutes"
+        self.assertNotEqual(fa.phase(f, T0), "arrived")
+        f["status_text"] = "Arrived at gate"
+        self.assertEqual(fa.phase(f, T0), "arrived")
