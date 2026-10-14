@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.14
+- Map dragging is now switched on per touch: only a touch that lands inside a map's visible box can drag it; any other touch turns that map's dragging off before the map sees it
+
 ## 2.11.13
 - Maps show one flight plus its own inbound only: your flight's map shows the inbound, and the inbound's page shows the leg before it (if that hasn't arrived). No more whole chain on one map
 

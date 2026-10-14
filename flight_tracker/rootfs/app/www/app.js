@@ -100,6 +100,22 @@
     }
   }
 
+  // Map dragging is decided per touch: before anything else sees a touch, each map's dragging is
+  // switched on only if the finger landed inside that map's visible box. A swipe that starts
+  // anywhere else can't move a map, whatever iOS decides the touch hit.
+  function gateMapDrag(e) {
+    const p = e.touches ? e.touches[0] : e;
+    if (!p) return;
+    for (const m of Object.values(MAPS)) {
+      if (!m.interactive || !m.map.dragging) continue;
+      const r = m.el.getBoundingClientRect();
+      const inside = p.clientX >= r.left && p.clientX <= r.right && p.clientY >= r.top && p.clientY <= r.bottom;
+      if (inside && !m.map.dragging.enabled()) m.map.dragging.enable();
+      else if (!inside && m.map.dragging.enabled()) m.map.dragging.disable();
+    }
+  }
+  for (const ev of ["touchstart", "pointerdown", "mousedown"]) document.addEventListener(ev, gateMapDrag, { capture: true, passive: true });
+
   async function api(path, opts) {
     const r = await fetch(path, { cache: "no-store", ...opts });
     if (!r.ok) throw new Error(`${r.status}`);
@@ -185,16 +201,6 @@
     entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
     MAPS[key] = entry;
     usedMaps.add(key);
-    // iOS can deliver a touch to the map's oversized inner layers even when the finger is outside
-    // the visible map (the strip just below it). Swallow any touch that starts outside the map's box
-    // before Leaflet sees it, so it scrolls the page instead.
-    const guard = (e) => {
-      const p = e.touches ? e.touches[0] : e;
-      if (!p) return;
-      const r = el.getBoundingClientRect();
-      if (p.clientY < r.top || p.clientY > r.bottom || p.clientX < r.left || p.clientX > r.right) e.stopPropagation();
-    };
-    for (const ev of ["pointerdown", "touchstart", "mousedown"]) el.addEventListener(ev, guard, { capture: true, passive: true });
     if (interactive && L.Control) {
       const Btn = L.Control.extend({
         options: { position: "topright" },
