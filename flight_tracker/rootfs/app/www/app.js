@@ -273,7 +273,9 @@
     return `<span class="pill ${slug(leg.status)}">${esc(txt)}</span>`;
   }
 
+  const notFound = (leg) => leg.extra && !leg.flight;
   function timeBlock(label, t, sched, tz, right) {
+    if (sched === "nf") return `<div class="t ${right ? "right" : ""}"><div class="lbl">${label}</div><div><span class="big">—</span></div><div class="sub">Not found</div></div>`;
     const shown = t ? (t.actual || t.estimated || t.scheduled) : null;
     const s = (t && t.scheduled) || sched;
     const diff = shown && s ? (shown - s) / 60 : 0;
@@ -414,7 +416,8 @@
   }
 
   function problemBanners(leg) {
-    return (leg.problems || []).filter((p) => !p.nas).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
+    const nf = notFound(leg) && leg.note && /^Not found/.test(leg.note) ? `<div class="banner warn"><span class="dot warn"></span><div>${esc(leg.note)}</div></div>` : "";
+    return nf + (leg.problems || []).filter((p) => !p.nas).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
   }
 
   function hero(leg) {
@@ -429,13 +432,13 @@
         </div>
         <div class="route">
           <div class="ap"><div class="code">${esc(leg.dep)}</div><div class="city">${esc(leg.dep_ap.city || leg.dep_ap.name || "")}</div></div>
-          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${dur(block)}</span></div>
+          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${notFound(leg) ? "" : dur(block)}</span></div>
           <div class="ap right"><div class="code">${esc(leg.arr)}</div><div class="city">${esc(leg.arr_ap.city || leg.arr_ap.name || "")}</div></div>
         </div>
         ${progress(leg)}
         <div class="times">
-          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, leg.sched_out, tzA)}
-          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : f.times.on && f.times.on.actual ? "Landed" : "Arrives", f.times.in, leg.sched_in, tzB, true)}
+          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, notFound(leg) ? "nf" : leg.sched_out, tzA)}
+          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : f.times.on && f.times.on.actual ? "Landed" : "Arrives", f.times.in, notFound(leg) ? "nf" : leg.sched_in, tzB, true)}
         </div>
         ${chips(leg)}
         ${countdown(leg)}
@@ -644,15 +647,15 @@
         <div class="hero-top"><div class="flightno">${esc(leg.display || leg.ident || "")}${leg.dh ? '<span class="tag">DH</span>' : ""}</div>${statusPill(leg)}</div>
         <div class="route">
           <div class="ap"><div class="code">${esc(leg.dep)}</div><div class="city">${esc(leg.dep_ap.name || "")}</div></div>
-          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${dur(leg.sched_in - leg.sched_out)}</span></div>
+          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${notFound(leg) ? "" : dur(leg.sched_in - leg.sched_out)}</span></div>
           <div class="ap right"><div class="code">${esc(leg.arr)}</div><div class="city">${esc(leg.arr_ap.name || "")}</div></div>
         </div>
         ${progress(leg)}
         <div class="times">
-          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, leg.sched_out, tzA)}
-          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : "Arrives", f.times.in, leg.sched_in, tzB, true)}
+          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, notFound(leg) ? "nf" : leg.sched_out, tzA)}
+          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : "Arrives", f.times.in, notFound(leg) ? "nf" : leg.sched_in, tzB, true)}
         </div>
-        <div class="times sm">
+        <div class="times sm" ${notFound(leg) ? 'hidden' : ""}>
           ${timeBlock(f.times.off && f.times.off.actual ? "Took off" : "Takeoff", f.times.off, null, tzA)}
           ${timeBlock(f.times.on && f.times.on.actual ? "Landed" : "Landing", f.times.on, null, tzB, true)}
         </div>

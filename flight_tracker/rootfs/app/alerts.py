@@ -37,6 +37,8 @@ def mins(n):
 
 def status_label(leg, cfg):
     f = leg.get("flight")
+    if leg.get("extra") and not f and (leg.get("aero") or {}).get("at"):
+        return "Not found"
     ph = fa.phase(f, 0)
     if ph != "scheduled":
         return PHASE_LABEL[ph]

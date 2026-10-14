@@ -457,6 +457,15 @@ class AeroAPI(unittest.TestCase):
         self.run_at("a1", T0 + 120)
         self.assertEqual(len(self.calls), 1)
 
+    def test_followed_wrong_airport_says_where_it_flies(self):
+        L = self.add(extra=True)
+        L["dep"] = "HOU"                                       # the flight really leaves EWR
+        L = self.run_at("a1", T0)
+        self.assertIsNone(L.get("flight"))
+        self.assertEqual(L["aero"]["other_routes"], ["EWR→SFO"])
+        self.assertIn("flies EWR→SFO, not HOU→SFO", L["note"])
+        self.assertEqual(alerts.status_label(L, self.server.CFG), "Not found")
+
     def test_first_lookup_tail_has_source(self):
         self.tail = "N77"
         self.add()

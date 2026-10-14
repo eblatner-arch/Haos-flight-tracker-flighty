@@ -750,6 +750,13 @@ def aero_call(L, now, reason, retry_h=None, observed_inbound=None, observed_tail
         flights, pages = aeroapi.query(CFG["aeroapi_key"].strip(), L["ident"], start, end)
         if L.get("extra"):
             flight = fa.pick_followed(None, flights, L.get("dep"), L.get("arr"), L.get("date"), now)
+            # Not found: say which routes this flight number does fly, so a wrong airport is obvious.
+            routes = []
+            for f in flights or []:
+                r = f"{(f.get('origin') or {}).get('iata') or '?'}→{(f.get('destination') or {}).get('iata') or '?'}"
+                if r not in routes:
+                    routes.append(r)
+            a["other_routes"] = [] if flight else routes[:4]
         else:
             flight = fa.pick_instance(None, flights, L.get("dep"), L["sched_out"], window=4 * HOUR)
         rec.update(pages=pages or 1, billed=bool(pages), ok=True, found=bool(flight),
@@ -780,6 +787,15 @@ def aero_call(L, now, reason, retry_h=None, observed_inbound=None, observed_tail
         STATE["flags"]["budget80"] = _month(now)
         push_event("sys_budget", "AeroAPI budget 80% used", f"${spent:.2f} of ${budget:.2f} this month.")
     return flight
+
+
+def not_found_note(L):
+    routes = (L.get("aero") or {}).get("other_routes") or []
+    want = f"{L.get('dep') or '?'}→{L.get('arr') or '?'}"
+    if routes:
+        return (f"Not found: {L.get('display') or L.get('ident')} flies {', '.join(routes)}, not {want}. "
+                "Stop following it and add it again with the right airports.")
+    return f"Not found: AeroAPI has no {L.get('display') or L.get('ident')} {want} yet. It will look again in a few hours."
 
 
 def first_lookup_due(L, now):
@@ -1051,7 +1067,7 @@ def update_leg(browser, lid):
                                   "source": "AeroAPI (airline assignment)"}
         elif not watched(L, now):
             flight, source, shot, note = None, None, None, (
-                "AeroAPI didn't find this flight yet; will look again" if (L.get("aero") or {}).get("at") else None)
+                not_found_note(L) if (L.get("aero") or {}).get("at") else None)
         else:
             flight, source, shot, note = fetch_flight(browser, L)
             sources.append(source or "FlightAware page (no flight data)")
@@ -1076,6 +1092,8 @@ def update_leg(browser, lid):
                 flight["track"] = [p for p in old_track if p[4] and p[4] < flight["track"][0][4]] + flight["track"]
                 flight["track"] = fa.thin(flight["track"], 1500)
             L["flight"], L["source"] = flight, source
+        if L.get("extra") and not L.get("flight") and (L.get("aero") or {}).get("at"):
+            note = not_found_note(L)  # page check came up empty too: keep the clear "not found" story
         L["note"] = note
         if shot or not first:
             L["shot"] = bool(shot)

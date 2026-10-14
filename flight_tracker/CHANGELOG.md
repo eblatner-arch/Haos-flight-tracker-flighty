@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.8
+- A followed flight that isn't found says so: status "Not found", no made-up times or 0m duration, and a banner saying where the flight number actually flies ("UA 1859 flies IAH→AUS, not HOU→AUS")
+
 ## 2.11.7
 - Maps show the airplane's earlier legs that still matter: your flight's map adds the inbound's inbound (and further back) while they haven't arrived, and each inbound page shows the leg before it. Stops at the leg the airplane is flying now; arrived legs aren't drawn
 - Map tile seams: base-map tiles overlap by half a pixel (drawn normally, so no bright lines) to cover Safari's intermittent hairlines
