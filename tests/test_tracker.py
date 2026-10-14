@@ -512,3 +512,23 @@ class InboundCancel(unittest.TestCase):
         a = [x for x in alerts.evaluate(L, cfg, T0, []) if x["key"] == "inbound"]
         self.assertEqual(len(a), 1)
         self.assertEqual(a[0]["level"], "critical")
+
+
+class LookupLog(unittest.TestCase):
+    def test_changes_and_quiet_checks(self):
+        import server
+        L = {"id": "h", "ident": "UAL1", "dep": "EWR", "arr": "SFO", "sched_out": T0 + 5 * H,
+             "sched_in": T0 + 11 * H}
+        prev = server.snapshot(L)
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + 5 * H, gate="C71", tail="N1"))
+        server.log_lookup(L, prev, T0, ["AeroAPI"])
+        fields = {c["field"] for c in L["history"][0]["changes"]}
+        self.assertTrue({"Gate", "Tail", "Scheduled out"} <= fields)
+        same = server.snapshot(L)
+        server.log_lookup(L, same, T0 + 60, ["FlightAware page data"])
+        server.log_lookup(L, same, T0 + 120, ["FlightAware page data"])
+        self.assertEqual(len(L["history"]), 2)
+        self.assertEqual(L["history"][1]["quiet"], 2)
+        L["flight"]["origin"]["gate"] = "C80"
+        server.log_lookup(L, same, T0 + 180, ["FlightAware page data"])
+        self.assertEqual(L["history"][-1]["changes"], [{"field": "Gate", "from": "C71", "to": "C80"}])

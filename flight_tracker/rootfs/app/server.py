@@ -768,6 +768,62 @@ def resolve_tail(browser, L, f, now):
     L["tail_info"] = info
 
 
+def snapshot(L):
+    """The facts worth logging when they change, as display strings."""
+    f = L.get("flight") or {}
+    t = f.get("times") or {}
+    o, d = f.get("origin") or {}, f.get("destination") or {}
+    tz_a = alerting.tz_for(L.get("dep"), o)
+    tz_b = alerting.tz_for(L.get("arr"), d)
+
+    def tm(key, tz, kind):
+        v = (t.get(key) or {}).get(kind)
+        return alerting.hhmm(v, tz) if v else None
+    inb = L.get("inbound") or {}
+    def gate(ap):
+        g, term = ap.get("gate"), ap.get("terminal")
+        if not g:
+            return None
+        if not term or str(g).upper().startswith(str(term).upper()):
+            return g
+        return f"T{term} {g}"
+    snap = {
+        "Status": alerting.status_label(L, CFG) if f else None,
+        "Gate": gate(o),
+        "Scheduled out": tm("out", tz_a, "scheduled"),
+        "Estimated out": tm("out", tz_a, "estimated"),
+        "Actual out": tm("out", tz_a, "actual"),
+        "Takeoff": tm("off", tz_a, "actual"),
+        "Estimated in": tm("in", tz_b, "estimated"),
+        "Arrival gate": gate(d),
+        "Bags": d.get("baggage"),
+        "Aircraft": f.get("aircraft_type"),
+        "Tail": f.get("tail"),
+        "Inbound": " ".join(x for x in (inb.get("display_ident"),
+                                        (inb.get("origin") or {}).get("iata") and f"from {inb['origin']['iata']}") if x) or None,
+        "Inbound due": alerting.hhmm(fa.best_time(inb["times"], "in"), tz_a) if inb.get("times") and fa.best_time(inb["times"], "in") else None,
+    }
+    return snap
+
+
+def log_lookup(L, prev, now, sources):
+    """Append what this check changed (or count it as a quiet check)."""
+    cur = snapshot(L)
+    changes = [{"field": k, "from": prev.get(k), "to": v} for k, v in cur.items() if v != prev.get(k) and v is not None]
+    if L.get("tail_source") is None and (L.get("flight") or {}).get("tail_source"):
+        for c in changes:
+            if c["field"] == "Tail":
+                c["via"] = L["flight"]["tail_source"]
+    hist = L.setdefault("history", [])
+    if not changes and hist and not hist[-1]["changes"] and hist[-1]["sources"] == sources:
+        hist[-1]["quiet"] = hist[-1].get("quiet", 1) + 1
+        hist[-1]["last"] = now
+    else:
+        hist.append({"at": now, "sources": sources, "changes": changes, "error": L.get("error"),
+                     "note": L.get("note")})
+    L["history"] = hist[-150:]
+
+
 class _OutsideWindow(Exception):
     pass
 
@@ -783,6 +839,10 @@ def update_leg(browser, lid):
             return
         L = json.loads(json.dumps(L))  # work on a copy outside the lock
     now = time.time()
+    prev_snap = snapshot(L)
+    prev_aero_at = (L.get("aero") or {}).get("at")
+    prev_tail_at = (L.get("tail_info") or {}).get("at")
+    sources = []
     try:
         first = None
         if first_lookup_due(L, now):
@@ -790,6 +850,7 @@ def update_leg(browser, lid):
             if first:
                 L["fa_id"] = first.get("fa_id") or L.get("fa_id")
         if first:
+            sources.append("AeroAPI")
             flight, source, shot, note = first, "AeroAPI", None, None
             if first.get("tail"):
                 first["tail_source"] = "AeroAPI (airline assignment)"
@@ -800,6 +861,7 @@ def update_leg(browser, lid):
                 "AeroAPI didn't find this flight yet; will look again" if (L.get("aero") or {}).get("at") else None)
         else:
             flight, source, shot, note = fetch_flight(browser, L)
+            sources.append(source or "FlightAware page (no flight data)")
         if flight:
             # Fill in airport details FlightAware left out.
             for side, code in (("origin", L.get("dep")), ("destination", L.get("arr"))):
@@ -907,6 +969,16 @@ def update_leg(browser, lid):
         # Keep schedule fields that may have changed while we were fetching.
         for k in ("sched_out", "sched_in", "summary", "dh") if not L.get("extra") else ():
             L[k] = live.get(k, L.get(k))
+        a_at = (L.get("aero") or {}).get("at")
+        if a_at and a_at != prev_aero_at and "AeroAPI" not in sources:
+            sources.append(f"AeroAPI ({(L.get('aero') or {}).get('reason')})")
+        ti = L.get("tail_info") or {}
+        if ti.get("at") == now and ti.get("kind") in ("own", "chain"):
+            sources.append(f"ADS-B ({ti.get('source')})")
+        if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
+                                    and d["at"] >= now for d in STATE["debug"][-6:]):
+            sources.append("FlightAware page (inbound)")
+        log_lookup(L, prev_snap, now, sources or ["no lookup"])
         L["alerts"] = (L.get("alerts") or []) + new_alerts
         L["alerts"] = L["alerts"][-60:]
         STATE["legs"][lid] = L
@@ -999,6 +1071,8 @@ def leg_summary(L, now, nas, full=False):
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra",
                                   "sched_out", "sched_in", "summary", "source", "note", "error", "updated",
                                   "next_check", "shot", "fa_id", "date", "manual", "tail_info", "chain")}
+    if full:
+        out["history"] = list(reversed(L.get("history") or []))
     out["status"] = alerting.status_label(L, CFG)
     out["phase"] = fa.phase(f, now)
     out["watching"] = watched(L, now)

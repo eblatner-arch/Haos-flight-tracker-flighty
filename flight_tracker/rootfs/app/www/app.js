@@ -158,8 +158,22 @@
       pos = track[track.length - 1]; hdg = track.length > 1 ? bearing(track[track.length - 2], pos) : 0;
     } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
     if (pos) planeMarker([pos[0], pos[1]], hdg, route, leg.display).addTo(map);
-    if (bounds.length) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 9 });
-    else map.setView([39.5, -98.35], 3);
+    const center = () => bounds.length ? map.fitBounds(bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
+    center();
+    if (interactive && L.Control) {
+      const Btn = L.Control.extend({
+        options: { position: "topright" },
+        onAdd() {
+          const b = L.DomUtil.create("button", "map-center");
+          b.type = "button"; b.title = "Center on route"; b.setAttribute("aria-label", "Center on route");
+          b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A8.99 8.99 0 0 0 13 3.06V1h-2v2.06A8.99 8.99 0 0 0 3.06 11H1v2h2.06A8.99 8.99 0 0 0 11 20.94V23h2v-2.06A8.99 8.99 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>';
+          L.DomEvent.disableClickPropagation(b);
+          L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); center(); });
+          return b;
+        },
+      });
+      map.addControl(new Btn());
+    }
     setTimeout(() => map.invalidateSize(), 50);
   }
 
@@ -422,6 +436,13 @@
         </div></div>
       ${(leg.nas || []).length ? `<h2 class="section">NAS at your airports</h2><div class="card">${leg.nas.map((n) => `<div class="nas-item mine"><div class="apt">${esc(n.airport)}</div><div><div class="lbl">${esc(n.label)}</div><div class="det">${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</div></div></div>`).join("")}</div>` : ""}
       ${(leg.alerts || []).length ? `<h2 class="section">Alerts for this flight</h2>${alertsCard(leg.alerts)}` : ""}
+      ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
+          <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
+            ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B/.test(x) ? "adsb" : ""}">${esc(x)}</span>`).join("")}</div>
+          ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
+            : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
+          ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
+        </div>`).join("")}</div>` : ""}
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
     drawMap(document.getElementById("detail-map"), leg);

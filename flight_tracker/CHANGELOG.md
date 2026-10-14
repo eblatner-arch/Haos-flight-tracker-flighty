@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.6.0
+- Map: center-on-route button
+- Flight page: lookup log at the bottom — every check, which sources it used (AeroAPI, FlightAware page, inbound page,
+  ADS-B, Gemini) and exactly what changed; checks that change nothing are grouped
+
 ## 2.5.4
 - A cancelled or diverted inbound always pushes, whatever the scheduled turn
 
