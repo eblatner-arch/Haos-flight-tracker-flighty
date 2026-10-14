@@ -472,6 +472,17 @@ def fetch_flight(browser, L):
     return None, None, shot, "FlightAware page data unavailable and no Gemini key set for the screenshot fallback"
 
 
+def inbound_needs_check(L, f):
+    """Re-check the inbound until it's at the gate. After that, only if the aircraft
+    changes: a different tail on our flight, or FlightAware links a different inbound."""
+    inb = L.get("inbound") or {}
+    if not inb or inb.get("fa_id") != f.get("inbound_fa_id"):
+        return True
+    if f.get("tail") and inb.get("checked_for_tail") and f["tail"] != inb["checked_for_tail"]:
+        return True
+    return fa.phase(inb, time.time()) not in ("arrived", "cancelled", "diverted")
+
+
 def update_leg(browser, lid):
     with LOCK:
         L = STATE["legs"].get(lid)
@@ -508,7 +519,7 @@ def update_leg(browser, lid):
 
         # Inbound aircraft
         f = L.get("flight") or {}
-        if f.get("inbound_fa_id") and ph == "scheduled":
+        if f.get("inbound_fa_id") and ph == "scheduled" and inbound_needs_check(L, f):
             try:
                 boot, _ = load(browser, fa.id_url(f["inbound_fa_id"]), lid + "-inbound", L, "inbound aircraft")
                 inb, _ = fa.flights_from_bootstrap(boot)
@@ -519,6 +530,7 @@ def update_leg(browser, lid):
                         for k in ("lat", "lon", "tz", "name", "city"):
                             if ap.get(k) is None and ref.get(k) is not None:
                                 ap[k] = ref[k]
+                    inb["checked_for_tail"] = f.get("tail")
                     L["inbound"] = inb
             except Exception as e:
                 log.warning("%s inbound: %s", L.get("display"), e)

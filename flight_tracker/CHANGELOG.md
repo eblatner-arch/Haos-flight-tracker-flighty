@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.1.1
+- Stops re-checking the inbound aircraft once it's at the gate; looks again only if your tail number changes or a different inbound is linked
+
 ## 2.1.0
 - Follow any flight from the app (+ button): flight number and optional date; remove it any time
 - Tracking stops once a flight has taken off

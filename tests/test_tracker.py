@@ -203,3 +203,21 @@ class Lifecycle(unittest.TestCase):
         d2 = datetime.fromtimestamp(T0 + 24 * H, ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
         self.assertEqual(fa.pick_by_date(cur, act, d2)["fa_id"], "B")
         self.assertIsNone(fa.pick_by_date(cur, act, "1999-01-01"))
+
+
+class Inbound(unittest.TestCase):
+    def test_only_rechecks_completed_inbound_on_swap(self):
+        import server
+        f, _ = fa.flights_from_bootstrap(boot(tail="N1"))
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="UAL567-1760000000-airline-0002", inbound_id=None))
+        L = {"inbound": None}
+        self.assertTrue(server.inbound_needs_check(L, f))           # never checked
+        inb["checked_for_tail"] = "N1"
+        L["inbound"] = inb
+        self.assertTrue(server.inbound_needs_check(L, f))           # still en route / scheduled
+        inb["times"]["in"]["actual"] = T0
+        self.assertFalse(server.inbound_needs_check(L, f))          # at the gate: stop
+        f["tail"] = "N2"
+        self.assertTrue(server.inbound_needs_check(L, f))           # tail swap: look again
+        f["tail"] = "N1"; f["inbound_fa_id"] = "UAL999-x"
+        self.assertTrue(server.inbound_needs_check(L, f))           # different inbound linked
