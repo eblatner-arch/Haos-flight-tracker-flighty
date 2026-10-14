@@ -153,6 +153,7 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
         if ok:
             alerts.append({"key": event, "title": title, "message": message, "level": level, "at": now,
                            "tag": tag, "ts": bool(R[event].get("ts"))})
+            return True
         elif held and event in rules_mod.CATCH_UP and undo:
             for k, v in undo:  # push it once the window opens, with the value at that moment
                 nt[k] = v
@@ -306,10 +307,11 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
         last = nt.get("turn")
         if t is not None and t < (P("inbound_late", "min_turn") or 35) and iph not in ("arrived", "cancelled", "diverted") \
                 and (last is None or t <= last - 10) and close("inbound_late"):
-            nt["turn"] = t
-            add("inbound_late", f"{ident}: short turn, {mins(t)}",
-                f"{iid} from {ifrom} due {hhmm(fa.best_time(inb['times'], 'in'), dep_tz)} at {dep} — "
-                f"{mins(t)} turn for your {hhmm(out_now, dep_tz)} departure", "critical" if t < 0 else "warn")
+            # only remember it once it's actually pushed, so turning the setting on later still alerts
+            if add("inbound_late", f"{ident}: short turn, {mins(t)}",
+                   f"{iid} from {ifrom} due {hhmm(fa.best_time(inb['times'], 'in'), dep_tz)} at {dep} — "
+                   f"{mins(t)} turn for your {hhmm(out_now, dep_tz)} departure", "critical" if t < 0 else "warn"):
+                nt["turn"] = t
         if iph in ("airborne", "landed", "arrived") and not nt.get("inbound_off") and close("inbound_departed"):
             nt["inbound_off"] = True
             add("inbound_departed", f"Inbound {iid} departed {ifrom}",

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.10.2
+- Short turn: a turn that was skipped because of a setting no longer counts as already sent, so changing the setting pushes it on the next check
+
 ## 2.10.1
 - Flight page shows times the same way as the Flights screen: big Departs/Arrives with green (early) or amber (late) and the scheduled time struck through; takeoff and landing below in the same style
 - "Inbound running late" is now "Short turn": it pushes whenever the turn is under your minimum, even if the inbound is on time or early and however long the scheduled turn was. The banner reads "Short turn: 58 min"

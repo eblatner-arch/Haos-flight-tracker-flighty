@@ -6,6 +6,10 @@ on:
     paths: ["flight_tracker/**", ".github/workflows/build.yaml"]
   workflow_dispatch:
 
+concurrency:
+  group: build
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
