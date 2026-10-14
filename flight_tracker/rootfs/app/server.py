@@ -1251,11 +1251,13 @@ class Handler(BaseHTTPRequestHandler):
                 lid = add_manual(body.get("ident"), body.get("dep"), body.get("arr"), body.get("date"))
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
+            save_state()
             REFRESH_Q.put(lid)
             WAKE.set()
             return self._send(200, {"ok": True, "id": lid})
         if path == "/api/flights/remove":
             remove_manual(self._json().get("id") or "")
+            save_state()
             return self._send(200, {"ok": True})
         if path == "/api/test-notify":
             ok, detail = notify({"title": "Flight Tracker test", "level": "warn", "tag": "test", "key": "notify",
@@ -1270,7 +1272,19 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
 
+def _shutdown(signum, frame):
+    """Home Assistant stops the add-on with SIGTERM (updates, restarts): save first."""
+    try:
+        save_state()
+        log.info("State saved; stopping")
+    finally:
+        os._exit(0)
+
+
 def main():
+    import signal
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
     load_state()
     if not CFG["airline_icao"]:
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")

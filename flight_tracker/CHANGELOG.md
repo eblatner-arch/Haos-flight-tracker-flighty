@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.1
+- Fix: flights removed (or added) right before an update or restart came back (or went missing); changes now save immediately and on shutdown
+
 ## 2.6.0
 - Map: center-on-route button
 - Flight page: lookup log at the bottom — every check, which sources it used (AeroAPI, FlightAware page, inbound page,
