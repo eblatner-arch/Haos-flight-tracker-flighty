@@ -1,0 +1,35 @@
+name: Flight Tracker
+version: "1.2.0"
+slug: flight_tracker
+description: Screenshots flight pages and uses Gemini to extract flight data
+url: https://github.com/eblatner-arch/haos-flight-tracker
+arch: [amd64, aarch64]
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+map:
+  - type: share
+    read_only: false
+ports:
+  6080/tcp: 6080
+ports_description:
+  6080/tcp: Live browser viewer (noVNC)
+options:
+  gemini_api_key: ""
+  gemini_model: gemini-flash-lite-latest
+  interval: 300
+  enable_viewer: true
+  viewer_password: ""
+  flights:
+    - ident: N12345
+      source: flightaware
+schema:
+  gemini_api_key: password
+  gemini_model: str
+  interval: int(60,)
+  enable_viewer: bool
+  viewer_password: password?
+  flights:
+    - ident: str
+      source: list(flightaware|fr24_flight|fr24_aircraft)

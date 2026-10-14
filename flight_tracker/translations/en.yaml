@@ -1,0 +1,19 @@
+configuration:
+  gemini_api_key:
+    name: Gemini API key
+    description: Free key from https://aistudio.google.com/apikey
+  gemini_model:
+    name: Gemini model
+    description: Model used to read the screenshots. Flash-Lite is cheapest and fast enough.
+  interval:
+    name: Update interval
+    description: Seconds between refresh cycles (minimum 60).
+  enable_viewer:
+    name: Enable live viewer
+    description: Serve the headed browser over noVNC on port 6080 (for solving CAPTCHAs or logging in).
+  viewer_password:
+    name: Viewer password
+    description: Required for the viewer to start. VNC only uses the first 8 characters.
+  flights:
+    name: Flights
+    description: Each entry needs an ident (flight number or tail number) and a source.
