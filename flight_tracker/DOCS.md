@@ -1,55 +1,100 @@
 # Flight Tracker
 
-Opens flight tracking pages in a real Chromium browser, screenshots them, and
-asks Gemini to read the flight details. Each tracked flight becomes a sensor.
+A Flighty-style tracker for your own crew schedule, inside Home Assistant.
+
+It reads your schedule from the file the **ICS2GCAL** add-on saves, and from
+12 hours before each departure it checks the flight on FlightAware in a real
+browser: gate and terminal, delays, the aircraft and tail, the **inbound
+aircraft** and how tight your turn is, the filed route, and the live track. It
+also watches the **FAA NAS status** for ground stops, delay programs and
+closures at your airports, and pulls METARs. Anything that changes is pushed
+to your phone.
+
+Open it from **Flights** in the Home Assistant sidebar.
 
 ## Setup
 
-1. Get a Gemini API key at https://aistudio.google.com/apikey and paste it into
-   **gemini_api_key**.
-2. Add your flights:
+1. In the **ICS2GCAL** add-on, make sure `save_feed_copy` is on (version 1.4.0
+   or later). This add-on reads that file; it never downloads your schedule
+   itself.
+2. Set **airline_icao** to your airline's three-letter code (`UAL` for United).
+   Schedule titles like `2204 EWR-IAH` or `2204 EWR 27Sep 12:01 - IAH 27Sep 14:50`
+   become `UAL2204`. Titles that carry their own code (`DH AA 312 EWR-ORD`) use it.
+3. Set **notify_service** to your phone, e.g. `mobile_app_erics_iphone`
+   (Developer Tools → Actions → search "notify.mobile_app" to find yours).
+4. Start the add-on and open **Flights** from the sidebar.
 
-   ```yaml
-   flights:
-     - ident: UAL1234
-       source: flightaware
-     - ident: N12345
-       source: fr24_aircraft
-   ```
+## What you get pushed
 
-   | source          | ident                         | page                                   |
-   |-----------------|-------------------------------|----------------------------------------|
-   | `flightaware`   | flight number or tail number  | flightaware.com/live/flight/IDENT      |
-   | `fr24_flight`   | flight number (e.g. `ua1234`) | flightradar24.com/data/flights/ident   |
-   | `fr24_aircraft` | registration (e.g. `n12345`)  | flightradar24.com/data/aircraft/ident  |
+| When | Example |
+|---|---|
+| A flight enters the watch window | Tracking UA 1234 EWR→SFO · departs 14:05 · gate C71 · B39M N37502 |
+| Gate assigned or changed | UA 1234 gate change: EWR gate C71 → C80 |
+| Departure delayed, delay grows/shrinks, back on time | UA 1234 delayed 25 min · now departs 14:30 (was 14:05) |
+| Aircraft swap | N37502 → N12345 |
+| Inbound aircraft departs / reaches the gate | Inbound UA567 departed ORD · due in 13:20 |
+| Inbound running late for your departure | UA567 from ORD due 13:50 — 15 min turn for your 14:05 departure |
+| Inbound or your flight cancelled / diverted | |
+| Ground stop, ground delay program, delays or closure at either end | EWR: Ground delay program (avg 1 hour) — low ceilings |
+| Off, takeoff, landing, on (deadheads and followed flights; working legs optional) | |
 
-3. Start the add-on and check the **Log** tab.
+Each piece of news is pushed once. Gate and delay pushes replace the earlier
+one on your lock screen. Delays, gate changes, tight turns and NAS programs
+are time-sensitive on iPhone (turn off with `time_sensitive`).
+
+## The app
+
+- **Next flight**: map with the filed route (dashed), the flown track and the
+  aircraft; times in each airport's local time with the original schedule
+  struck through; gate, terminal, arrival gate, bags, aircraft and tail;
+  countdown or progress bar.
+- **Inbound aircraft**: where your airplane is coming from, its ETA, and your
+  turn time against `min_turn_minutes`. It's drawn on the map in purple.
+- **Upcoming** legs for the next three weeks, **Following** (extra flights from
+  `track_flights`), **Recent**.
+- **National airspace**: every current NAS program, your airports first.
+- Tap a flight for full times (gate out, takeoff, landing, gate in), METARs
+  with flight category, filed route, altitude and speed, its alert history and
+  the latest page screenshot.
 
 ## Sensors
 
-Each flight creates `sensor.flight_<ident>`. The state is the flight status
-(`Scheduled`, `En Route`, `Landed`, `Delayed`, `Unavailable`, ...). Attributes:
-`flight_number`, `registration`, `aircraft_type`, `origin`, `destination`,
-`departure_scheduled`, `departure_actual`, `arrival_scheduled`,
-`arrival_estimated`, `delay_minutes`, `altitude_ft`, `groundspeed_kt`,
-`progress_percent`, `source_url`, `screenshot`, `last_updated`.
+- `sensor.flight_tracker_next_leg`: status of your next flight, with times,
+  gates, aircraft, inbound and problems as attributes.
+- `binary_sensor.flight_tracker_problem`: on when a watched flight is delayed,
+  cancelled, diverted, has a tight turn, or a NAS program affects it.
+- `sensor.flight_tracker_nas_programs`: number of current NAS programs.
 
-The latest screenshot for each flight is saved to `/share/flight_tracker/`.
+They're pushed through the API, so they reappear within a minute of a Home
+Assistant restart.
 
-These sensors are pushed through the API, so they disappear after a Home
-Assistant restart until the next cycle runs (within one interval).
+## Where the data comes from
 
-## Live viewer
+- **FlightAware** flight pages, opened in a real Chromium browser. The add-on
+  reads the data the page itself is drawn from (gates, times, aircraft,
+  inbound, filed route waypoints, track) and saves a screenshot of each page to
+  `/share/flight_tracker/`. If that data can't be read, and you set a Gemini
+  API key, Gemini Flash-Lite reads the screenshot instead.
+- **FAA NAS status** (nasstatus.faa.gov), **aviationweather.gov** METARs and
+  **adsb.lol** live positions — all free, no keys.
 
-With **enable_viewer** on and a **viewer_password** set, open
-`http://<your-ha-ip>:6080/vnc.html` to watch or drive the browser. Use it to
-clear a CAPTCHA, accept cookies, or log in to a FlightAware/FR24 account; the
-browser profile is kept in `/data`, so sessions survive restarts. VNC passwords
-are limited to 8 characters.
+If FlightAware shows a CAPTCHA or wants you signed in, set a
+`viewer_password`, open `http://<your-ha-ip>:6080/vnc.html`, and handle it in
+the tracker's browser. The browser profile is kept, so you only do it once.
+Signing in to a free FlightAware account also tends to show more detail.
 
-## Notes
+## Check intervals
 
-- If a site blocks the browser, the sensor state becomes `Unavailable`. Open the
-  viewer and clear the challenge.
-- Each flight costs one Gemini call per interval. With a 300 s interval that is
-  about 290 calls per flight per day.
+More than 3 hours before departure every `poll_far_minutes` (30), within 3
+hours every `poll_near_minutes` (10), and from 45 minutes before departure
+through arrival every `poll_fast_minutes` (3). Each check loads one or two
+FlightAware pages, plus one for the inbound aircraft.
+
+## Troubleshooting
+
+- **"No schedule file"**: turn on `save_feed_copy` in ICS2GCAL and let it sync once.
+- **A flight shows no data**: FlightAware usually lists a flight a day or two
+  ahead. The note under the flight says why (for example "FlightAware doesn't
+  list this departure yet").
+- **Wrong or missing flight numbers**: set `airline_icao`, or a custom
+  `flight_regex` with named groups `dep`, `arr` and `flt`.

@@ -1,19 +1,72 @@
 configuration:
+  ics_file_path:
+    name: Schedule file
+    description: The feed copy ICS2GCAL saves (turn on save_feed_copy there). Default /homeassistant/ics2gcal/feed.ics.
+  airline_icao:
+    name: Your airline (ICAO)
+    description: Three-letter code added to flight numbers in your schedule, e.g. UAL for United. Titles that already carry a code (DH AA 312) use that one.
+  notify_service:
+    name: Notify service
+    description: Your phone's notify service without "notify.", e.g. mobile_app_erics_iphone. Blank sends alerts to Home Assistant notifications instead.
+  watch_hours:
+    name: Start watching (hours before departure)
+    description: When to start checking a flight for gates, delays, the inbound aircraft and NAS programs.
+  track_deadheads:
+    name: Track deadheads
+    description: Also watch flights marked DH in your schedule.
+  track_flights:
+    name: Also follow
+    description: Other flights to follow, by flight number (UA1234 or UAL1234), e.g. family. Shown under Following.
+  delay_threshold_minutes:
+    name: Delay alert threshold
+    description: Push when the departure is this many minutes late.
+  delay_step_minutes:
+    name: Delay change step
+    description: Push again when the delay changes by at least this many minutes.
+  min_turn_minutes:
+    name: Minimum turn
+    description: Warn when the inbound aircraft is due less than this many minutes before your departure.
+  notify_watch_start:
+    name: Alert when tracking starts
+    description: One push with the departure time, gate and aircraft when a flight enters the watch window.
+  notify_inbound_progress:
+    name: Inbound aircraft updates
+    description: Push when your inbound aircraft departs and when it reaches the gate.
+  notify_progress:
+    name: Progress alerts on working legs
+    description: Push off-block, takeoff, landing and on-block for flights you're operating.
+  notify_progress_deadhead:
+    name: Progress alerts on deadheads and followed flights
+    description: Push off-block, takeoff, landing and on-block for deadheads and followed flights.
+  time_sensitive:
+    name: Time-sensitive pushes
+    description: Delays, gate changes, tight turns, cancellations and NAS programs break through Focus on iPhone.
+  poll_far_minutes:
+    name: Check interval (more than 3 h out)
+  poll_near_minutes:
+    name: Check interval (within 3 h)
+  poll_fast_minutes:
+    name: Check interval (last 45 min, taxi and airborne)
+  nas_minutes:
+    name: NAS status interval
+  live_positions:
+    name: Live ADS-B positions
+    description: Use adsb.lol for up-to-the-minute aircraft positions on the map while taxiing or airborne.
   gemini_api_key:
-    name: Gemini API key
-    description: Free key from https://aistudio.google.com/apikey
+    name: Gemini API key (optional)
+    description: Only for the screenshot fallback when FlightAware's page data can't be read. Free key at aistudio.google.com/apikey.
   gemini_model:
     name: Gemini model
-    description: Model used to read the screenshots. Flash-Lite is cheapest and fast enough.
-  interval:
-    name: Update interval
-    description: Seconds between refresh cycles (minimum 60).
+    description: Flash-Lite is cheapest and fast enough.
   enable_viewer:
-    name: Enable live viewer
-    description: Serve the headed browser over noVNC on port 6080 (for solving CAPTCHAs or logging in).
+    name: Enable browser viewer
+    description: Serve the tracker's browser over noVNC on port 6080 (to clear a CAPTCHA or sign in to FlightAware).
   viewer_password:
     name: Viewer password
     description: Required for the viewer to start. VNC only uses the first 8 characters.
-  flights:
-    name: Flights
-    description: Each entry needs an ident (flight number or tail number) and a source.
+  flight_regex:
+    name: Custom flight pattern
+    description: Advanced. A regular expression with named groups dep, arr and optionally flt, if your schedule titles aren't recognised.
+  home_timezone:
+    name: Home time zone
+    description: Leave blank to use Home Assistant's. Only used for schedule times without a zone.

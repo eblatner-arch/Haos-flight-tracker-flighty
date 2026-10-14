@@ -1,0 +1,7 @@
+playwright==1.48.0
+requests
+pydantic>=2
+google-genai
+icalendar>=5.0
+recurring-ical-events>=2.0
+airportsdata

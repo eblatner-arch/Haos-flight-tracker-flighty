@@ -1,0 +1,4 @@
+<AIRPORT_STATUS_INFORMATION><Update_Time>Tue Oct 14 02:40:00 2026 GMT</Update_Time>
+<Delay_type><Name>Ground Delay Programs</Name><Ground_Delay_List><Ground_Delay><ARPT>EWR</ARPT><Reason>low ceilings</Reason><Avg>1 hour and 12 minutes</Avg><Max>2 hours and 40 minutes</Max></Ground_Delay><Ground_Delay><ARPT>BOS</ARPT><Reason>wind</Reason><Avg>48 minutes</Avg><Max>1 hour and 30 minutes</Max></Ground_Delay></Ground_Delay_List></Delay_type>
+<Delay_type><Name>General Arrival/Departure Delay Info</Name><Arrival_Departure_Delay_List><Delay><ARPT>PHX</ARPT><Reason>WX:Low Ceilings</Reason><Arrival_Departure Type="Departure"><Min>31 minutes</Min><Max>45 minutes</Max><Trend>Increasing</Trend></Arrival_Departure></Delay></Arrival_Departure_Delay_List></Delay_type>
+</AIRPORT_STATUS_INFORMATION>

@@ -1,14 +1,20 @@
 name: Flight Tracker
-version: "1.2.0"
+version: "2.0.0"
 slug: flight_tracker
-description: Screenshots flight pages and uses Gemini to extract flight data
+description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
 arch: [amd64, aarch64]
 startup: application
 boot: auto
 init: false
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:airplane
+panel_title: Flights
 homeassistant_api: true
+hassio_api: true
 map:
+  - homeassistant_config:ro
   - type: share
     read_only: false
 ports:
@@ -16,20 +22,53 @@ ports:
 ports_description:
   6080/tcp: Live browser viewer (noVNC)
 options:
+  ics_file_path: /homeassistant/ics2gcal/feed.ics
+  airline_icao: ""
+  notify_service: ""
+  watch_hours: 12
+  track_deadheads: true
+  track_flights: []
+  delay_threshold_minutes: 15
+  delay_step_minutes: 10
+  min_turn_minutes: 35
+  notify_watch_start: true
+  notify_inbound_progress: true
+  notify_progress: false
+  notify_progress_deadhead: true
+  time_sensitive: true
+  poll_far_minutes: 30
+  poll_near_minutes: 10
+  poll_fast_minutes: 3
+  nas_minutes: 5
+  live_positions: true
   gemini_api_key: ""
   gemini_model: gemini-flash-lite-latest
-  interval: 300
   enable_viewer: true
   viewer_password: ""
-  flights:
-    - ident: N12345
-      source: flightaware
 schema:
-  gemini_api_key: password
+  ics_file_path: str
+  airline_icao: str?
+  notify_service: str?
+  watch_hours: int(1,48)
+  track_deadheads: bool
+  track_flights:
+    - ident: str
+  delay_threshold_minutes: int(1,180)
+  delay_step_minutes: int(1,120)
+  min_turn_minutes: int(0,180)
+  notify_watch_start: bool
+  notify_inbound_progress: bool
+  notify_progress: bool
+  notify_progress_deadhead: bool
+  time_sensitive: bool
+  poll_far_minutes: int(5,120)
+  poll_near_minutes: int(2,60)
+  poll_fast_minutes: int(1,30)
+  nas_minutes: int(2,60)
+  live_positions: bool
+  gemini_api_key: password?
   gemini_model: str
-  interval: int(60,)
   enable_viewer: bool
   viewer_password: password?
-  flights:
-    - ident: str
-      source: list(flightaware|fr24_flight|fr24_aircraft)
+  flight_regex: str?
+  home_timezone: str?

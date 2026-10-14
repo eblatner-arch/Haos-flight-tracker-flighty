@@ -1,0 +1,219 @@
+"""Read FlightAware flight pages.
+
+A FlightAware flight page carries the data it draws from in a page variable
+(`trackpollBootstrap`): gates, times, aircraft, inbound flight, filed route
+waypoints and the flown track. The browser reads that variable from the
+loaded page; this module turns it into a plain dict. The screenshot of the
+same page is the fallback when the variable is missing or the layout changes.
+
+Everything here is pure and tolerant: unknown or missing keys give None.
+"""
+
+import re
+
+BASE = "https://www.flightaware.com/live/flight/"
+
+TIME_KEYS = {
+    "out": "gateDepartureTimes",
+    "off": "takeoffTimes",
+    "on": "landingTimes",
+    "in": "gateArrivalTimes",
+}
+
+
+def ident_url(ident):
+    return BASE + ident.upper()
+
+
+def id_url(fa_id):
+    return BASE + "id/" + fa_id
+
+
+def _get(d, *path):
+    for p in path:
+        if isinstance(d, dict):
+            d = d.get(p)
+        elif isinstance(d, list) and isinstance(p, int) and -len(d) <= p < len(d):
+            d = d[p]
+        else:
+            return None
+    return d
+
+
+def _first(*vals):
+    for v in vals:
+        if v not in (None, "", [], {}):
+            return v
+    return None
+
+
+def _num(v):
+    try:
+        return None if v is None or v == "" else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _airport(a):
+    a = a or {}
+    coord = a.get("coord") or []
+    tz = (a.get("TZ") or a.get("tz") or "").lstrip(":")
+    return {
+        "iata": _first(a.get("iata"), a.get("altIdent")),
+        "icao": _first(a.get("icao"), a.get("identifier")),
+        "name": a.get("friendlyName") or a.get("name"),
+        "city": a.get("friendlyLocation") or a.get("city"),
+        "lat": _num(coord[1]) if len(coord) > 1 else None,
+        "lon": _num(coord[0]) if len(coord) > 1 else None,
+        "tz": tz or None,
+        "gate": _first(a.get("gate")),
+        "terminal": _first(a.get("terminal")),
+        "baggage": _first(a.get("baggage"), a.get("bagClaim"), a.get("baggageClaim")),
+        "delays": a.get("delays") or None,
+    }
+
+
+def _times(f, key):
+    t = f.get(TIME_KEYS[key]) or {}
+    return {k: _num(t.get(k)) for k in ("scheduled", "estimated", "actual")}
+
+
+def _alt_ft(v):
+    v = _num(v)
+    if v is None:
+        return None
+    # The track gives altitude in hundreds of feet (FL style).
+    return int(v * 100) if v < 1000 else int(v)
+
+
+def normalize(f):
+    """One FlightAware flight object -> our flight dict."""
+    if not isinstance(f, dict):
+        return None
+    aircraft = f.get("aircraft") or {}
+    plan = f.get("flightPlan") or {}
+    inbound = f.get("inboundFlight") or {}
+    track = []
+    for p in f.get("track") or []:
+        c = p.get("coord") or []
+        if len(c) < 2:
+            continue
+        track.append([_num(c[1]), _num(c[0]), _alt_ft(p.get("alt")), _num(p.get("gs")), _num(p.get("timestamp"))])
+    waypoints = []
+    for w in f.get("waypoints") or []:
+        if isinstance(w, (list, tuple)) and len(w) >= 2:
+            waypoints.append([_num(w[1]), _num(w[0])])
+    out = {
+        "fa_id": _first(f.get("flightId"), f.get("fa_flight_id"), f.get("id")),
+        "ident": _first(f.get("ident"), f.get("displayIdent")),
+        "display_ident": _first(f.get("displayIdent"), f.get("iataIdent"), f.get("ident")),
+        "status_text": _first(f.get("flightStatus"), f.get("status")),
+        "cancelled": bool(f.get("cancelled")),
+        "diverted": bool(f.get("diverted")),
+        "origin": _airport(f.get("origin")),
+        "destination": _airport(f.get("destination")),
+        "times": {k: _times(f, k) for k in TIME_KEYS},
+        "aircraft_type": _first(aircraft.get("type"), f.get("aircraftType")),
+        "aircraft_name": _first(aircraft.get("friendlyType"), aircraft.get("typeDescription")),
+        "tail": _first(aircraft.get("tail"), aircraft.get("registration"), f.get("tail"), f.get("registration")),
+        "route": _first(plan.get("route")),
+        "filed_altitude": _num(plan.get("altitude")),
+        "filed_speed": _num(plan.get("speed")),
+        "distance_nm": _num(_first(plan.get("directDistance"), plan.get("plannedDistance"))),
+        "ete": _num(plan.get("ete")),
+        "waypoints": waypoints[:2000],
+        "track": track[-800:],
+        "inbound_fa_id": _first(inbound.get("fa_flight_id"), inbound.get("flightId"), inbound.get("id")),
+        "inbound_ident": _first(inbound.get("ident"), inbound.get("displayIdent")),
+    }
+    return out
+
+
+def flights_from_bootstrap(b):
+    """Return (current_flight_dict_or_None, [activity entries]) from trackpollBootstrap."""
+    if not isinstance(b, dict):
+        return None, []
+    flights = b.get("flights") or {}
+    raw = next(iter(flights.values()), None) if isinstance(flights, dict) else None
+    cur = normalize(raw) if raw else None
+    activity = []
+    for a in _get(raw or {}, "activityLog", "flights") or []:
+        n = normalize(a)
+        if n:
+            activity.append(n)
+    if cur and not cur["fa_id"]:
+        key = next(iter(flights.keys()), None)
+        if key and re.match(r"^[A-Z0-9]+-\d+-", key):
+            cur["fa_id"] = key
+    return cur, activity
+
+
+def pick_instance(cur, activity, dep, sched_out, window=6 * 3600):
+    """The flight instance (fa_id) that matches our leg: same origin, departure close to schedule."""
+    best, best_gap = None, None
+    for f in ([cur] if cur else []) + list(activity):
+        if not f or not f.get("fa_id"):
+            continue
+        o = f["origin"]
+        if dep and dep.upper() not in {(o.get("iata") or "").upper(), (o.get("icao") or "").upper()[-3:]}:
+            continue
+        t = f["times"]["out"]["scheduled"] or f["times"]["off"]["scheduled"]
+        if t is None or sched_out is None:
+            continue
+        gap = abs(t - sched_out)
+        if gap <= window and (best_gap is None or gap < best_gap):
+            best, best_gap = f, gap
+    return best
+
+
+def best_time(times, key):
+    t = times.get(key) or {}
+    return t.get("actual") or t.get("estimated") or t.get("scheduled")
+
+
+def phase(f, now):
+    """scheduled | taxi_out | airborne | landed | arrived | cancelled | diverted"""
+    if not f:
+        return "scheduled"
+    if f.get("cancelled"):
+        return "cancelled"
+    t = f["times"]
+    if f.get("diverted"):
+        return "diverted"
+    if t["in"]["actual"]:
+        return "arrived"
+    if t["on"]["actual"]:
+        return "landed"
+    if t["off"]["actual"]:
+        return "airborne"
+    if t["out"]["actual"]:
+        return "taxi_out"
+    st = (f.get("status_text") or "").lower()
+    if "arriv" in st:
+        return "arrived"
+    if "en route" in st or "airborne" in st:
+        return "airborne"
+    return "scheduled"
+
+
+def delay_minutes(f, sched_out=None):
+    """Departure delay: (actual or estimated gate out) - scheduled gate out."""
+    if not f:
+        return None
+    t = f["times"]["out"]
+    s = t["scheduled"] or sched_out
+    e = t["actual"] or t["estimated"]
+    if s is None or e is None:
+        return None
+    return int(round((e - s) / 60))
+
+
+def arrival_delay_minutes(f, sched_in=None):
+    if not f:
+        return None
+    t = f["times"]["in"]
+    s = t["scheduled"] or sched_in
+    e = t["actual"] or t["estimated"]
+    if s is None or e is None:
+        return None
+    return int(round((e - s) / 60))
