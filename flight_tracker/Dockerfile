@@ -1,7 +1,5 @@
 FROM python:3.12-slim-bookworm
-ARG BUILD_VERSION=dev
-ENV FT_VERSION=${BUILD_VERSION} \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
@@ -20,5 +18,9 @@ RUN pip install -r /tmp/requirements.txt \
 COPY rootfs/app /app
 COPY run.sh /
 RUN chmod +x /run.sh
+
+# Last, so a version bump doesn't invalidate the cached Chromium/apt layers above.
+ARG BUILD_VERSION=dev
+ENV FT_VERSION=${BUILD_VERSION}
 
 CMD ["/run.sh"]
