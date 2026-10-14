@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.13
+- Maps show one flight plus its own inbound only: your flight's map shows the inbound, and the inbound's page shows the leg before it (if that hasn't arrived). No more whole chain on one map
+
 ## 2.11.12
 - Fix (again): a swipe starting just below a map could still drag it on iPhone. Touches that start outside the map's visible box are now ignored by the map before it can react, and the route layer is no bigger than the map
 

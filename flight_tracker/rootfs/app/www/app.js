@@ -360,10 +360,9 @@
     return out;
   }
 
-  // Your flight's map also shows the inbound's own inbound (and so on) while they still matter.
+  // Each map shows one flight and its own inbound only; earlier legs live on their own pages.
   function withChain(leg) {
-    const inbPh = leg.inbound && (leg.rotation || [])[0] ? leg.rotation[0].phase : null;
-    leg.chain = leg.phase === "scheduled" && inbPh === "scheduled" ? chainFrom(leg.rotation, 1) : [];
+    leg.chain = [];
     return leg;
   }
 
@@ -423,7 +422,7 @@
       ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}`;
     const earlier = h.phase === "scheduled" ? chainFrom(rot, n + 1) : [];
     drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
-      chain: earlier.slice(1), live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
+      chain: [], live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
   }
 
   function problemBanners(leg) {
