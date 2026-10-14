@@ -236,12 +236,68 @@
     const cls = turn == null ? "" : turn < 0 ? "bad" : turn < minTurn ? "tight" : "";
     const pct = turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
     const from = (i.origin || {}).iata || "";
-    return `<div class="card inbound">
-      <div class="head"><span class="title">Inbound aircraft</span><span class="pill ${slug(i.status)}">${esc(i.status)}</span></div>
+    return `<a class="card inbound" href="#/aircraft/${leg.id}/0">
+      <div class="head"><span class="title">Inbound aircraft ›</span><span class="pill ${slug(i.status)}">${esc(i.status)}</span></div>
       <div class="line">${esc(i.display_ident || "")} ${from ? `from ${esc(from)}` : ""}</div>
       <div class="small muted">${due ? `Due at ${esc(leg.dep)} ${hm(due, tz)} ${tzAbbr(due, tz)}` : "Arrival time not known yet"}${i.tail ? ` · ${esc(i.tail)}` : ""}${(i.destination || {}).gate ? ` · gate ${esc(i.destination.gate)}` : ""}</div>
       ${turn != null ? `<div class="turnbar ${cls}"><div class="bar"><span style="width:${pct}%"></span></div><div class="num">${dur(turn * 60)} turn</div></div>` : ""}
-    </div>`;
+    </a>`;
+  }
+
+  // ---------- the airplane's day: your inbound, its inbound, ... ----------
+  async function aircraftView(id, n) {
+    let leg;
+    try { leg = await api(`api/leg/${id}`); } catch { location.hash = "#/"; return; }
+    const rot = (leg.rotation || []).length ? leg.rotation : (leg.inbound ? [leg.inbound] : []);
+    n = Math.max(0, Math.min(n, rot.length - 1));
+    const h = rot[n];
+    destroyMaps();
+    if (!h) { $app.innerHTML = `<a class="back" href="#/leg/${id}">‹ ${esc(leg.display || "Flight")}</a><div class="card empty"><b>No inbound linked yet</b>FlightAware hasn't linked the flight bringing your aircraft.</div>`; return; }
+    const t = h.times || { out: {}, off: {}, on: {}, in: {} };
+    const o = h.origin || {}, d = h.destination || {};
+    const tzA = o.tz, tzB = d.tz;
+    const cell = (lbl, x, tz) => {
+      const v = x ? (x.actual || x.estimated || x.scheduled) : null;
+      const k = x && x.actual ? "actual" : x && x.estimated ? "estimated" : x && x.scheduled ? "scheduled" : "";
+      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v">${hm(v, tz)}</div><div class="s">${k}${x && x.scheduled && v && Math.abs(v - x.scheduled) >= 300 ? ` · sched ${hm(x.scheduled, tz)}` : ""}</div></div>`;
+    };
+    const finished = ["arrived", "cancelled", "diverted"].includes(h.phase);
+    const flying = ["taxi_out", "airborne", "landed"].includes(h.phase);
+    const more = n + 1 < rot.length;
+    // the whole day as a strip, newest (your flight) on the left
+    const strip = [`<a class="rot-step mine" href="#/leg/${id}"><b>${esc(leg.display || "You")}</b><span>${esc(leg.dep)}→${esc(leg.arr)}</span></a>`]
+      .concat(rot.map((r, i) => `<a class="rot-step ${i === n ? "on" : ""} ph-${slug(r.phase)}" href="#/aircraft/${id}/${i}"><b>${esc(r.display_ident || r.ident || "?")}</b><span>${esc((r.origin || {}).iata || "?")}→${esc((r.destination || {}).iata || "?")}</span><i>${esc(r.status)}</i></a>`))
+      .join('<span class="rot-arrow">‹</span>');
+    $app.innerHTML = `
+      <a class="back" href="${n === 0 ? `#/leg/${id}` : `#/aircraft/${id}/${n - 1}`}">‹ ${n === 0 ? esc(leg.display || "Your flight") : "Later leg"}</a>
+      <div class="rot-strip">${strip}</div>
+      <div class="detail-map" id="ac-map"></div>
+      <div class="card">
+        <div class="hero-top"><div class="flightno">${esc(h.display_ident || h.ident || "")}<span class="tag">${n === 0 ? "YOUR INBOUND" : `${n + 1} LEGS BACK`}</span></div><span class="pill ${slug(h.status)}">${esc(h.status)}</span></div>
+        <div class="route">
+          <div class="ap"><div class="code">${esc(o.iata || "?")}</div><div class="city">${esc(o.city || o.name || "")}</div></div>
+          <div class="mid"><span class="dur">${t.out && t.in && best(t, "in") && best(t, "out") ? dur(best(t, "in") - best(t, "out")) : ""}</span></div>
+          <div class="ap right"><div class="code">${esc(d.iata || "?")}</div><div class="city">${esc(d.city || d.name || "")}</div></div>
+        </div>
+        <div class="grid4" style="margin-top:14px">
+          ${cell(`Gate out · ${tzAbbr(best(t, "out"), tzA)}`, t.out, tzA)}
+          ${cell(`Gate in · ${tzAbbr(best(t, "in"), tzB)}`, t.in, tzB)}
+          ${cell("Takeoff", t.off, tzA)}
+          ${cell("Landing", t.on, tzB)}
+        </div>
+        <div class="chips">
+          ${o.gate ? `<div class="chip"><div class="k">${esc(o.iata || "")} gate</div><div class="v">${esc(o.gate)}</div></div>` : ""}
+          ${d.gate ? `<div class="chip"><div class="k">${esc(d.iata || "")} gate</div><div class="v">${esc(d.gate)}</div></div>` : ""}
+          ${h.aircraft_type || h.tail ? `<div class="chip"><div class="k">Aircraft</div><div class="v">${esc([h.aircraft_type, h.tail].filter(Boolean).join(" · "))}</div></div>` : ""}
+          ${h.dep_delay ? `<div class="chip ${h.dep_delay >= 15 ? "changed" : ""}"><div class="k">Departure</div><div class="v">${h.dep_delay > 0 ? "+" : ""}${h.dep_delay} min</div></div>` : ""}
+        </div>
+      </div>
+      ${finished ? `<div class="card small muted">This leg has ${esc(h.status.toLowerCase())}${h.phase === "arrived" && t.in.actual ? ` (${hm(t.in.actual, tzB)} ${tzAbbr(t.in.actual, tzB)})` : ""}, so the airplane's earlier legs don't matter. This is as far back as it goes.</div>`
+        : flying ? `<div class="card small muted">The airplane is on this leg now, so nothing earlier matters.</div>`
+        : more ? `<a class="card rot-next" href="#/aircraft/${id}/${n + 1}"><span class="small muted">Before this, the airplane flies</span><b>${esc(rot[n + 1].display_ident || "")} ${esc((rot[n + 1].origin || {}).iata || "")}→${esc((rot[n + 1].destination || {}).iata || "")}</b><span class="pill ${slug(rot[n + 1].status)}">${esc(rot[n + 1].status)}</span></a>`
+        : `<div class="card small muted">${h.inbound_fa_id ? "The earlier leg will appear on the next check." : "FlightAware hasn't linked the leg before this one yet."}</div>`}
+      ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}`;
+    drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: null, live: null, display: h.display_ident });
   }
 
   function problemBanners(leg) {
@@ -649,7 +705,9 @@
     try {
       if (force || !STATE) await load();
       const m = route.match(/^#\/leg\/([\w-]+)/);
-      if (m) await legView(m[1]);
+      const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
+      if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
+      else if (m) await legView(m[1]);
       else if (route.startsWith("#/add")) addView();
       else if (route.startsWith("#/tools")) await toolsView();
       else if (route.startsWith("#/notify")) await notifyView();

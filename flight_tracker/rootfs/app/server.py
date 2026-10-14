@@ -786,13 +786,64 @@ def aero_check(L, f, now):
                   observed_inbound=f.get("inbound_fa_id") if reason.startswith("FlightAware page") else None)
 
 
+ROTATION_MAX = 6
+ROTATION_REFRESH = 10 * 60
+DONE = ("arrived", "cancelled", "diverted")
+
+
+def _fill_airports(fl):
+    for side in ("origin", "destination"):
+        ap = fl.get(side) or {}
+        ref = airports.get(ap.get("iata") or ap.get("icao"))
+        for k in ("lat", "lon", "tz", "name", "city"):
+            if ap.get(k) is None and ref.get(k) is not None:
+                ap[k] = ref[k]
+        fl[side] = ap
+    return fl
+
+
+def update_rotation(browser, L, now):
+    """The airplane's day before your flight: your inbound, its inbound, ... back to the
+    first leg that has already arrived (nothing earlier matters). Finished legs are kept
+    as they are; legs still to come are refreshed every ROTATION_REFRESH."""
+    inb = L.get("inbound")
+    if not inb or not inb.get("fa_id"):
+        L["rotation"] = [inb] if inb else []
+        return
+    old = {h.get("fa_id"): h for h in (L.get("rotation") or []) if h and h.get("fa_id")}
+    rot = [inb]
+    cur = inb
+    for hop in range(1, ROTATION_MAX):
+        if fa.phase(cur, now) in DONE + ("taxi_out", "airborne", "landed") or not cur.get("inbound_fa_id"):
+            break  # this leg has arrived, or the airplane is on it now: nothing earlier matters
+        prev_id = cur["inbound_fa_id"]
+        cached = old.get(prev_id)
+        if cached and (fa.phase(cached, now) in DONE or now - (cached.get("fetched") or 0) < ROTATION_REFRESH):
+            nxt = cached
+        else:
+            try:
+                boot, _ = load(browser, fa.id_url(prev_id), f"{L['id']}-chain{hop}", L, f"aircraft's earlier leg #{hop}")
+                nxt, _ = fa.flights_from_bootstrap(boot)
+            except Exception as e:
+                log.info("%s rotation hop %d: %s", L.get("display"), hop, e)
+                nxt = cached
+            if nxt is None:
+                break
+            if nxt is not cached:
+                _fill_airports(nxt)
+                nxt["fetched"] = now
+                nxt["track"] = (nxt.get("track") or [])[-300:]
+        rot.append(nxt)
+        cur = nxt
+    L["rotation"] = rot
+
+
 def walk_chain(browser, L, now):
-    """Follow the airplane's day backwards (inbound, its inbound, ...) to the first leg
-    that's transmitting, and read the registration from its ADS-B. Returns tail info or None."""
-    cur = L.get("inbound")
-    hops = []
-    found = None
-    for hop in range(CHAIN_HOPS + 1):
+    """Read the registration from ADS-B on the first leg of the airplane's day that's transmitting."""
+    update_rotation(browser, L, now)
+    L["_rot_done"] = True
+    hops, found = [], None
+    for i, cur in enumerate(L.get("rotation") or []):
         if not cur:
             break
         ph = fa.phase(cur, now)
@@ -800,7 +851,7 @@ def walk_chain(browser, L, now):
         name = cur.get("display_ident") or cur.get("ident") or "?"
         hops.append({"ident": name, "route": route, "phase": ph,
                      "out": fa.best_time(cur["times"], "out"), "in": fa.best_time(cur["times"], "in")})
-        if ph in ("taxi_out", "airborne", "landed") and cur.get("ident"):
+        if found is None and ph in ("taxi_out", "airborne", "landed") and cur.get("ident"):
             try:
                 live = sources.fetch_live(cur["ident"])
             except Exception as e:
@@ -809,17 +860,7 @@ def walk_chain(browser, L, now):
             if live and live.get("tail"):
                 found = {"tail": live["tail"].upper(), "kind": "chain", "at": now,
                          "root": (L.get("flight") or {}).get("inbound_fa_id"),
-                         "source": f"{'inbound ' if hop == 0 else ''}{name} {route} in flight"}
-            break
-        if ph != "scheduled" or not cur.get("inbound_fa_id") or hop == CHAIN_HOPS:
-            break  # on the ground (no signal to read), or the chain isn't linked further back
-        try:
-            boot, _ = load(browser, fa.id_url(cur["inbound_fa_id"]), f"{L['id']}-chain{hop + 1}", L,
-                           f"aircraft's earlier leg #{hop + 1}")
-            cur, _ = fa.flights_from_bootstrap(boot)
-        except Exception as e:
-            log.info("%s chain hop %d: %s", L.get("display"), hop + 1, e)
-            break
+                         "source": f"{'inbound ' if i == 0 else ''}{name} {route} in flight"}
     L["chain"] = hops
     return found
 
@@ -1022,9 +1063,12 @@ def update_leg(browser, lid):
                 k: {"scheduled": None, "estimated": None, "actual": None} for k in fa.TIME_KEYS},
                 "origin": {}, "destination": {}}
 
-        # Which airplane
+        # Which airplane, and the airplane's day before this flight
         if f and L.get("flight") and ph in ("scheduled", "taxi_out"):
             resolve_tail(browser, L, f, now)
+        if ph == "scheduled" and L.get("inbound") and not L.get("_rot_done"):
+            update_rotation(browser, L, now)
+        L.pop("_rot_done", None)
 
         # Live positions
         if CFG.get("live_positions", True):
@@ -1171,6 +1215,17 @@ def leg_summary(L, now, nas, full=False):
                                   "next_check", "shot", "fa_id", "date", "manual", "tail_info", "chain")}
     if full:
         out["history"] = list(reversed(L.get("history") or []))
+        out["rotation"] = []
+        for i, h in enumerate(L.get("rotation") or []):
+            if not h:
+                continue
+            r = {k: v for k, v in h.items() if k != "track"}
+            r["track"] = h.get("track") or []
+            r["phase"] = fa.phase(h, now)
+            r["status"] = alerting.PHASE_LABEL[r["phase"]]
+            r["dep_delay"] = fa.delay_minutes(h)
+            r["arr_delay"] = fa.arrival_delay_minutes(h)
+            out["rotation"].append(r)
     out["status"] = alerting.status_label(L, CFG)
     out["phase"] = fa.phase(f, now)
     out["watching"] = watched(L, now)

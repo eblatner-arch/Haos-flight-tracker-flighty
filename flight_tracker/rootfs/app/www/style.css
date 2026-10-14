@@ -328,3 +328,19 @@ h3 { font-size: 18px; letter-spacing: -0.01em; }
 .switch span::after { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: transform .15s; }
 .switch input:checked + span { background: var(--accent); }
 .switch input:checked + span::after { transform: translateX(16px); }
+
+/* the airplane's day */
+a.card.inbound { display: block; }
+.rot-strip { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 2px 0 12px; scrollbar-width: none; }
+.rot-strip::-webkit-scrollbar { display: none; }
+.rot-step { flex: none; display: grid; gap: 1px; padding: 7px 10px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-size: 12px; }
+.rot-step b { font-size: 13px; }
+.rot-step span { color: var(--muted); }
+.rot-step i { font-style: normal; font-size: 11px; color: var(--faint); }
+.rot-step.on { border-color: var(--violet); box-shadow: inset 0 0 0 1px var(--violet); }
+.rot-step.mine { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.rot-step.ph-arrived i { color: var(--green); }
+.rot-step.ph-cancelled i, .rot-step.ph-diverted i { color: var(--red); }
+.rot-arrow { color: var(--faint); flex: none; }
+.rot-next { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rot-next b { font-size: 16px; margin-right: auto; }

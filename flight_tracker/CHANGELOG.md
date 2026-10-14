@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.8.0
+- Tap the inbound card to follow the airplane's day backwards: your inbound, its inbound, and so on, each with times,
+  gates, delay and a map, plus a strip of the whole chain to jump between legs
+- The chain stops at the first leg that has arrived (or that the airplane is flying right now); finished legs are never
+  reloaded, open ones refresh every 10 minutes
+
 ## 2.7.2
 - The viewer port (6080) opens the browser viewer directly instead of a file listing
 - Optional direct port for the app (8099, off by default) for use outside the Home Assistant app

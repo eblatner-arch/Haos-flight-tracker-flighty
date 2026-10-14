@@ -684,3 +684,56 @@ class ScheduleChange(unittest.TestCase):
         server.reload_schedule(force=True)
         self.assertEqual(sorted(pushed), ["Schedule: flight added", "Schedule: flight removed",
                                           "Schedule: flight retimed"])
+
+
+class Rotation(unittest.TestCase):
+    def setUp(self):
+        import server
+        self.server = server
+        self.loads = []
+        test = self
+        # A ← B ← C(airborne) ← D(arrived)
+        self.chain = {
+            "B": dict(out_s=T0 + 1 * H, inbound_id="C"),
+            "C": dict(out_s=T0 - 1 * H, inbound_id="D", off_a=T0 - 0.8 * H),
+            "D": dict(out_s=T0 - 5 * H, inbound_id="E"),
+        }
+
+        class FB:
+            client = None
+
+            def load(self, url, name):
+                fid = url.rsplit("/", 1)[-1]
+                test.loads.append(fid)
+                kw = test.chain.get(fid)
+                if not kw:
+                    return {"flights": {}}, None
+                return boot(fa_id=fid, **kw), None
+        self.browser = FB()
+
+    def leg(self, inbound_kw):
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="A", **inbound_kw))
+        return {"id": "r", "display": "UA 1", "inbound": inb}
+
+    def test_walks_back_to_the_leg_in_flight_and_stops(self):
+        L = self.leg(dict(out_s=T0 + 3 * H, inbound_id="B"))
+        self.server.update_rotation(self.browser, L, T0)
+        self.assertEqual([h["fa_id"] for h in L["rotation"]], ["A", "B", "C"])   # C airborne: stop
+        self.assertEqual(self.loads, ["B", "C"])
+
+    def test_stops_at_arrived_inbound(self):
+        L = self.leg(dict(out_s=T0 - 3 * H, inbound_id="B"))
+        L["inbound"]["times"]["in"]["actual"] = T0 - H
+        self.server.update_rotation(self.browser, L, T0)
+        self.assertEqual([h["fa_id"] for h in L["rotation"]], ["A"])
+        self.assertEqual(self.loads, [])
+
+    def test_finished_legs_are_not_reloaded(self):
+        self.chain["C"] = dict(out_s=T0 - 3 * H, inbound_id="D")
+        L = self.leg(dict(out_s=T0 + 3 * H, inbound_id="B"))
+        self.server.update_rotation(self.browser, L, T0)
+        L["rotation"][2]["times"]["in"]["actual"] = T0 - H                    # C has arrived
+        self.loads.clear()
+        self.server.update_rotation(self.browser, L, T0 + 20 * 60)
+        self.assertEqual(self.loads, ["B"])                                   # only the open leg refreshes
+        self.assertEqual(len(L["rotation"]), 3)
