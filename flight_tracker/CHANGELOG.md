@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.9.7
+- Fix: light lines across the map. Tiles no longer use Leaflet's plus-lighter blending (which brightened tile overlaps), the earlier overlap tweak is removed, and the map background matches the tiles
+
 ## 2.9.6
 - Flight card says Departed once the airplane pushes back, and Landed / Arrived on the arrival side
 

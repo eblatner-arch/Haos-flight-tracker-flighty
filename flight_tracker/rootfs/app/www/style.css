@@ -348,8 +348,12 @@ a.card.inbound { display: block; }
 /* keep map layers (zoom buttons, markers) under the sticky header */
 .top { z-index: 5000; }
 .leaflet-container { isolation: isolate; z-index: 0; }
-/* close hairline seams between map tiles on high-density screens */
-.leaflet-tile-container img.leaflet-tile { width: 256.6px !important; height: 256.6px !important; }
+/* Tile seams: Leaflet draws tiles with mix-blend-mode: plus-lighter, which turns any sub-pixel
+   overlap into a bright line on dark maps. Draw them normally, and paint the map background in
+   the tiles' own grey so a sub-pixel gap can't show either. */
+.leaflet-container img.leaflet-tile { mix-blend-mode: normal !important; }
+.leaflet-container { background: #e4e4e4 !important; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-container { background: #262626 !important; } }
 
 /* live-update indicator */
 .live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
