@@ -514,6 +514,9 @@
         <div class="k">Read</div><div>${sch.checked ? ago(sch.checked) : "not yet"}${sch.events != null ? ` · ${sch.events} events, ${sch.count} flights` : ""}</div>
         ${sch.error ? `<div class="k">Error</div><div class="err">${esc(sch.error)}</div>` : ""}
         <div class="k">Airline</div><div>${esc(c.airline_icao)}</div>
+        <div class="k">AeroAPI</div><div>${d.aeroapi.enabled
+          ? `<b>$${d.aeroapi.spent.toFixed(3)}</b> of $${d.aeroapi.budget.toFixed(2)} this month · ${d.aeroapi.queries} quer${d.aeroapi.queries === 1 ? "y" : "ies"}`
+          : "off (no key)"}</div>
         <div class="k">Gemini</div><div>${d.gemini.enabled
           ? `${esc(d.gemini.model)}, only when page data can't be read · <b>${d.gemini.today}</b> today, <b>${d.gemini.month}</b> this month${d.gemini.last ? ` · last ${ago(d.gemini.last)}` : " · never used yet"}`
           : "off (no API key), never used"}</div>
@@ -529,6 +532,10 @@
         : '<div class="small muted">None in the next three weeks.</div>'}
         ${(sch.unmatched || []).length ? `<div class="small muted" style="margin-top:12px">Events not recognised as flights (fine if they're hotels, reserve, etc.):</div><div class="small faint mono">${sch.unmatched.map(esc).join("<br>")}</div>` : ""}
       </div>
+      ${d.aeroapi.enabled ? `<h2 class="section">AeroAPI calls</h2><div class="card">${d.aeroapi.calls.length ? d.aeroapi.calls.map((x) => `<div class="fetch ${x.ok === false ? "bad" : ""}"><div class="fx">
+          <div><b>${esc(x.leg || "")}</b> · ${esc(x.reason)} <span class="faint">${fmt(x.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</span></div>
+          <div class="small">${x.ok === false ? `<span class="err">${esc(x.error)}</span>` : x.found ? `tail ${esc(x.tail || "not assigned yet")}${x.inbound ? " · inbound linked" : ""}` : "flight not found in AeroAPI"}${x.billed ? "" : ' <span class="faint">(not billed)</span>'}</div>
+        </div></div>`).join("") : '<div class="small muted">No calls yet. The first one happens when a flight enters the watch window.</div>'}</div>` : ""}
       <h2 class="section"><span>Page loads &amp; screenshots</span><button class="btn small" id="t-reload">Reload</button></h2>
       <div class="card">${d.fetches.length ? d.fetches.map(fetchRow).join("") : '<div class="small muted">No pages loaded yet. Flights are checked from ' + STATE.settings.watch_hours + ' h before departure; add a flight to test now.</div>'}</div>`;
     document.getElementById("t-notify").onclick = async (e) => {

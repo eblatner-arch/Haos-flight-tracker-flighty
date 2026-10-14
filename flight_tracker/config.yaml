@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "2.3.1"
+version: "2.4.0"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -42,6 +42,8 @@ options:
   poll_fast_minutes: 3
   nas_minutes: 5
   live_positions: true
+  aeroapi_key: ""
+  aeroapi_monthly_budget: 5
   gemini_api_key: ""
   gemini_model: gemini-flash-lite-latest
   enable_viewer: true
@@ -70,6 +72,10 @@ schema:
   poll_fast_minutes: int(1,30)
   nas_minutes: int(2,60)
   live_positions: bool
+  aeroapi_key: password?
+  aeroapi_monthly_budget: float(0,1000)
+  aeroapi_cost_per_query: float(0,1)?
+  aeroapi_max_per_leg: int(1,50)?
   gemini_api_key: password?
   gemini_model: str
   enable_viewer: bool

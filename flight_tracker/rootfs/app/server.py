@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
+import aeroapi
 import airports
 import alerts as alerting
 import flightaware as fa
@@ -53,6 +54,10 @@ DEFAULTS = {
     "nas_minutes": 5,
     "live_positions": True,
     "gemini_api_key": "",
+    "aeroapi_key": "",
+    "aeroapi_monthly_budget": 5.0,
+    "aeroapi_cost_per_query": 0.005,
+    "aeroapi_max_per_leg": 6,
     "gemini_model": "gemini-flash-lite-latest",
     "home_timezone": "",
     "publish_sensors": True,
@@ -84,8 +89,8 @@ STATE_PATH = os.path.join(DATA_DIR, "state.json")
 STATE = {"legs": {}, "nas": [], "nas_at": None, "nas_error": None, "wx": {}, "wx_at": 0,
          "alerts": [], "schedule": {"mtime": None, "error": None, "count": 0, "checked": None},
          "worker": {"busy": None, "last_cycle": None, "error": None},
-         "manual": [], "debug": [], "gemini_calls": []}
-PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls")
+         "manual": [], "debug": [], "gemini_calls": [], "aero_calls": []}
+PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls", "aero_calls")
 INGRESS = {"path": None}
 
 ICAO_TO_IATA = {v: k for k, v in schedule.IATA_TO_ICAO.items()}
@@ -268,7 +273,8 @@ def reload_schedule(force=False):
             old = cur.get(L["id"])
             if old:
                 if old.get("ident") != L["ident"] or old.get("dep") != L["dep"]:
-                    old.pop("fa_id", None)
+                    for k in ("fa_id", "aero", "tail_info", "inbound", "chain"):
+                        old.pop(k, None)
                 old.update(L)
             else:
                 L.update(notified={}, alerts=[], next_check=0)
@@ -560,6 +566,78 @@ def inbound_needs_check(L, f):
 
 
 CHAIN_HOPS = 3
+AERO_RETRY_HOURS = (6, 3, 1.5)
+
+
+def _month(ts):
+    return datetime.fromtimestamp(ts, HOME_TZ).strftime("%Y-%m")
+
+
+def aero_month(now):
+    """(queries billed this month, dollars)."""
+    with LOCK:
+        pages = sum(c.get("pages", 1) for c in STATE["aero_calls"] if c.get("billed") and _month(c["at"]) == _month(now))
+    return pages, pages * float(CFG.get("aeroapi_cost_per_query") or 0.005)
+
+
+def aero_reason(L, f, now):
+    """Why this leg needs an AeroAPI call right now, or (None, None)."""
+    a = L.get("aero") or {}
+    if not a.get("at"):
+        return "tracking started", None
+    if a.get("calls", 0) >= int(CFG.get("aeroapi_max_per_leg") or 6):
+        return None, None
+    scraped = f.get("inbound_fa_id")
+    if scraped and a.get("inbound_id") and scraped != a["inbound_id"] and scraped != a.get("rechecked_for"):
+        return "FlightAware page shows a different inbound", None
+    if not a.get("tail"):
+        out_t = fa.best_time(f["times"], "out") or L["sched_out"]
+        for h in AERO_RETRY_HOURS:
+            if out_t - now <= h * HOUR and h not in (a.get("retries") or []):
+                return f"no tail assigned yet ({h:g} h before departure)", h
+    return None, None
+
+
+def aero_check(L, f, now):
+    """Ask AeroAPI for the airline's tail and inbound when there's a reason to, within budget."""
+    key = (CFG.get("aeroapi_key") or "").strip()
+    if not key or L.get("extra") or not L.get("ident") or fa.phase(f, now) != "scheduled":
+        return
+    reason, retry_h = aero_reason(L, f, now)
+    if not reason:
+        return
+    a = L.setdefault("aero", {})
+    cost = float(CFG.get("aeroapi_cost_per_query") or 0.005)
+    _, spent = aero_month(now)
+    if spent + cost > float(CFG.get("aeroapi_monthly_budget") or 0) + 1e-9:
+        if a.get("blocked") != _month(now):
+            a["blocked"] = _month(now)
+            log.warning("AeroAPI monthly budget reached ($%.2f); skipping (%s)", spent, reason)
+        return
+    rec = {"at": now, "leg": L.get("display"), "leg_id": L["id"], "reason": reason, "billed": True, "pages": 1}
+    try:
+        flight, pages = aeroapi.lookup(key, L["ident"], L.get("dep"), L["sched_out"])
+        rec.update(pages=pages, ok=True, tail=(flight or {}).get("tail"),
+                   found=bool(flight), inbound=(flight or {}).get("inbound_fa_id"))
+        a.update(at=now, calls=a.get("calls", 0) + 1, reason=reason, found=bool(flight))
+        if flight:
+            a.update(tail=flight.get("tail") or a.get("tail"), inbound_id=flight.get("inbound_fa_id"),
+                     fa_id=flight.get("fa_id"), aircraft_type=flight.get("aircraft_type"))
+        if retry_h:
+            a["retries"] = (a.get("retries") or []) + [retry_h]
+        if reason.startswith("FlightAware page shows"):
+            a["rechecked_for"] = f.get("inbound_fa_id")
+        log.info("AeroAPI %s (%s): tail %s, inbound %s", L.get("display"), reason,
+                 (flight or {}).get("tail") or "not assigned", (flight or {}).get("inbound_fa_id") or "none")
+    except Exception as e:
+        msg = str(e).splitlines()[0][:200]
+        rec.update(ok=False, error=msg, billed="rejected" not in msg and "rate limit" not in msg)
+        a.update(at=a.get("at") or now, error=msg)
+        if retry_h:
+            a["retries"] = (a.get("retries") or []) + [retry_h]
+        log.warning("AeroAPI %s: %s", L.get("display"), msg)
+    with LOCK:
+        STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
 
 
 def walk_chain(browser, L, now):
@@ -606,8 +684,8 @@ def resolve_tail(browser, L, f, now):
     info = dict(L.get("tail_info") or {})
     if info.get("kind") == "chain" and info.get("root") != f.get("inbound_fa_id"):
         info = {}  # a different inbound is a different airplane
-    if info.get("kind") == "page":
-        info = {}  # re-read every time
+    if info.get("kind") in ("page", "aeroapi"):
+        info = {}  # re-derived every time
     ph = fa.phase(f, now)
     out_t = fa.best_time(f["times"], "out") or L["sched_out"]
     if L.get("ident") and (ph == "taxi_out" or (ph == "scheduled" and out_t - now < 90 * 60)):
@@ -618,7 +696,11 @@ def resolve_tail(browser, L, f, now):
                         "source": "your flight's transponder"}
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
-    if info.get("kind") not in ("own", "chain") and ph == "scheduled":
+    aero_tail = (L.get("aero") or {}).get("tail")
+    if info.get("kind") != "own" and aero_tail:
+        info = {"tail": aero_tail.upper(), "kind": "aeroapi", "at": (L.get("aero") or {}).get("at") or now,
+                "source": "AeroAPI (airline assignment)"}
+    elif info.get("kind") not in ("own", "chain") and ph == "scheduled":
         found = walk_chain(browser, L, now)
         if found:
             info = found
@@ -666,6 +748,11 @@ def update_leg(browser, lid):
 
         # Inbound aircraft
         f = L.get("flight") or {}
+        if f:
+            aero_check(L, f, now)
+            ai = (L.get("aero") or {}).get("inbound_id")
+            if ai and not f.get("inbound_fa_id"):
+                f["inbound_fa_id"] = ai  # the page didn't link one; AeroAPI did
         ti = L.get("tail_info") or {}
         if f and not f.get("tail") and ti.get("tail") and ti.get("kind") in ("own", "chain") \
                 and (ti.get("kind") == "own" or ti.get("root") == f.get("inbound_fa_id")):
@@ -916,6 +1003,10 @@ def api_debug():
                        "home_tz": TZNAME, "viewer_port": 6080},
             "manual": STATE["manual"],
             "screenshots": dict(zip(("count", "bytes"), shot_usage()), keep_hours=SHOT_KEEP_HOURS),
+            "aeroapi": {"enabled": bool(CFG.get("aeroapi_key")),
+                        "budget": float(CFG.get("aeroapi_monthly_budget") or 0),
+                        "queries": aero_month(now)[0], "spent": round(aero_month(now)[1], 3),
+                        "calls": list(reversed(STATE["aero_calls"][-30:]))},
             "gemini": {"enabled": bool(CFG.get("gemini_api_key")), "model": CFG.get("gemini_model"),
                        "last": STATE["gemini_calls"][-1] if STATE["gemini_calls"] else None,
                        "today": sum(1 for t in STATE["gemini_calls"]

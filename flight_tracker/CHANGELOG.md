@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.0
+- Optional AeroAPI: one query when a flight enters the watch window for the airline's tail and inbound flight;
+  retries at 6 h, 3 h and 90 min only while no tail is assigned; one more whenever the free page check links a different inbound
+- Monthly budget cap (default $5) with spend and every query shown on the Tools page; stops calling instead of billing past the cap
+- Tail priority: your own transponder, then AeroAPI, then the airplane's earlier legs on ADS-B, then FlightAware's page
+
 ## 2.3.1
 - Screenshots are deleted 48 hours after a flight is done (or when it leaves the list)
 - Tools shows Gemini use (today, this month, last call) and screenshot storage; flights read by Gemini carry a GEMINI tag

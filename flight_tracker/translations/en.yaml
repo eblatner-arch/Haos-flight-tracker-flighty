@@ -52,6 +52,18 @@ configuration:
   live_positions:
     name: Live ADS-B positions
     description: Use adsb.lol for up-to-the-minute aircraft positions on the map while taxiing or airborne.
+  aeroapi_key:
+    name: AeroAPI key (optional)
+    description: FlightAware AeroAPI Personal key. Used a few times per leg for the airline's tail assignment and inbound flight. Blank turns it off.
+  aeroapi_monthly_budget:
+    name: AeroAPI monthly budget ($)
+    description: Stops calling AeroAPI once this month's queries would cost more than this. The Personal tier includes $5 free a month.
+  aeroapi_cost_per_query:
+    name: AeroAPI cost per query ($)
+    description: Advanced. Used to count spend against the budget. Default 0.005.
+  aeroapi_max_per_leg:
+    name: AeroAPI max queries per flight
+    description: Advanced. Default 6.
   gemini_api_key:
     name: Gemini API key (optional)
     description: Only for the screenshot fallback when FlightAware's page data can't be read. Free key at aistudio.google.com/apikey.

@@ -318,3 +318,78 @@ class Cleanup(unittest.TestCase):
             os.utime(p, (now - 72 * H, now - 72 * H))
         server.clean_screenshots(now)
         self.assertEqual(sorted(os.listdir(d)), ["live-inbound.png", "live.png"])
+
+
+class AeroAPI(unittest.TestCase):
+    def setUp(self):
+        import server
+        import aeroapi
+        self.server, self.aeroapi = server, aeroapi
+        server.CFG.update(aeroapi_key="k", aeroapi_monthly_budget=5.0, aeroapi_cost_per_query=0.005,
+                          aeroapi_max_per_leg=6)
+        server.STATE["aero_calls"] = []
+        self.calls = []
+        self.answer = {"tail": None, "inbound_fa_id": "IN-1", "fa_id": "F-1", "aircraft_type": "B39M"}
+
+        def lookup(key, ident, dep, sched_out):
+            self.calls.append(ident)
+            return dict(self.answer), 1
+        aeroapi.lookup = lookup
+        sources.fetch_live = lambda cs: None
+
+    def leg(self, out):
+        f, _ = fa.flights_from_bootstrap(boot(out_s=out, tail=None, inbound_id="IN-1"))
+        return {"id": "a1", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO",
+                "sched_out": out, "sched_in": out + 6 * H}, f
+
+    def test_retries_then_stops(self):
+        out = T0 + 12 * H
+        L, f = self.leg(out)
+        s = self.server
+        s.aero_check(L, f, T0)                       # 12 h: first look
+        s.aero_check(L, f, T0 + H)                   # nothing new
+        s.aero_check(L, f, out - 5.9 * H)            # 6 h retry
+        s.aero_check(L, f, out - 5.5 * H)            # already retried at 6 h
+        self.answer["tail"] = "N12345"
+        s.aero_check(L, f, out - 2.9 * H)            # 3 h retry finds it
+        s.aero_check(L, f, out - 1.4 * H)            # tail known: no 90-min retry
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(L["aero"]["tail"], "N12345")
+        s.resolve_tail(None, L, f, out - 1.4 * H + 60)
+        self.assertEqual(f["tail"], "N12345")
+        self.assertEqual(f["tail_source"], "AeroAPI (airline assignment)")
+
+    def test_inbound_change_triggers_one_call(self):
+        out = T0 + 12 * H
+        L, f = self.leg(out)
+        self.answer["tail"] = "N1"
+        self.server.aero_check(L, f, T0)
+        f["inbound_fa_id"] = "IN-2"                  # the free page check now links another airplane
+        self.answer.update(tail="N2", inbound_fa_id="IN-2")
+        self.server.aero_check(L, f, T0 + H)
+        self.server.aero_check(L, f, T0 + 2 * H)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(L["aero"]["tail"], "N2")
+
+    def test_budget_cap(self):
+        self.server.CFG["aeroapi_monthly_budget"] = 0.01
+        for i in range(4):
+            L, f = self.leg(T0 + 12 * H)
+            L["id"] = f"b{i}"
+            self.server.aero_check(L, f, T0)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_no_key_no_calls(self):
+        self.server.CFG["aeroapi_key"] = ""
+        L, f = self.leg(T0 + 12 * H)
+        self.server.aero_check(L, f, T0)
+        self.assertEqual(self.calls, [])
+
+    def test_normalize(self):
+        raw = {"fa_flight_id": "UAL1-x", "ident_icao": "UAL1", "ident_iata": "UA1", "registration": "N37502",
+               "inbound_fa_flight_id": "UAL9-x", "origin": {"code_iata": "EWR", "code_icao": "KEWR",
+               "timezone": "America/New_York"}, "destination": {"code_iata": "SFO"}, "gate_origin": "C71",
+               "scheduled_out": "2026-10-14T18:05:00Z", "estimated_out": None, "actual_out": None}
+        n = self.aeroapi.normalize(raw)
+        self.assertEqual((n["tail"], n["inbound_fa_id"], n["origin"]["gate"]), ("N37502", "UAL9-x", "C71"))
+        self.assertEqual(n["times"]["out"]["scheduled"], 1792001100.0)

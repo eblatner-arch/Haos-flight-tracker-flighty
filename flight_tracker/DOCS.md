@@ -70,6 +70,23 @@ shows where the tail came from.
 A parked airplane doesn't transmit, so for an early first leg the tail may only
 appear once the airplane's previous flight is in the air.
 
+## AeroAPI (optional)
+
+With a FlightAware AeroAPI **Personal** key in `aeroapi_key`, the add-on asks
+AeroAPI for the airline's tail assignment and inbound flight:
+
+- once when a flight enters the watch window (12 hours out),
+- again at 6 hours, 3 hours and 90 minutes only if no tail was assigned yet,
+- and once more whenever the free FlightAware page check links a different
+  inbound flight (an aircraft swap).
+
+That's typically 1–4 queries per leg. Spend is counted against
+`aeroapi_monthly_budget` (default $5, which the Personal tier includes free); once
+a query would go over, it stops until next month. The Tools page shows the month's
+spend and every query with its reason and result. Everything else stays on the free
+sources. Tail priority: your own transponder, then AeroAPI, then ADS-B from the
+airplane's earlier legs, then FlightAware's page.
+
 ## Following other flights
 
 Tap **+** to follow any flight: flight number (UA1234 or UAL1234), From and To
