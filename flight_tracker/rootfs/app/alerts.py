@@ -100,6 +100,8 @@ def problems(leg, cfg, nas_items, rules=None):
                             "text": f"Short turn: {mins(t)}"})
     if ph not in ("arrived", "cancelled"):
         for n in nas_for(leg, nas_items):
+            if n["kind"] == "delay":
+                continue  # FAA delay trends are information, not a problem with the flight
             hit = any(i["hit"] for i in n.get("impact") or [])
             out.append({"level": "critical" if n["kind"] in ("gs", "closure") and hit is not False else "warn",
                         "text": f"{n['airport']}: {n['label']}", "nas": True})
@@ -125,6 +127,7 @@ def nas_for(leg, nas_items):
         if n["airport"] not in codes:
             continue
         m = dict(n)
+        m["here"] = "dep" if n["airport"] == dep else "arr"
         impact = []
         if n["kind"] in ("gs", "gdp") and (n.get("scope") or n.get("flights")):
             if n["airport"] == arr and dep:
@@ -153,6 +156,8 @@ def nas_text(n, tz):
         bits.append(f"extension probability {n['prob'].lower()}")
     if n.get("scope"):
         bits.append("departures from " + " ".join(n["scope"]))
+    if n.get("here") == "dep" and n["kind"] in ("gs", "gdp"):
+        bits.append(f"doesn't hold departures from {n['airport']}")
     for i in n.get("impact") or []:
         where = f"{i['from']}" + (f" ({i['center']})" if i.get("center") else "")
         whose = "your departure" if i["who"] == "you" else "your inbound"

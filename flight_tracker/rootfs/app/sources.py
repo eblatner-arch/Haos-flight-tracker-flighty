@@ -123,11 +123,13 @@ def parse_events(data):
                 continue
             ad = d.get("arrivalDeparture") or {}
             typ = ad.get("type") or ("Arrival" if fld == "arrivalDelay" else "Departure")
-            det = f"{ad.get('min') or '?'}–{ad.get('max') or '?'}".replace(" minutes", "") + " min"
+            avg = d.get("averageDelay")
+            det = f"avg {avg} min" if avg not in (None, "") else \
+                f"{ad.get('min') or '?'}–{ad.get('max') or '?'}".replace(" minutes", "") + " min"
             if ad.get("trend") or d.get("trend"):
-                det += f", {(ad.get('trend') or d.get('trend')).lower()}"
+                det += f" and {(ad.get('trend') or d.get('trend')).lower()}"
             reason = d.get("reason") or ""
-            out.append({"airport": arpt, "kind": "delay", "label": f"{typ.title()} delays",
+            out.append({"airport": arpt, "kind": "delay", "label": f"{typ.title()} delay trend",
                         "reason": reason.split(":", 1)[-1] if ":" in reason else reason, "detail": det,
                         "key": f"{arpt}|delay|{typ}"})
         cl = a.get("airportClosure")

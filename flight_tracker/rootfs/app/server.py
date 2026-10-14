@@ -128,7 +128,12 @@ def load_state():
 
 
 def init_rules():
-    STATE["rules"] = rules_mod.merge(STATE.get("rules"), CFG)
+    saved = STATE.get("rules") or {}
+    flags = STATE.setdefault("flags", {})
+    if not flags.get("nas_delay_trend") and isinstance(saved.get("nas_delay"), dict):
+        saved["nas_delay"]["on"] = False  # FAA delay figures are trends, not programs: off unless turned back on
+    flags["nas_delay_trend"] = True
+    STATE["rules"] = rules_mod.merge(saved, CFG)
     sync_rule_cfg()
 
 

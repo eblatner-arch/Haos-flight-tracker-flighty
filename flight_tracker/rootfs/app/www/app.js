@@ -442,7 +442,7 @@
 
   function nasCard(items) {
     const sorted = [...items].sort((a, b) => a.airport.localeCompare(b.airport));
-    return `<div class="card">${sorted.map((n) => `<div class="nas-item mine">
+    return `<div class="card">${sorted.map((n) => `<div class="nas-item ${n.kind === "delay" ? "" : "mine"}">
       <div class="apt">${esc(n.airport)}</div>
       <div><div class="lbl">${esc(n.label)}</div><div class="det">${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</div></div></div>`).join("")}
       ${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
@@ -472,12 +472,16 @@
         : i.hit === false ? `<div class="na-hit no">Doesn't include ${who}${where} — yet</div>`
         : `<div class="na-hit">Can't tell if it includes ${who}</div>`);
     }
+    // A ground stop / delay program holds flights *to* the airport; leaving it isn't held.
+    for (const u of g.uses) if (["gs", "gdp"].includes(n.kind) && u.leg.dep === n.airport)
+      lines.push(`<div class="na-hit air">Doesn't hold ${esc(u.leg.display || u.leg.ident || "your flight")} leaving ${esc(n.airport)}${(u.impact || []).length ? "" : " — only flights headed here"}</div>`);
     if (!lines.length) lines.push(...g.uses.map((u) => `<div class="na-hit">${esc(u.leg.display || u.leg.ident || "")} ${esc(u.leg.dep)}→${esc(u.leg.arr)}</div>`));
     const when = n.end ? `${n.start && n.start > Date.now() / 1000 ? hm(n.start, tz) + "–" : "until "}${hm(n.end, tz)} ${tzAbbr(n.end, tz)}` : "";
     const sub = [n.reason && n.reason[0].toUpperCase() + n.reason.slice(1), n.detail, n.prob && `extension probability ${n.prob.toLowerCase()}`].filter(Boolean).join(" · ");
     const scope = (n.scope || []).length ? `<div class="na-scope"><span class="faint">Departures from</span> ${n.scope.map((c) => `<span class="cc ${hits.has(c) ? "on" : ""}">${esc(c)}</span>`).join("")}</div>`
       : n.flights ? `<div class="na-scope faint">${esc(n.flights)}</div>` : "";
-    return `<div class="nas-alert k-${esc(n.kind)}">
+    const holds = g.uses.some((u) => u.impact.some((i) => i.hit !== false));
+    return `<div class="nas-alert k-${esc(n.kind)} ${holds ? "" : "clear"}">
       <div class="na-top"><span class="na-apt">${esc(n.airport)}</span><span class="na-kind">${esc(n.label)}</span><span class="na-when">${esc(when)}</span></div>
       ${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}
       ${scope}${lines.join("")}
@@ -615,7 +619,7 @@
           ${leg.manual ? '<button class="btn" id="leg-remove">Stop following</button>' : ""}
           ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div></div>
-      ${nasMinor([leg]).length ? `<h2 class="section">Delays at these airports</h2>${nasCard(nasMinor([leg]))}` : ""}
+      ${nasMinor([leg]).length ? `<h2 class="section">FAA delay trends</h2>${nasCard(nasMinor([leg]))}` : ""}
       ${(leg.alerts || []).length ? `<h2 class="section">Alerts for this flight</h2>${alertsCard(leg.alerts)}` : ""}
       ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
           <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>

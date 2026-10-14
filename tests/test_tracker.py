@@ -315,7 +315,7 @@ class Followed(unittest.TestCase):
         gs = [i for i in items if i["kind"] == "gs"][0]
         self.assertEqual((gs["scope"], gs["prob"], gs["key"]), (["ZDC", "ZJX", "ZTL", "ZMA"], "Medium", "EWR|gs|gs1"))
         dl = [i for i in items if i["kind"] == "delay"][0]
-        self.assertEqual((dl["label"], dl["detail"], dl["reason"]), ("Departure delays", "16–30 min, increasing", "Volume"))
+        self.assertEqual((dl["label"], dl["detail"], dl["reason"]), ("Departure delay trend", "16–30 min and increasing", "Volume"))
         inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN", out_s=T0, origin="TPA", dest="EWR", inbound_id=None))
         # GS at my departure airport: holds my inbound from TPA (ZJX); MCO->EWR: includes my departure
         out = alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": inb}, items)
@@ -325,6 +325,10 @@ class Followed(unittest.TestCase):
                                                off_a=T0 + 600))
         imp = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["hit"], i["airborne"]) for i in imp], [(False, True)])   # already flying: not held
+        g = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO"}, items) if n["kind"] == "gs"][0]
+        self.assertIn("doesn't hold departures from EWR", alerts.nas_text(g, None))   # leaving a GS airport is fine
+        self.assertFalse(any(p.get("nas") and "delay" in p["text"].lower()
+                             for p in alerts.problems({"dep": "EWR", "arr": "MCO", "flight": None}, {}, items)))
         self.assertIn("already airborne", alerts.nas_text([n for n in alerts.nas_for(
             {"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0], None))
         imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
@@ -337,6 +341,7 @@ class Followed(unittest.TestCase):
         items = sources.parse_events(self.EVENTS)
         keys = [a["title"] for a in alerts.evaluate(L, CFG, T0, items)]
         self.assertIn("EWR: Ground stop", keys)                 # pushes though BOS (ZBW) isn't in scope
+        self.assertFalse(any("delay" in k.lower() for k in keys))  # FAA delay trends don't push by default
         msg = [a for a in alerts.evaluate(L, CFG, T0, []) + [] if a]  # nothing new
         self.assertEqual(msg, [])
         ev = json.loads(json.dumps(self.EVENTS))

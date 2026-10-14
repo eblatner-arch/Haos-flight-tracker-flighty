@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.2
+- Ground stops and delay programs hold flights headed to that airport, not ones leaving it. A program at your departure airport only matters for an inbound that hasn't taken off; the card and push say "doesn't hold departures from EWR"
+- A program that doesn't hold you or your inbound is still shown at the top, but toned down (gray card, amber label) instead of red
+- FAA departure/arrival delays are shown as "delay trend" (avg 15 min and increasing), aren't treated as a problem with your flight, and no longer push by default (switch them back on under Delay trends)
+
 ## 2.11.1
 - Ground stops: an inbound (or your own flight) that's already airborne isn't held, so the card says "already airborne — not held" in green instead of "includes", and its center isn't highlighted
 

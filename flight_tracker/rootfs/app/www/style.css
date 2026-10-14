@@ -386,3 +386,6 @@ a.card.inbound { display: block; }
 .na-hit.no::before { background: var(--amber); }
 .na-adv { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--accent); font-weight: 600; }
 .na-hit.air::before { background: var(--green); }
+/* program at your airport that doesn't hold you or your inbound: still shown, toned down */
+.nas-alert.clear { border-color: var(--line); background: var(--card); }
+.nas-alert.clear .na-kind { color: var(--amber); }
