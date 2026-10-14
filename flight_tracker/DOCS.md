@@ -52,7 +52,7 @@ are time-sensitive on iPhone (turn off with `time_sensitive`).
   turn time against `min_turn_minutes`. It's drawn on the map in purple.
 - **Upcoming** legs for the next three weeks, **Following** (extra flights from
   `track_flights`), **Recent**.
-- **National airspace**: every current NAS program, your airports first.
+- **NAS**: ground stops, delay programs and closures at the airports on your own flights in the next `watch_hours`.
 - Tap a flight for full times (gate out, takeoff, landing, gate in), METARs
   with flight category, filed route, altitude and speed, its alert history and
   the latest page screenshot.
