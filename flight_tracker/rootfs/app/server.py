@@ -142,7 +142,9 @@ def sync_rule_cfg():
     R = STATE["rules"]
     CFG["delay_threshold_minutes"] = R["delay"]["params"]["threshold"]
     CFG["min_turn_minutes"] = R["inbound_late"]["params"]["min_turn"]
-    CFG["inbound_alert_minutes"] = R["inbound_late"]["params"]["max_sched_turn"]
+    mx = R["inbound_delayed"]["params"].get("max_sched_turn")
+    if mx is not None:
+        CFG["inbound_alert_minutes"] = mx
 
 
 def push_event(event, title, message, level="info", leg=None, tag=None, out_time=None):

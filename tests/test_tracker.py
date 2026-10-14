@@ -177,6 +177,23 @@ class Nas(unittest.TestCase):
         self.assertEqual(len(items), 4)
 
 
+
+class Startup(unittest.TestCase):
+    def test_init_rules_with_old_saved_rules(self):
+        """Rules saved by older versions (with settings since removed) must still load."""
+        import server
+        old = server.rules_mod.seed_from_config(server.CFG)
+        old["inbound_late"]["params"]["max_sched_turn"] = 60   # 2.10.0 and earlier had this
+        old["nas_gs"]["followed"] = None                      # and NAS had no Followed switch
+        old["nas_delay"]["on"] = True
+        server.STATE["rules"], server.STATE["flags"] = old, {}
+        server.init_rules()
+        R = server.STATE["rules"]
+        self.assertNotIn("max_sched_turn", R["inbound_late"]["params"])
+        self.assertTrue(R["nas_gs"]["followed"])
+        self.assertFalse(R["nas_delay"]["on"])
+        server.init_rules()                                   # restarting again keeps working
+
 if __name__ == "__main__":
     unittest.main()
 

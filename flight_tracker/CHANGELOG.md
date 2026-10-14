@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.4
+- Fix: the add-on crashed on start after 2.10.1 (KeyError max_sched_turn) while reading the removed short-turn setting
+
 ## 2.11.3
 - FAA delay trends at your airports show at the top again, as a quiet gray card with an amber edge (below any ground stop or program), not as a red alert
 
