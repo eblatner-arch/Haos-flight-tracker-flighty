@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1
+- AeroAPI and tail-number lookup apply to followed flights too, with the same rules
+- The first AeroAPI query waits until a flight is within the watch window, even for flights added days ahead
+
 ## 2.4.0
 - Optional AeroAPI: one query when a flight enters the watch window for the airline's tail and inbound flight;
   retries at 6 h, 3 h and 90 min only while no tail is assigned; one more whenever the free page check links a different inbound

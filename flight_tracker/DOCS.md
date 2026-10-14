@@ -73,7 +73,8 @@ appear once the airplane's previous flight is in the air.
 ## AeroAPI (optional)
 
 With a FlightAware AeroAPI **Personal** key in `aeroapi_key`, the add-on asks
-AeroAPI for the airline's tail assignment and inbound flight:
+AeroAPI for the airline's tail assignment and inbound flight, for every flight
+(your legs and followed ones alike):
 
 - once when a flight enters the watch window (12 hours out),
 - again at 6 hours, 3 hours and 90 minutes only if no tail was assigned yet,

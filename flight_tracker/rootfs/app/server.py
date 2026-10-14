@@ -601,8 +601,11 @@ def aero_reason(L, f, now):
 def aero_check(L, f, now):
     """Ask AeroAPI for the airline's tail and inbound when there's a reason to, within budget."""
     key = (CFG.get("aeroapi_key") or "").strip()
-    if not key or L.get("extra") or not L.get("ident") or fa.phase(f, now) != "scheduled":
+    if not key or not L.get("ident") or fa.phase(f, now) != "scheduled":
         return
+    out_t = fa.best_time(f["times"], "out") or L["sched_out"]
+    if out_t - now > float(CFG["watch_hours"]) * HOUR:
+        return  # same 12-hour start for every flight, including ones added days ahead
     reason, retry_h = aero_reason(L, f, now)
     if not reason:
         return
@@ -780,7 +783,7 @@ def update_leg(browser, lid):
                 "origin": {}, "destination": {}}
 
         # Which airplane
-        if f and L.get("flight") and not L.get("extra") and ph in ("scheduled", "taxi_out"):
+        if f and L.get("flight") and ph in ("scheduled", "taxi_out"):
             resolve_tail(browser, L, f, now)
 
         # Live positions

@@ -54,7 +54,7 @@ configuration:
     description: Use adsb.lol for up-to-the-minute aircraft positions on the map while taxiing or airborne.
   aeroapi_key:
     name: AeroAPI key (optional)
-    description: FlightAware AeroAPI Personal key. Used a few times per leg for the airline's tail assignment and inbound flight. Blank turns it off.
+    description: FlightAware AeroAPI Personal key. Used a few times per flight (yours and followed) for the airline's tail assignment and inbound flight. Blank turns it off.
   aeroapi_monthly_budget:
     name: AeroAPI monthly budget ($)
     description: Stops calling AeroAPI once this month's queries would cost more than this. The Personal tier includes $5 free a month.

@@ -393,3 +393,14 @@ class AeroAPI(unittest.TestCase):
         n = self.aeroapi.normalize(raw)
         self.assertEqual((n["tail"], n["inbound_fa_id"], n["origin"]["gate"]), ("N37502", "UAL9-x", "C71"))
         self.assertEqual(n["times"]["out"]["scheduled"], 1792001100.0)
+
+
+class AeroAPIFollowed(AeroAPI):
+    def test_followed_flight_same_rules_and_waits_for_window(self):
+        self.server.CFG["watch_hours"] = 12
+        L, f = self.leg(T0 + 40 * H)
+        L["extra"] = True
+        self.server.aero_check(L, f, T0)               # 40 h out: too early
+        self.assertEqual(self.calls, [])
+        self.server.aero_check(L, f, T0 + 29 * H)      # 11 h out: first call
+        self.assertEqual(len(self.calls), 1)
