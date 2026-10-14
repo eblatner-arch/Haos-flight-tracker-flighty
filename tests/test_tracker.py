@@ -532,3 +532,18 @@ class LookupLog(unittest.TestCase):
         L["flight"]["origin"]["gate"] = "C80"
         server.log_lookup(L, same, T0 + 180, ["FlightAware page data"])
         self.assertEqual(L["history"][-1]["changes"], [{"field": "Gate", "from": "C71", "to": "C80"}])
+
+
+class FirstTailQuiet(unittest.TestCase):
+    def test_first_tail_silent_unless_tracking_push_on(self):
+        out = T0 + 10 * H
+        for watch_push, extra, expect in ((False, False, 0), (True, True, 0), (True, False, 1)):
+            L = {"id": "t", "ident": "UAL1", "display": "UA 1", "dep": "EWR", "arr": "SFO", "extra": extra,
+                 "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True}}
+            L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, tail="N1"))
+            L["flight"]["tail_source"] = "AeroAPI (airline assignment)"
+            cfg = dict(CFG, notify_watch_start=watch_push)
+            n = len([a for a in alerts.evaluate(L, cfg, T0, []) if a["key"] == "tail"])
+            self.assertEqual(n, expect, (watch_push, extra))
+            L["flight"]["tail"] = "N2"                                    # a swap always pushes
+            self.assertEqual(len([a for a in alerts.evaluate(L, cfg, T0 + 60, []) if a["key"] == "tail"]), 1)

@@ -210,7 +210,8 @@ def evaluate(leg, cfg, now, nas_items):
         add("tail", f"{ident} aircraft swap",
             f"{nt['tail']} → {tail} {f.get('aircraft_type') or ''}".strip() + src, "warn")
     elif tail and not nt.get("tail") and ph == "scheduled" and nt.get("watch_sent_tail") != tail \
-            and f.get("tail_source") and f["tail_source"] != "FlightAware":
+            and f.get("tail_source") and f["tail_source"] != "FlightAware" \
+            and cfg.get("notify_watch_start", True) and not leg.get("extra"):
         add("tail", f"{ident} aircraft {tail}", f"{f.get('aircraft_type') or 'Aircraft'} {tail}{src}")
     if tail:
         nt["tail"] = tail

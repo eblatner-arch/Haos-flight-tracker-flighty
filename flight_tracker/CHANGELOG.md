@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.2
+- The "aircraft identified" push only goes out when "Alert when tracking starts" is on, and never for flights you follow; aircraft swaps still always push
+
 ## 2.6.1
 - Fix: flights removed (or added) right before an update or restart came back (or went missing); changes now save immediately and on shutdown
 
