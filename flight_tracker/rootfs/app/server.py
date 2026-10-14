@@ -97,6 +97,15 @@ STATE = {"legs": {}, "nas": [], "nas_at": None, "nas_error": None, "wx": {}, "wx
          "blocked_streak": 0}
 PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls", "aero_calls", "rules", "flags")
 INGRESS = {"path": None}
+CHANGE = threading.Condition()
+CHANGE_V = [0]
+
+
+def bump():
+    """Tell open pages something changed."""
+    with CHANGE:
+        CHANGE_V[0] += 1
+        CHANGE.notify_all()
 
 STATE["rules"] = rules_mod.seed_from_config(CFG)  # replaced by the saved rules in init_rules()
 ICAO_TO_IATA = {v: k for k, v in schedule.IATA_TO_ICAO.items()}
@@ -344,6 +353,7 @@ def reload_schedule(force=False):
         matched = {L["id"] for L in legs}
         unmatched = sorted({e["summary"] for e in events if not e.get("allday") and e["oid"] not in matched
                             and e["start"] > now - 2 * HOUR})
+        bump()
         STATE["schedule"].update(mtime=mtime, error=None, count=len(legs), checked=now, path=path,
                                  events=len(events), unmatched=unmatched[:25])
         horizon = now + 72 * HOUR
@@ -1126,6 +1136,7 @@ def update_leg(browser, lid):
         for a in new_alerts:
             STATE["alerts"].append({**a, "leg": lid, "display": L.get("display"), "route": f"{L['dep']}→{L['arr']}"})
         STATE["alerts"] = STATE["alerts"][-200:]
+    bump()
     for a in new_alerts:
         notify(a)
     log.info("%s %s→%s: %s%s", L.get("display"), L.get("dep"), L.get("arr"),
@@ -1136,7 +1147,10 @@ def refresh_nas(now):
     try:
         items = sources.fetch_nas()
         with LOCK:
+            changed = [n["key"] for n in items] != [n["key"] for n in STATE["nas"]]
             STATE["nas"], STATE["nas_at"], STATE["nas_error"] = items, now, None
+        if changed:
+            bump()
     except Exception as e:
         with LOCK:
             STATE["nas_error"] = str(e)[:200]
@@ -1368,6 +1382,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/index.html"
         if path == "/api/state":
             return self._send(200, api_state())
+        if path == "/api/events":
+            return self._events()
         if path == "/api/debug":
             return self._send(200, api_debug())
         if path == "/api/rules":
@@ -1399,6 +1415,29 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _events(self):
+        """Server-sent events: one message per change, a comment every 20 s to keep it open."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        v = CHANGE_V[0]
+        try:
+            self.wfile.write(b"retry: 5000\n\n")
+            self.wfile.flush()
+            while True:
+                with CHANGE:
+                    CHANGE.wait_for(lambda: CHANGE_V[0] != v, timeout=20)
+                if CHANGE_V[0] != v:
+                    v = CHANGE_V[0]
+                    self.wfile.write(f"data: {v}\n\n".encode())
+                else:
+                    self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/flights":
@@ -1408,12 +1447,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
             save_state()
+            bump()
             REFRESH_Q.put(lid)
             WAKE.set()
             return self._send(200, {"ok": True, "id": lid})
         if path == "/api/flights/remove":
             remove_manual(self._json().get("id") or "")
             save_state()
+            bump()
             return self._send(200, {"ok": True})
         if path == "/api/rules":
             with LOCK:
@@ -1456,7 +1497,9 @@ def main():
     threading.Thread(target=worker, daemon=True, name="tracker").start()
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    srv.daemon_threads = True
+    srv.serve_forever()
 
 
 if __name__ == "__main__":

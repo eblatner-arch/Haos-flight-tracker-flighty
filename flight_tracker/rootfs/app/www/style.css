@@ -344,3 +344,7 @@ a.card.inbound { display: block; }
 .rot-arrow { color: var(--faint); flex: none; }
 .rot-next { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .rot-next b { font-size: 16px; margin-right: auto; }
+
+/* keep map layers (zoom buttons, markers) under the sticky header */
+.top { z-index: 5000; }
+.leaflet-container { isolation: isolate; z-index: 0; }

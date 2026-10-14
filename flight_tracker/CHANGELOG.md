@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.9.0
+- Live page: the add-on streams a signal whenever anything changes and the open page updates in place — no reloading
+  (falls back to checking every 30 s if the stream can't get through)
+- Maps keep your zoom and pan through updates; only the aircraft, tracks and routes are redrawn
+- Map zoom and center buttons no longer draw over the header
+
 ## 2.8.0
 - Tap the inbound card to follow the airplane's day backwards: your inbound, its inbound, and so on, each with times,
   gates, delay and a map, plus a strip of the whole chain to jump between legs

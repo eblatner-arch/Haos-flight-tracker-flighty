@@ -5,7 +5,9 @@
   const $updated = document.getElementById("updated");
   const $refresh = document.getElementById("refresh");
   let STATE = null;
-  let maps = [];
+  // Maps survive re-renders: keyed, moved back into the new page, layers repainted in place.
+  const MAPS = {};
+  let usedMaps = new Set();
   let lastRoute = null;
 
   const PLANE = '<svg viewBox="0 0 24 24"><path fill="currentColor" stroke="#000" stroke-opacity=".35" stroke-width=".6" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>';
@@ -49,7 +51,12 @@
   };
   const best = (t, k) => t && t[k] ? (t[k].actual || t[k].estimated || t[k].scheduled) : null;
   const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z]+/g, "-");
-  const destroyMaps = () => { maps.forEach((m) => m.remove()); maps = []; };
+  const destroyMaps = () => { usedMaps = new Set(); };
+  function sweepMaps() {
+    for (const k of Object.keys(MAPS)) {
+      if (!usedMaps.has(k)) { try { MAPS[k].map.remove(); } catch {} delete MAPS[k]; }
+    }
+  }
 
   async function api(path, opts) {
     const r = await fetch(path, { cache: "no-store", ...opts });
@@ -107,59 +114,26 @@
     });
   }
 
-  function drawMap(el, leg, { interactive = true } = {}) {
+  function drawMap(el, leg, { interactive = true, key = null } = {}) {
+    if (!el) return;
     if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
+    key = key || el.id;
+    const have = MAPS[key];
+    if (have) {
+      el.replaceWith(have.el);
+      usedMaps.add(key);
+      paintMap(have, leg, false);
+      setTimeout(() => have.map.invalidateSize(), 30);
+      return;
+    }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     const map = L.map(el, { zoomControl: interactive, attributionControl: true, dragging: interactive,
       scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
-    maps.push(map);
     addTiles(map, dark);
-    const route = css("--route"), violet = css("--violet"), muted = css("--faint");
-    const bounds = [];
-    const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
-    const f = leg.flight || {};
-    const wps = (f.waypoints || []).filter((p) => p[0] != null);
-    if (wps.length > 1) {
-      L.polyline(wps, { color: route, weight: 2, opacity: 0.55, dashArray: "6 6" }).addTo(map);
-      wps.forEach((p) => bounds.push(p));
-    } else if (A && B) {
-      const g = gcPoints(A, B);
-      L.polyline(g, { color: muted, weight: 2, opacity: 0.8, dashArray: "4 7" }).addTo(map);
-      g.forEach((p) => bounds.push(p));
-    }
-    const track = (f.track || []).filter((p) => p[0] != null);
-    if (track.length > 1) {
-      L.polyline(track.map((p) => [p[0], p[1]]), { color: route, weight: 3.5, opacity: 0.95 }).addTo(map);
-    }
-    // inbound aircraft
-    const inb = leg.inbound;
-    if (inb) {
-      const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
-      if (itr.length > 1) L.polyline(itr.map((p) => [p[0], p[1]]), { color: violet, weight: 2.5, opacity: 0.9 }).addTo(map);
-      const iw = (inb.waypoints || []).filter((p) => p[0] != null);
-      if (iw.length > 1) L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }).addTo(map);
-      else if (ia && A) L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }).addTo(map);
-      let ip = null, ih = 0;
-      if (leg.inbound_live) { ip = [leg.inbound_live.lat, leg.inbound_live.lon]; ih = leg.inbound_live.heading; }
-      else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = itr.length > 1 ? bearing(itr[itr.length - 2], ip) : 0; }
-      if (ip) { planeMarker([ip[0], ip[1]], ih, violet, "Inbound").addTo(map); bounds.push([ip[0], ip[1]]); }
-      if (ia && interactive) { bounds.push(ia); L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) }).addTo(map); }
-    }
-    for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
-      if (!pos) continue;
-      bounds.push(pos);
-      L.circleMarker(pos, { radius: 4, color: route, fillColor: route, fillOpacity: 1, weight: 0 }).addTo(map);
-      L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label">${esc(ap.iata || "")}</span>`, iconSize: null, iconAnchor: [-6, 8] }) }).addTo(map);
-    }
-    // our aircraft
-    let pos = null, hdg = 0;
-    if (leg.live) { pos = [leg.live.lat, leg.live.lon]; hdg = leg.live.heading; }
-    else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && track.length) {
-      pos = track[track.length - 1]; hdg = track.length > 1 ? bearing(track[track.length - 2], pos) : 0;
-    } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
-    if (pos) planeMarker([pos[0], pos[1]], hdg, route, leg.display).addTo(map);
-    const center = () => bounds.length ? map.fitBounds(bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
-    center();
+    const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive };
+    entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
+    MAPS[key] = entry;
+    usedMaps.add(key);
     if (interactive && L.Control) {
       const Btn = L.Control.extend({
         options: { position: "topright" },
@@ -168,14 +142,64 @@
           b.type = "button"; b.title = "Center on route"; b.setAttribute("aria-label", "Center on route");
           b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A8.99 8.99 0 0 0 13 3.06V1h-2v2.06A8.99 8.99 0 0 0 3.06 11H1v2h2.06A8.99 8.99 0 0 0 11 20.94V23h2v-2.06A8.99 8.99 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>';
           L.DomEvent.disableClickPropagation(b);
-          L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); center(); });
+          L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); entry.center(); });
           return b;
         },
       });
       map.addControl(new Btn());
     }
+    paintMap(entry, leg, true);
     setTimeout(() => map.invalidateSize(), 50);
   }
+
+  function paintMap(entry, leg, fit) {
+    const { layer, interactive } = entry;
+    layer.clearLayers();
+    const add = (x) => x.addTo(layer);
+    const route = css("--route"), violet = css("--violet"), muted = css("--faint");
+    const bounds = [];
+    const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
+    const f = leg.flight || {};
+    const wps = (f.waypoints || []).filter((p) => p[0] != null);
+    if (wps.length > 1) {
+      add(L.polyline(wps, { color: route, weight: 2, opacity: 0.55, dashArray: "6 6" }));
+      wps.forEach((p) => bounds.push(p));
+    } else if (A && B) {
+      const g = gcPoints(A, B);
+      add(L.polyline(g, { color: muted, weight: 2, opacity: 0.8, dashArray: "4 7" }));
+      g.forEach((p) => bounds.push(p));
+    }
+    const track = (f.track || []).filter((p) => p[0] != null);
+    if (track.length > 1) add(L.polyline(track.map((p) => [p[0], p[1]]), { color: route, weight: 3.5, opacity: 0.95 }));
+    const inb = leg.inbound;
+    if (inb) {
+      const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
+      if (itr.length > 1) add(L.polyline(itr.map((p) => [p[0], p[1]]), { color: violet, weight: 2.5, opacity: 0.9 }));
+      const iw = (inb.waypoints || []).filter((p) => p[0] != null);
+      if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
+      else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
+      let ip = null, ih = 0;
+      if (leg.inbound_live) { ip = [leg.inbound_live.lat, leg.inbound_live.lon]; ih = leg.inbound_live.heading; }
+      else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = itr.length > 1 ? bearing(itr[itr.length - 2], ip) : 0; }
+      if (ip) { add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); bounds.push([ip[0], ip[1]]); }
+      if (ia && interactive) { bounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
+    }
+    for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
+      if (!pos) continue;
+      bounds.push(pos);
+      add(L.circleMarker(pos, { radius: 4, color: route, fillColor: route, fillOpacity: 1, weight: 0 }));
+      add(L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label">${esc(ap.iata || "")}</span>`, iconSize: null, iconAnchor: [-6, 8] }) }));
+    }
+    let pos = null, hdg = 0;
+    if (leg.live) { pos = [leg.live.lat, leg.live.lon]; hdg = leg.live.heading; }
+    else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && track.length) {
+      pos = track[track.length - 1]; hdg = track.length > 1 ? bearing(track[track.length - 2], pos) : 0;
+    } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
+    if (pos) add(planeMarker([pos[0], pos[1]], hdg, route, leg.display));
+    entry.bounds = bounds;
+    if (fit || !interactive) entry.center();
+  }
+
 
   // ---------- pieces ----------
   function statusPill(leg) {
@@ -297,7 +321,7 @@
         : more ? `<a class="card rot-next" href="#/aircraft/${id}/${n + 1}"><span class="small muted">Before this, the airplane flies</span><b>${esc(rot[n + 1].display_ident || "")} ${esc((rot[n + 1].origin || {}).iata || "")}→${esc((rot[n + 1].destination || {}).iata || "")}</b><span class="pill ${slug(rot[n + 1].status)}">${esc(rot[n + 1].status)}</span></a>`
         : `<div class="card small muted">${h.inbound_fa_id ? "The earlier leg will appear on the next check." : "FlightAware hasn't linked the leg before this one yet."}</div>`}
       ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}`;
-    drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: null, live: null, display: h.display_ident });
+    drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: null, live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
   }
 
   function problemBanners(leg) {
@@ -425,7 +449,7 @@
     $app.innerHTML = h;
     const hm_ = document.getElementById("hero-map");
     if (hm_ && next) {
-      api(`api/leg/${next.id}`).then((full) => drawMap(hm_, full, { interactive: false })).catch(() => drawMap(hm_, next, { interactive: false }));
+      api(`api/leg/${next.id}`).then((full) => drawMap(hm_, full, { interactive: false, key: `hero-${next.id}` })).catch(() => drawMap(hm_, next, { interactive: false, key: `hero-${next.id}` }));
     }
   }
 
@@ -501,7 +525,7 @@
         </div>`).join("")}</div>` : ""}
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
-    drawMap(document.getElementById("detail-map"), leg);
+    drawMap(document.getElementById("detail-map"), leg, { key: `leg-${leg.id}` });
     const rb = document.getElementById("leg-refresh");
     if (rb) rb.onclick = async (e) => {
       e.target.textContent = "Refreshing…";
@@ -712,6 +736,8 @@
       else if (route.startsWith("#/tools")) await toolsView();
       else if (route.startsWith("#/notify")) await notifyView();
       else homeView();
+      // hero map is drawn after its own fetch; give it a moment before clearing unused maps
+      setTimeout(sweepMaps, 1500);
       if (route !== lastRoute) window.scrollTo(0, 0);
       lastRoute = route;
     } catch (e) {
@@ -725,9 +751,28 @@
     setTimeout(async () => { await render(true); $refresh.classList.remove("spin"); }, 20000);
   };
   window.addEventListener("hashchange", () => render(false));
-  // Re-render on a timer, but not while the user is panning a detail map.
-  setInterval(() => { if (!document.hidden && ["", "#/", "#"].includes(location.hash)) render(true); }, 30000);
-  setInterval(() => { if (!document.hidden && (location.hash || "").startsWith("#/leg/")) render(true); }, 120000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) render(true); });
+
+  // ---------- live updates ----------
+  // The add-on pushes an event whenever anything changes; the page re-renders in place
+  // (maps keep their zoom and pan). Views with forms aren't redrawn under your fingers.
+  const LIVE_VIEW = () => !/^#\/(add|notify|tools)/.test(location.hash || "#/");
+  let pending = null;
+  function liveRefresh() {
+    if (pending || document.hidden || !LIVE_VIEW()) return;
+    pending = setTimeout(async () => { pending = null; await render(true); }, 400);
+  }
+  let es = null;
+  function connect() {
+    if (es || !window.EventSource) return;
+    try {
+      es = new EventSource("api/events");
+      es.onmessage = liveRefresh;
+      es.onerror = () => { try { es.close(); } catch {} es = null; setTimeout(connect, 8000); };
+    } catch { es = null; }
+  }
+  connect();
+  // Countdowns tick, and a fallback in case the stream is blocked somewhere.
+  setInterval(liveRefresh, 30000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { connect(); liveRefresh(); } });
   render(true);
 })();
