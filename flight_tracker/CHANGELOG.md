@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.9.8
+- Fix: the screen blinked on every live update. Updates now patch only what changed in place, so the page, scroll position and maps stay still
+
 ## 2.9.7
 - Fix: light lines across the map. Tiles no longer use Leaflet's plus-lighter blending (which brightened tile overlaps), the earlier overlap tweak is removed, and the map background matches the tiles
 

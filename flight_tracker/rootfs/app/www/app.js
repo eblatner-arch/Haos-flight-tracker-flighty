@@ -1,7 +1,42 @@
 /* Flight Tracker web app. Served through Home Assistant ingress, so every URL is relative. */
 (() => {
   "use strict";
-  const $app = document.getElementById("app");
+  const $root = document.getElementById("app");
+  // Views write `$app.innerHTML = …`. On a live update of the same page the new markup is
+  // patched into the existing DOM instead of replacing it, so nothing blinks: unchanged
+  // elements stay put, only changed text/attributes are touched, and maps are left alone.
+  let morphing = false;
+  const $app = {
+    set innerHTML(html) { if (morphing) morph($root, html); else $root.innerHTML = html; },
+    querySelectorAll: (s) => $root.querySelectorAll(s),
+  };
+  function morph(target, html) {
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    patchChildren(target, tpl.content);
+  }
+  const keepNode = (x, y) => x.classList && x.classList.contains("leaflet-container") && x.id && x.id === y.id;
+  function sameKind(x, y) {
+    return x.nodeType === y.nodeType && x.nodeName === y.nodeName && (x.nodeType !== 1 || (x.id || "") === (y.id || ""));
+  }
+  function patchChildren(a, b) {
+    const an = [...a.childNodes], bn = [...b.childNodes];
+    bn.forEach((y, i) => {
+      const x = an[i];
+      if (!x) a.appendChild(y);
+      else if (sameKind(x, y)) patchNode(x, y);
+      else a.replaceChild(y, x);
+    });
+    for (let i = bn.length; i < an.length; i++) a.removeChild(an[i]);
+  }
+  function patchNode(x, y) {
+    if (x.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; return; }
+    if (keepNode(x, y)) return;
+    for (const { name } of [...x.attributes]) if (!y.hasAttribute(name)) x.removeAttribute(name);
+    for (const { name, value } of [...y.attributes]) if (x.getAttribute(name) !== value) x.setAttribute(name, value);
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(x.nodeName)) return;
+    patchChildren(x, y);
+  }
   const $updated = document.getElementById("updated");
   const $refresh = document.getElementById("refresh");
   let STATE = null;
@@ -120,14 +155,21 @@
     if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
     key = key || el.id;
     const have = MAPS[key];
+    if (!have && el.classList.contains("leaflet-container")) {
+      // a kept map element now belongs to a different flight: swap in a clean container
+      const f = document.createElement("div");
+      f.id = el.id; f.className = el.dataset.cls || "";
+      el.replaceWith(f); el = f;
+    }
     if (have) {
-      el.replaceWith(have.el);
+      if (have.el !== el) el.replaceWith(have.el);
       usedMaps.add(key);
       paintMap(have, leg, false);
       setTimeout(() => have.map.invalidateSize(), 30);
       return;
     }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    el.dataset.cls = el.className;
     const map = L.map(el, { zoomControl: interactive, attributionControl: true, dragging: interactive,
       scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
     addTiles(map, dark);
@@ -731,6 +773,7 @@
     const route = location.hash || "#/";
     try {
       if (force || !STATE) await load();
+      morphing = route === lastRoute && $root.childElementCount > 0;
       const m = route.match(/^#\/leg\/([\w-]+)/);
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
       if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
@@ -745,6 +788,8 @@
       lastRoute = route;
     } catch (e) {
       $app.innerHTML = `<div class="card empty"><b>Can't reach the add-on</b>${esc(e.message)}</div>`;
+    } finally {
+      morphing = false;
     }
   }
 
