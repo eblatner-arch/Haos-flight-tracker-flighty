@@ -177,13 +177,25 @@
     }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     el.dataset.cls = el.className;
-    const map = L.map(el, { zoomControl: interactive, attributionControl: true, dragging: interactive,
+    // On phones one finger scrolls the page; moving the map takes two fingers (pinch also pans).
+    const phone = !!(L.Browser && L.Browser.mobile && L.Browser.touch);
+    const map = L.map(el, { zoomControl: interactive, attributionControl: true, dragging: interactive && !phone,
       scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
     addTiles(map, dark);
     const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive };
     entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
     MAPS[key] = entry;
     usedMaps.add(key);
+    if (interactive && phone) {
+      const tip = L.DomUtil.create("div", "map-tip", el);
+      tip.textContent = "Use two fingers to move the map";
+      let t = null;
+      el.addEventListener("touchmove", (e) => {
+        if (e.touches.length !== 1) { tip.classList.remove("on"); return; }
+        tip.classList.add("on"); clearTimeout(t); t = setTimeout(() => tip.classList.remove("on"), 1200);
+      }, { passive: true });
+      el.addEventListener("touchend", () => { clearTimeout(t); t = setTimeout(() => tip.classList.remove("on"), 800); }, { passive: true });
+    }
     if (interactive && L.Control) {
       const Btn = L.Control.extend({
         options: { position: "topright" },
