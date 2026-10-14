@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.0.1
+- Much smaller image: Python slim base with only Chromium instead of the full Playwright image, so installs finish faster
+
 ## 2.0.0
 - Rebuilt as a full flight tracker app for your crew schedule (Home Assistant sidebar panel)
 - Reads the schedule from the file ICS2GCAL saves; starts watching each leg 12 hours before departure
