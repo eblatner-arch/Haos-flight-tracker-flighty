@@ -347,8 +347,8 @@
         </div>
         ${progress(leg)}
         <div class="times">
-          ${timeBlock("Departs", f.times.out, leg.sched_out, tzA)}
-          ${timeBlock("Arrives", f.times.in, leg.sched_in, tzB, true)}
+          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, leg.sched_out, tzA)}
+          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : f.times.on && f.times.on.actual ? "Landed" : "Arrives", f.times.in, leg.sched_in, tzB, true)}
         </div>
         ${chips(leg)}
         ${countdown(leg)}

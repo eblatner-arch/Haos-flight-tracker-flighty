@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.9.6
+- Flight card says Departed once the airplane pushes back, and Landed / Arrived on the arrival side
+
 ## 2.9.5
 - Fix: AeroAPI was queried a second time because FlightAware's page and AeroAPI write the same inbound's ID differently.
   The inbound is now compared by flight number and scheduled departure, and there's no re-query when the page shows
