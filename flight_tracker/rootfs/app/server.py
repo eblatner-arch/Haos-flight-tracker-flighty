@@ -254,7 +254,10 @@ def notify(alert):
     svc = (CFG.get("notify_service") or "").strip()
     if svc.startswith("notify."):
         svc = svc[7:]
-    data = {"tag": f"{alert['tag']}-{alert['key']}", "group": "flight-tracker"}
+    data = {"tag": f"{alert['tag']}-{alert['key']}", "group": "flight-tracker",
+            # Custom notification icon: Android companion today, iOS companion once its custom-icon
+            # support ships (home-assistant/iOS#4672). Older apps ignore these keys.
+            "notification_icon": "mdi:airplane", "notification_icon_color": "#FFFFFF", "color": "#3B4FB8"}
     if INGRESS["path"]:
         data["url"] = INGRESS["path"]
         data["clickAction"] = INGRESS["path"]

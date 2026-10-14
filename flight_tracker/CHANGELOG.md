@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.12.2
+- Pushes carry a custom icon (white airplane on the app's indigo): shows on Android now, and on iPhone once the Home Assistant iOS app ships custom notification icons (planned for 2026.8). Older apps ignore it
+
 ## 2.12.1
 - Swipe in from the left edge to go back (to wherever the page's ‹ link goes). The page follows your finger; let go past about a third of the way to go back. Works over the map too
 
