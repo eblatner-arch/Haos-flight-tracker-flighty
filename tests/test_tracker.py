@@ -321,69 +321,114 @@ class Cleanup(unittest.TestCase):
 
 
 class AeroAPI(unittest.TestCase):
+    """First look is AeroAPI from watch_hours out; page checks compare; AeroAPI again only on a change."""
+
     def setUp(self):
         import server
         import aeroapi
         self.server, self.aeroapi = server, aeroapi
         server.CFG.update(aeroapi_key="k", aeroapi_monthly_budget=5.0, aeroapi_cost_per_query=0.005,
-                          aeroapi_max_per_leg=6)
+                          aeroapi_max_per_leg=6, watch_hours=18)
         server.STATE["aero_calls"] = []
-        self.calls = []
-        self.answer = {"tail": None, "inbound_fa_id": "IN-1", "fa_id": "F-1", "aircraft_type": "B39M"}
+        server.STATE["debug"] = []
+        self.calls, self.pages = [], []
+        self.tail, self.inbound = None, "IN-1"
+        self.out = T0 + 17 * H
 
-        def lookup(key, ident, dep, sched_out):
+        def query(key, ident, start, end):
             self.calls.append(ident)
-            return dict(self.answer), 1
-        aeroapi.lookup = lookup
+            b = boot(fa_id="F-1", out_s=self.out, tail=self.tail, inbound_id=self.inbound)
+            return [fa.normalize(list(b["flights"].values())[0])], 1
+        aeroapi.query = query
         sources.fetch_live = lambda cs: None
+        test = self
 
-    def leg(self, out):
-        f, _ = fa.flights_from_bootstrap(boot(out_s=out, tail=None, inbound_id="IN-1"))
-        return {"id": "a1", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO",
-                "sched_out": out, "sched_in": out + 6 * H}, f
+        class FB:
+            client = None
 
-    def test_retries_then_stops(self):
-        out = T0 + 12 * H
-        L, f = self.leg(out)
-        s = self.server
-        s.aero_check(L, f, T0)                       # 12 h: first look
-        s.aero_check(L, f, T0 + H)                   # nothing new
-        s.aero_check(L, f, out - 5.9 * H)            # 6 h retry
-        s.aero_check(L, f, out - 5.5 * H)            # already retried at 6 h
-        self.answer["tail"] = "N12345"
-        s.aero_check(L, f, out - 2.9 * H)            # 3 h retry finds it
-        s.aero_check(L, f, out - 1.4 * H)            # tail known: no 90-min retry
-        self.assertEqual(len(self.calls), 3)
-        self.assertEqual(L["aero"]["tail"], "N12345")
-        s.resolve_tail(None, L, f, out - 1.4 * H + 60)
-        self.assertEqual(f["tail"], "N12345")
-        self.assertEqual(f["tail_source"], "AeroAPI (airline assignment)")
+            def load(self, url, name):
+                test.pages.append(url)
+                return boot(fa_id="F-1", out_s=test.out, tail=None, inbound_id=test.inbound), None
+        self.browser = FB()
+
+    def add(self, lid="a1", extra=False, out=None):
+        out = out or self.out
+        L = {"id": lid, "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO", "extra": extra,
+             "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True}, "alerts": [], "next_check": 0}
+        self.server.STATE["legs"][lid] = L
+        return L
+
+    def run_at(self, lid, t):
+        import time as _t
+        real = _t.time
+        _t.time = lambda: t
+        try:
+            self.server.update_leg(self.browser, lid)
+        finally:
+            _t.time = real
+        return self.server.STATE["legs"][lid]
+
+    def test_first_lookup_is_aeroapi_then_pages_compare(self):
+        self.add()
+        L = self.run_at("a1", T0)                              # 17 h out: first look
+        self.assertEqual((len(self.calls), len(self.pages)), (1, 0))
+        self.assertEqual(L["source"], "AeroAPI")
+        self.run_at("a1", T0 + 120)                            # comparison by page check, no AeroAPI
+        self.assertEqual(len(self.calls), 1)
+        self.assertGreater(len(self.pages), 0)
+
+    def test_nothing_before_watch_window(self):
+        self.add(out=T0 + 30 * H)
+        self.assertFalse(self.server.first_lookup_due(self.server.STATE["legs"]["a1"], T0))
+        self.assertFalse(self.server.watched(self.server.STATE["legs"]["a1"], T0))
 
     def test_inbound_change_triggers_one_call(self):
-        out = T0 + 12 * H
-        L, f = self.leg(out)
-        self.answer["tail"] = "N1"
-        self.server.aero_check(L, f, T0)
-        f["inbound_fa_id"] = "IN-2"                  # the free page check now links another airplane
-        self.answer.update(tail="N2", inbound_fa_id="IN-2")
-        self.server.aero_check(L, f, T0 + H)
-        self.server.aero_check(L, f, T0 + 2 * H)
+        self.tail = "N1"
+        self.add()
+        self.run_at("a1", T0)
+        self.inbound = "IN-2"                                  # page now links another airplane
+        self.tail = "N2"
+        self.run_at("a1", T0 + 120)
+        self.run_at("a1", T0 + 2 * H)
         self.assertEqual(len(self.calls), 2)
-        self.assertEqual(L["aero"]["tail"], "N2")
+        self.assertEqual(self.server.STATE["legs"]["a1"]["aero"]["tail"], "N2")
+
+    def test_retries_only_while_no_tail(self):
+        self.add()
+        self.run_at("a1", T0)                                  # no tail yet
+        self.run_at("a1", self.out - 5.9 * H)                  # 6 h retry
+        self.tail = "N9"
+        self.run_at("a1", self.out - 2.9 * H)                  # 3 h retry finds it
+        self.run_at("a1", self.out - 1.4 * H)                  # tail known: no more
+        self.assertEqual(len(self.calls), 3)
+        L = self.server.STATE["legs"]["a1"]
+        self.assertEqual(L["flight"]["tail"], "N9")
+        self.assertEqual(L["flight"]["tail_source"], "AeroAPI (airline assignment)")
+
+    def test_followed_undated_looks_up_then_waits(self):
+        self.out = T0 + 30 * H
+        L = self.add(lid="x1", extra=True, out=T0)
+        L["sched_out"] = L["sched_in"] = T0
+        self.assertTrue(self.server.first_lookup_due(L, T0))
+        L = self.run_at("x1", T0)                              # learns it's 30 h away
+        self.assertEqual((len(self.calls), len(self.pages)), (1, 0))
+        self.assertEqual(L["sched_out"], self.out)
+        self.assertFalse(self.server.watched(L, T0 + H))      # no screenshots until 18 h out
+        self.assertTrue(self.server.watched(L, self.out - 17 * H))
 
     def test_budget_cap(self):
         self.server.CFG["aeroapi_monthly_budget"] = 0.01
         for i in range(4):
-            L, f = self.leg(T0 + 12 * H)
-            L["id"] = f"b{i}"
-            self.server.aero_check(L, f, T0)
+            self.add(lid=f"b{i}")
+            self.run_at(f"b{i}", T0)
         self.assertEqual(len(self.calls), 2)
 
-    def test_no_key_no_calls(self):
+    def test_no_key_uses_pages(self):
         self.server.CFG["aeroapi_key"] = ""
-        L, f = self.leg(T0 + 12 * H)
-        self.server.aero_check(L, f, T0)
+        self.add()
+        self.run_at("a1", T0)
         self.assertEqual(self.calls, [])
+        self.assertGreater(len(self.pages), 0)
 
     def test_normalize(self):
         raw = {"fa_flight_id": "UAL1-x", "ident_icao": "UAL1", "ident_iata": "UA1", "registration": "N37502",
@@ -392,15 +437,3 @@ class AeroAPI(unittest.TestCase):
                "scheduled_out": "2026-10-14T18:05:00Z", "estimated_out": None, "actual_out": None}
         n = self.aeroapi.normalize(raw)
         self.assertEqual((n["tail"], n["inbound_fa_id"], n["origin"]["gate"]), ("N37502", "UAL9-x", "C71"))
-        self.assertEqual(n["times"]["out"]["scheduled"], 1792001100.0)
-
-
-class AeroAPIFollowed(AeroAPI):
-    def test_followed_flight_same_rules_and_waits_for_window(self):
-        self.server.CFG["watch_hours"] = 12
-        L, f = self.leg(T0 + 40 * H)
-        L["extra"] = True
-        self.server.aero_check(L, f, T0)               # 40 h out: too early
-        self.assertEqual(self.calls, [])
-        self.server.aero_check(L, f, T0 + 29 * H)      # 11 h out: first call
-        self.assertEqual(len(self.calls), 1)

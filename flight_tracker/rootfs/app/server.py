@@ -36,7 +36,7 @@ DEFAULTS = {
     "ics_file_path": "/homeassistant/ics2gcal/feed.ics",
     "airline_icao": "",
     "flight_regex": "",
-    "watch_hours": 12,
+    "watch_hours": 18,
     "track_deadheads": True,
     "track_flights": [],
     "notify_service": "",
@@ -452,9 +452,12 @@ def finished(L, now):
 
 
 def watched(L, now):
-    if L.get("extra"):
-        return not finished(L, now)
-    return now >= L["sched_out"] - float(CFG["watch_hours"]) * HOUR and not finished(L, now)
+    """Inside the page-check window. Nothing at all runs before watch_hours out."""
+    if finished(L, now):
+        return False
+    if L.get("extra") and not L.get("flight"):
+        return not aero_on()  # no AeroAPI: the page check is the only way to find it
+    return now >= L["sched_out"] - float(CFG["watch_hours"]) * HOUR
 
 
 def poll_seconds(L, now):
@@ -580,12 +583,89 @@ def aero_month(now):
     return pages, pages * float(CFG.get("aeroapi_cost_per_query") or 0.005)
 
 
+def aero_on():
+    return bool((CFG.get("aeroapi_key") or "").strip())
+
+
+def aero_window(L, now):
+    """Query window (start, end) for this flight."""
+    if not L.get("extra"):
+        return L["sched_out"] - 6 * HOUR, L["sched_out"] + 6 * HOUR
+    if L.get("date"):
+        try:
+            tz = ZoneInfo(airports.get(L.get("dep")).get("tz") or TZNAME)
+            d0 = datetime.strptime(L["date"], "%Y-%m-%d").replace(tzinfo=tz).timestamp()
+            return d0 - 6 * HOUR, d0 + 30 * HOUR
+        except Exception:
+            pass
+    return now - 3 * HOUR, now + 47 * HOUR
+
+
+def aero_call(L, now, reason, retry_h=None, observed_inbound=None, observed_tail=None):
+    """One AeroAPI query for this flight, within budget. Returns the matched flight or None."""
+    a = L.setdefault("aero", {})
+    if a.get("calls", 0) >= int(CFG.get("aeroapi_max_per_leg") or 6):
+        return None
+    cost = float(CFG.get("aeroapi_cost_per_query") or 0.005)
+    _, spent = aero_month(now)
+    if spent + cost > float(CFG.get("aeroapi_monthly_budget") or 0) + 1e-9:
+        if a.get("blocked") != _month(now):
+            a["blocked"] = _month(now)
+            log.warning("AeroAPI monthly budget reached ($%.2f); skipping (%s)", spent, reason)
+        return None
+    rec = {"at": now, "leg": L.get("display"), "leg_id": L["id"], "reason": reason, "billed": True, "pages": 1}
+    flight = None
+    try:
+        start, end = aero_window(L, now)
+        flights, pages = aeroapi.query(CFG["aeroapi_key"].strip(), L["ident"], start, end)
+        if L.get("extra"):
+            flight = fa.pick_followed(None, flights, L.get("dep"), L.get("arr"), L.get("date"), now)
+        else:
+            flight = fa.pick_instance(None, flights, L.get("dep"), L["sched_out"], window=4 * HOUR)
+        rec.update(pages=pages or 1, billed=bool(pages), ok=True, found=bool(flight),
+                   tail=(flight or {}).get("tail"), inbound=(flight or {}).get("inbound_fa_id"))
+        a.update(at=now, calls=a.get("calls", 0) + 1, reason=reason, found=bool(flight), error=None)
+        if flight:
+            a.update(tail=flight.get("tail") or a.get("tail"), inbound_id=flight.get("inbound_fa_id"),
+                     fa_id=flight.get("fa_id"), aircraft_type=flight.get("aircraft_type"))
+        log.info("AeroAPI %s (%s): %s", L.get("display"), reason,
+                 f"tail {flight.get('tail') or 'not assigned'}, inbound {flight.get('inbound_fa_id') or 'none'}"
+                 if flight else "flight not found")
+    except Exception as e:
+        msg = str(e).splitlines()[0][:200]
+        rec.update(ok=False, error=msg, billed="rejected" not in msg and "rate limit" not in msg)
+        a.update(at=a.get("at") or now, error=msg)
+        log.warning("AeroAPI %s: %s", L.get("display"), msg)
+    if retry_h:
+        a["retries"] = (a.get("retries") or []) + [retry_h]
+    if observed_inbound:
+        a["rechecked_for"] = observed_inbound
+    if observed_tail:
+        a["rechecked_tail"] = observed_tail
+    with LOCK:
+        STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
+    return flight
+
+
+def first_lookup_due(L, now):
+    """The first look at a flight is AeroAPI, from watch_hours before departure."""
+    a = L.get("aero") or {}
+    if not aero_on() or a.get("found") or not L.get("ident") or L.get("flight"):
+        return False
+    if a.get("at") and now - a["at"] < 6 * HOUR:
+        return False  # looked and didn't find it; try again in a few hours
+    if not L.get("extra"):
+        return now >= L["sched_out"] - float(CFG["watch_hours"]) * HOUR and now < L["sched_in"] + 2 * HOUR
+    if L.get("date"):
+        start, _ = aero_window(L, now)
+        return now >= start + 6 * HOUR - float(CFG["watch_hours"]) * HOUR
+    return True  # undated: one query to learn when its next departure is
+
+
 def aero_reason(L, f, now):
-    """Why this leg needs an AeroAPI call right now, or (None, None)."""
+    """Why this flight needs another AeroAPI query, or (None, None)."""
     a = L.get("aero") or {}
     if not a.get("at"):
-        return "tracking started", None
-    if a.get("calls", 0) >= int(CFG.get("aeroapi_max_per_leg") or 6):
         return None, None
     scraped = f.get("inbound_fa_id")
     if scraped and a.get("inbound_id") and scraped != a["inbound_id"] and scraped != a.get("rechecked_for"):
@@ -599,48 +679,13 @@ def aero_reason(L, f, now):
 
 
 def aero_check(L, f, now):
-    """Ask AeroAPI for the airline's tail and inbound when there's a reason to, within budget."""
-    key = (CFG.get("aeroapi_key") or "").strip()
-    if not key or not L.get("ident") or fa.phase(f, now) != "scheduled":
+    """Re-ask AeroAPI when the free checks suggest a different airplane, within budget."""
+    if not aero_on() or not L.get("ident") or fa.phase(f, now) != "scheduled":
         return
-    out_t = fa.best_time(f["times"], "out") or L["sched_out"]
-    if out_t - now > float(CFG["watch_hours"]) * HOUR:
-        return  # same 12-hour start for every flight, including ones added days ahead
     reason, retry_h = aero_reason(L, f, now)
-    if not reason:
-        return
-    a = L.setdefault("aero", {})
-    cost = float(CFG.get("aeroapi_cost_per_query") or 0.005)
-    _, spent = aero_month(now)
-    if spent + cost > float(CFG.get("aeroapi_monthly_budget") or 0) + 1e-9:
-        if a.get("blocked") != _month(now):
-            a["blocked"] = _month(now)
-            log.warning("AeroAPI monthly budget reached ($%.2f); skipping (%s)", spent, reason)
-        return
-    rec = {"at": now, "leg": L.get("display"), "leg_id": L["id"], "reason": reason, "billed": True, "pages": 1}
-    try:
-        flight, pages = aeroapi.lookup(key, L["ident"], L.get("dep"), L["sched_out"])
-        rec.update(pages=pages, ok=True, tail=(flight or {}).get("tail"),
-                   found=bool(flight), inbound=(flight or {}).get("inbound_fa_id"))
-        a.update(at=now, calls=a.get("calls", 0) + 1, reason=reason, found=bool(flight))
-        if flight:
-            a.update(tail=flight.get("tail") or a.get("tail"), inbound_id=flight.get("inbound_fa_id"),
-                     fa_id=flight.get("fa_id"), aircraft_type=flight.get("aircraft_type"))
-        if retry_h:
-            a["retries"] = (a.get("retries") or []) + [retry_h]
-        if reason.startswith("FlightAware page shows"):
-            a["rechecked_for"] = f.get("inbound_fa_id")
-        log.info("AeroAPI %s (%s): tail %s, inbound %s", L.get("display"), reason,
-                 (flight or {}).get("tail") or "not assigned", (flight or {}).get("inbound_fa_id") or "none")
-    except Exception as e:
-        msg = str(e).splitlines()[0][:200]
-        rec.update(ok=False, error=msg, billed="rejected" not in msg and "rate limit" not in msg)
-        a.update(at=a.get("at") or now, error=msg)
-        if retry_h:
-            a["retries"] = (a.get("retries") or []) + [retry_h]
-        log.warning("AeroAPI %s: %s", L.get("display"), msg)
-    with LOCK:
-        STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
+    if reason:
+        aero_call(L, now, reason, retry_h,
+                  observed_inbound=f.get("inbound_fa_id") if reason.startswith("FlightAware page") else None)
 
 
 def walk_chain(browser, L, now):
@@ -685,6 +730,7 @@ def resolve_tail(browser, L, f, now):
     """Which airplane is flying this leg. Trust order: our own transponder, then an earlier
     leg of the same airplane seen in flight, then whatever FlightAware's page says."""
     info = dict(L.get("tail_info") or {})
+    page_tail = f.get("tail") if not f.get("tail_source") else None
     if info.get("kind") == "chain" and info.get("root") != f.get("inbound_fa_id"):
         info = {}  # a different inbound is a different airplane
     if info.get("kind") in ("page", "aeroapi"):
@@ -700,6 +746,11 @@ def resolve_tail(browser, L, f, now):
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
     aero_tail = (L.get("aero") or {}).get("tail")
+    observed = info.get("tail") if info.get("kind") == "own" else page_tail
+    if aero_tail and observed and observed.upper() != aero_tail.upper() and aero_on() \
+            and (L.get("aero") or {}).get("rechecked_tail") != observed and ph == "scheduled":
+        aero_call(L, now, f"{observed} seen, AeroAPI had {aero_tail}", observed_tail=observed)
+        aero_tail = (L.get("aero") or {}).get("tail")
     if info.get("kind") != "own" and aero_tail:
         info = {"tail": aero_tail.upper(), "kind": "aeroapi", "at": (L.get("aero") or {}).get("at") or now,
                 "source": "AeroAPI (airline assignment)"}
@@ -715,6 +766,14 @@ def resolve_tail(browser, L, f, now):
     L["tail_info"] = info
 
 
+class _OutsideWindow(Exception):
+    pass
+
+
+def source_is_aero(L):
+    return L.get("source") == "AeroAPI"
+
+
 def update_leg(browser, lid):
     with LOCK:
         L = STATE["legs"].get(lid)
@@ -723,7 +782,18 @@ def update_leg(browser, lid):
         L = json.loads(json.dumps(L))  # work on a copy outside the lock
     now = time.time()
     try:
-        flight, source, shot, note = fetch_flight(browser, L)
+        first = None
+        if first_lookup_due(L, now):
+            first = aero_call(L, now, "first lookup")
+            if first:
+                L["fa_id"] = first.get("fa_id") or L.get("fa_id")
+        if first:
+            flight, source, shot, note = first, "AeroAPI", None, None
+        elif not watched(L, now):
+            flight, source, shot, note = None, None, None, (
+                "AeroAPI didn't find this flight yet; will look again" if (L.get("aero") or {}).get("at") else None)
+        else:
+            flight, source, shot, note = fetch_flight(browser, L)
         if flight:
             # Fill in airport details FlightAware left out.
             for side, code in (("origin", L.get("dep")), ("destination", L.get("arr"))):
@@ -746,8 +816,14 @@ def update_leg(browser, lid):
                 flight["track"] = flight["track"][-1500:]
             L["flight"], L["source"] = flight, source
         L["note"] = note
-        L["shot"] = bool(shot)
+        if shot or not first:
+            L["shot"] = bool(shot)
         ph = fa.phase(L.get("flight"), now)
+        if first or not watched(L, now):
+            # The AeroAPI lookup is this check; page loads (inbound, comparison) start on the next one,
+            # and not at all while the flight is more than watch_hours out.
+            L["updated"], L["error"] = now, None
+            raise _OutsideWindow()
 
         # Inbound aircraft
         f = L.get("flight") or {}
@@ -806,10 +882,15 @@ def update_leg(browser, lid):
 
         L["updated"] = now
         L["error"] = None
+    except _OutsideWindow:
+        pass
     except Exception as e:
         log.error("%s: %s", L.get("display") or lid, e)
         L["error"] = str(e).splitlines()[0][:300]
-    L["next_check"] = now + poll_seconds(L, now)
+    L["next_check"] = now + (90 if source_is_aero(L) and watched(L, now) and not L.get("compared")
+                             else poll_seconds(L, now))
+    if L.get("source") and L["source"] != "AeroAPI":
+        L["compared"] = True
 
     with LOCK:
         nas = list(STATE["nas"])
@@ -884,7 +965,7 @@ def worker():
                 refresh_wx(now)
             with LOCK:
                 due = sorted((L["next_check"] if L["id"] not in forced and "all" not in forced else 0, L["id"])
-                             for L in STATE["legs"].values() if watched(L, now))
+                             for L in STATE["legs"].values() if watched(L, now) or first_lookup_due(L, now))
             for when, lid in due:
                 if when <= time.time():
                     STATE["worker"]["busy"] = lid

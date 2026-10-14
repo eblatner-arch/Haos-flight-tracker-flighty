@@ -72,21 +72,23 @@ appear once the airplane's previous flight is in the air.
 
 ## AeroAPI (optional)
 
-With a FlightAware AeroAPI **Personal** key in `aeroapi_key`, the add-on asks
-AeroAPI for the airline's tail assignment and inbound flight, for every flight
-(your legs and followed ones alike):
+With a FlightAware AeroAPI **Personal** key in `aeroapi_key`, every flight (yours
+and followed ones) is handled the same way:
 
-- once when a flight enters the watch window (12 hours out),
-- again at 6 hours, 3 hours and 90 minutes only if no tail was assigned yet,
-- and once more whenever the free FlightAware page check links a different
-  inbound flight (an aircraft swap).
+1. **Nothing runs** until `watch_hours` (18) before departure: no AeroAPI, no page checks.
+2. **First look: AeroAPI.** One query gets the times, gates, the airline's tail
+   assignment and the inbound flight.
+3. **Then page checks and screenshots** every 30 / 10 / 3 minutes (more than 3 hours
+   out / within 3 hours / last 45 minutes), compared against what AeroAPI said.
+4. **AeroAPI again only on a change:** the page links a different inbound, or a
+   different tail shows up (FlightAware's page or your own transponder). While no tail is
+   assigned yet it also retries at 6 h, 3 h and 90 min.
 
-That's typically 1–4 queries per leg. Spend is counted against
-`aeroapi_monthly_budget` (default $5, which the Personal tier includes free); once
-a query would go over, it stops until next month. The Tools page shows the month's
-spend and every query with its reason and result. Everything else stays on the free
-sources. Tail priority: your own transponder, then AeroAPI, then ADS-B from the
-airplane's earlier legs, then FlightAware's page.
+A followed flight with no date gets one query to find its next departure, then waits
+until 18 hours before it. Typically 1–3 queries per flight. Spend is counted against
+`aeroapi_monthly_budget` (default $5); once a query would go over, it stops until next
+month. The Tools page shows the spend and every query. Without a key, page checks do
+everything.
 
 ## Following other flights
 

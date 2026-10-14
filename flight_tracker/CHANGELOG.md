@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0
+- Nothing runs for a flight until 18 hours before departure (new default `watch_hours`: 18), then the first look is AeroAPI
+- Page checks and screenshots start right after, as the comparison; AeroAPI is asked again only when they show a different
+  inbound or a different tail (or, while no tail is assigned, at 6 h / 3 h / 90 min)
+- Followed flights without a date: one AeroAPI query finds the next departure, then nothing until 18 hours before it
+
 ## 2.4.1
 - AeroAPI and tail-number lookup apply to followed flights too, with the same rules
 - The first AeroAPI query waits until a flight is within the watch window, even for flights added days ahead

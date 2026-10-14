@@ -10,7 +10,7 @@ configuration:
     description: Your phone's notify service without "notify.", e.g. mobile_app_erics_iphone. Blank sends alerts to Home Assistant notifications instead.
   watch_hours:
     name: Start watching (hours before departure)
-    description: When to start checking a flight for gates, delays, the inbound aircraft and NAS programs.
+    description: Nothing runs for a flight before this. At this point the first look is AeroAPI (if set up), then page checks. Default 18.
   track_deadheads:
     name: Track deadheads
     description: Also watch flights marked DH in your schedule.

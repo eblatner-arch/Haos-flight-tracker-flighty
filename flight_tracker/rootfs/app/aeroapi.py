@@ -60,11 +60,13 @@ def normalize(f):
     }
 
 
-def lookup(key, ident, dep, sched_out):
-    """The flight instance departing dep near sched_out. Returns (flight or None, number of result pages billed)."""
+def query(key, ident, start, end):
+    """All instances of ident scheduled between start and end (epoch). Returns (flights, pages billed)."""
     now = datetime.now(timezone.utc).timestamp()
-    start = max(sched_out - 6 * 3600, now - 9 * 86400)
-    end = min(sched_out + 6 * 3600, now + 2 * 86400 - 60)
+    start = max(start, now - 9 * 86400)
+    end = min(end, now + 2 * 86400 - 60)
+    if end <= start:
+        return [], 0
     r = requests.get(f"{BASE}/flights/{ident}", headers={"x-apikey": key, "Accept": "application/json"},
                      params={"start": _iso(start), "end": _iso(end), "max_pages": 1}, timeout=20)
     if r.status_code in (401, 403):
@@ -73,16 +75,4 @@ def lookup(key, ident, dep, sched_out):
         raise RuntimeError("AeroAPI rate limit hit; will retry later")
     r.raise_for_status()
     data = r.json() or {}
-    best, gap = None, None
-    for raw in data.get("flights") or []:
-        f = normalize(raw)
-        o = f["origin"]
-        if dep and dep.upper() not in {(o.get("iata") or "").upper(), (o.get("icao") or "").upper()}:
-            continue
-        t = f["times"]["out"]["scheduled"] or f["times"]["off"]["scheduled"]
-        if t is None:
-            continue
-        g = abs(t - sched_out)
-        if g <= 4 * 3600 and (gap is None or g < gap):
-            best, gap = f, g
-    return best, max(1, int(data.get("num_pages") or 1))
+    return [normalize(raw) for raw in data.get("flights") or []], max(1, int(data.get("num_pages") or 1))

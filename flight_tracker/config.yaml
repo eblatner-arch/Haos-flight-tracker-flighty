@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "2.4.1"
+version: "2.5.0"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -26,7 +26,7 @@ options:
   ics_file_path: /homeassistant/ics2gcal/feed.ics
   airline_icao: ""
   notify_service: ""
-  watch_hours: 12
+  watch_hours: 18
   track_deadheads: true
   track_flights: []
   delay_threshold_minutes: 15
