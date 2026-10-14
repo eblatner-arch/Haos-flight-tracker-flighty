@@ -83,7 +83,9 @@ REFRESH_Q = queue.Queue()
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
 STATE = {"legs": {}, "nas": [], "nas_at": None, "nas_error": None, "wx": {}, "wx_at": 0,
          "alerts": [], "schedule": {"mtime": None, "error": None, "count": 0, "checked": None},
-         "worker": {"busy": None, "last_cycle": None, "error": None}}
+         "worker": {"busy": None, "last_cycle": None, "error": None},
+         "manual": [], "debug": []}
+PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual")
 INGRESS = {"path": None}
 
 ICAO_TO_IATA = {v: k for k, v in schedule.IATA_TO_ICAO.items()}
@@ -97,7 +99,7 @@ def load_state():
     try:
         with open(STATE_PATH) as f:
             saved = json.load(f)
-        STATE.update({k: saved[k] for k in ("legs", "alerts", "nas", "nas_at", "wx") if k in saved})
+        STATE.update({k: saved[k] for k in PERSIST if k in saved})
         log.info("Loaded %d legs from saved state", len(STATE["legs"]))
     except FileNotFoundError:
         pass
@@ -107,7 +109,7 @@ def load_state():
 
 def save_state():
     with LOCK:
-        data = json.dumps({k: STATE[k] for k in ("legs", "alerts", "nas", "nas_at", "wx")})
+        data = json.dumps({k: STATE[k] for k in PERSIST})
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w") as f:
         f.write(data)
@@ -158,8 +160,16 @@ def notify(alert):
                {"title": alert["title"], "message": alert["message"],
                 "notification_id": data["tag"]})
         log.info("Pushed: %s — %s", alert["title"], alert["message"])
+        return True, f"notify.{svc}" if svc else "persistent notification"
     except Exception as e:
-        log.warning("Notification failed (%s): %s", svc or "persistent_notification", e)
+        detail = str(e)
+        if hasattr(e, "read"):
+            try:
+                detail += " " + e.read().decode()[:200]
+            except Exception:
+                pass
+        log.warning("Notification failed (%s): %s", svc or "persistent_notification", detail)
+        return False, detail
 
 
 def post_state(entity, state, attrs):
@@ -266,29 +276,85 @@ def reload_schedule(force=False):
                 del cur[lid]  # dropped from the schedule
             elif L["sched_in"] < now - 36 * HOUR:
                 del cur[lid]
-        STATE["schedule"].update(mtime=mtime, error=None, count=len(legs), checked=now)
+        matched = {L["id"] for L in legs}
+        unmatched = sorted({e["summary"] for e in events if not e.get("allday") and e["oid"] not in matched
+                            and e["start"] > now - 2 * HOUR})
+        STATE["schedule"].update(mtime=mtime, error=None, count=len(legs), checked=now, path=path,
+                                 events=len(events), unmatched=unmatched[:25])
     log.info("Schedule: %d flights in the next 3 weeks", len(legs))
 
 
+IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
+
+
+def extra_id(ident, date=""):
+    return "x-" + re.sub(r"[^A-Z0-9]", "", ident) + ("-" + date.replace("-", "") if date else "")
+
+
 def sync_extras():
+    """Followed flights: track_flights from the config plus flights added in the app."""
     wanted = {}
     for x in CFG.get("track_flights") or []:
         ident = (x.get("ident") if isinstance(x, dict) else str(x)).strip().upper().replace(" ", "")
         if ident:
-            wanted["x-" + re.sub(r"[^A-Z0-9]", "", ident)] = ident
+            wanted[extra_id(ident)] = (ident, "", False)
+    now = time.time()
     with LOCK:
+        for x in STATE["manual"]:
+            wanted[extra_id(x["ident"], x.get("date") or "")] = (x["ident"], x.get("date") or "", True)
         for lid in [k for k, L in STATE["legs"].items() if L.get("extra") and k not in wanted]:
             del STATE["legs"][lid]
-        for lid, ident in wanted.items():
-            if lid not in STATE["legs"]:
-                m = re.match(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d+)$", ident)
-                airline = schedule.IATA_TO_ICAO.get(m.group(1), m.group(1)) if m else ""
-                STATE["legs"][lid] = {
-                    "id": lid, "extra": True, "ident": (airline + m.group(2)) if m else ident,
-                    "display": display_ident(airline, m.group(2)) if m else ident, "airline": airline,
-                    "flight_no": m.group(2) if m else "", "dep": "", "arr": "", "dh": False,
-                    "sched_out": time.time(), "sched_in": time.time(), "summary": "Followed flight",
-                    "notified": {"watch": True}, "alerts": [], "next_check": 0}
+        for lid, (ident, date, manual) in wanted.items():
+            if lid in STATE["legs"]:
+                continue
+            m = IDENT_RE.match(ident)
+            airline = schedule.IATA_TO_ICAO.get(m.group(1), m.group(1)) if m else ""
+            STATE["legs"][lid] = {
+                "id": lid, "extra": True, "manual": manual, "date": date,
+                "ident": (airline + m.group(2)) if m else ident,
+                "display": display_ident(airline, m.group(2)) if m else ident, "airline": airline,
+                "flight_no": m.group(2) if m else "", "dep": "", "arr": "", "dh": False,
+                "sched_out": now, "sched_in": now, "summary": "Added in the app" if manual else "track_flights",
+                "notified": {"watch": True}, "alerts": [], "next_check": 0}
+
+
+def add_manual(ident, date):
+    ident = (ident or "").strip().upper().replace(" ", "")
+    m = IDENT_RE.match(ident)
+    if not m:
+        raise ValueError("Enter a flight number like UA1234 or UAL1234")
+    date = (date or "").strip()
+    if date:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Date must be YYYY-MM-DD")
+    with LOCK:
+        if not any(x["ident"] == ident and (x.get("date") or "") == date for x in STATE["manual"]):
+            STATE["manual"].append({"ident": ident, "date": date, "added": time.time()})
+    sync_extras()
+    return extra_id(ident, date)
+
+
+def remove_manual(lid):
+    with LOCK:
+        STATE["manual"] = [x for x in STATE["manual"] if extra_id(x["ident"], x.get("date") or "") != lid]
+        STATE["legs"].pop(lid, None)
+
+
+def expire_manual(now):
+    """Drop app-added flights a day and a half after they took off or were due."""
+    with LOCK:
+        keep = []
+        for x in STATE["manual"]:
+            L = STATE["legs"].get(extra_id(x["ident"], x.get("date") or ""))
+            f = (L or {}).get("flight")
+            off = f and (f["times"]["off"]["actual"] or f["times"]["out"]["actual"])
+            due = L and L.get("flight") and L["sched_in"]
+            gone = (off and now > off + 36 * HOUR) or (due and finished(L, now) and now > due + 36 * HOUR)
+            if not gone:
+                keep.append(x)
+        STATE["manual"] = keep
 
 
 # --------------------------------------------------------------------------
@@ -296,21 +362,21 @@ def sync_extras():
 # --------------------------------------------------------------------------
 
 def finished(L, now):
+    """Tracking stops once the flight is off the ground (or long cancelled / long past)."""
     f = L.get("flight")
     ph = fa.phase(f, now)
-    if L.get("extra"):
-        return False
-    if ph == "arrived":
-        t = (f["times"]["in"]["actual"] if f else None) or L["sched_in"]
-        return now > t + 45 * 60
+    if ph in ("airborne", "landed", "arrived", "diverted"):
+        return True
     if ph == "cancelled":
         return now > L["sched_out"] + 2 * HOUR
+    if L.get("extra"):
+        return False
     return now > max(L["sched_in"], (fa.best_time(f["times"], "in") if f else 0) or 0) + 2 * HOUR
 
 
 def watched(L, now):
     if L.get("extra"):
-        return True
+        return not finished(L, now)
     return now >= L["sched_out"] - float(CFG["watch_hours"]) * HOUR and not finished(L, now)
 
 
@@ -318,7 +384,7 @@ def poll_seconds(L, now):
     f = L.get("flight")
     ph = fa.phase(f, now)
     out_t = (fa.best_time(f["times"], "out") if f else None) or L["sched_out"]
-    if ph in ("taxi_out", "airborne", "landed"):
+    if ph == "taxi_out":
         m = CFG["poll_fast_minutes"]
     elif out_t - now <= 45 * 60:
         m = CFG["poll_fast_minutes"]
@@ -326,9 +392,30 @@ def poll_seconds(L, now):
         m = CFG["poll_near_minutes"]
     else:
         m = CFG["poll_far_minutes"]
-    if L.get("extra") and ph in ("scheduled", "arrived", "cancelled"):
+    if L.get("extra") and not L.get("flight"):
         m = max(m, CFG["poll_near_minutes"])
     return max(60, float(m) * 60)
+
+
+def load(browser, url, shot, L, what):
+    """browser.load with a record in the debug log."""
+    t0 = time.time()
+    rec = {"at": t0, "leg": L.get("display") or L.get("ident"), "leg_id": L["id"], "what": what, "url": url,
+           "shot": shot}
+    try:
+        boot, path = browser.load(url, shot)
+        cur, act = fa.flights_from_bootstrap(boot)
+        rec.update(page_data=boot is not None, flights=(1 if cur else 0) + len(act),
+                   has_shot=bool(path), ms=int((time.time() - t0) * 1000),
+                   found=(f"{cur['origin'].get('iata')}→{cur['destination'].get('iata')} "
+                          f"{fa.phase(cur, time.time())}") if cur else None)
+        return boot, path
+    except Exception as e:
+        rec.update(error=str(e).splitlines()[0][:300], ms=int((time.time() - t0) * 1000))
+        raise
+    finally:
+        with LOCK:
+            STATE["debug"] = (STATE["debug"] + [rec])[-60:]
 
 
 def fetch_flight(browser, L):
@@ -338,15 +425,25 @@ def fetch_flight(browser, L):
         return None, None, None, "No flight number found in the calendar title"
     shot = None
     if L.get("fa_id"):
-        boot, shot = browser.load(fa.id_url(L["fa_id"]), lid)
+        boot, shot = load(browser, fa.id_url(L["fa_id"]), lid, L, "flight (pinned)")
         cur, _ = fa.flights_from_bootstrap(boot)
         if cur:
             return cur, "FlightAware page data", shot, None
         if boot is not None:
             L.pop("fa_id", None)  # stale instance; look it up again
     if not L.get("fa_id"):
-        boot, shot = browser.load(fa.ident_url(ident), lid)
+        boot, shot = load(browser, fa.ident_url(ident), lid, L, "flight lookup")
         cur, activity = fa.flights_from_bootstrap(boot)
+        if L.get("extra") and L.get("date") and boot is not None:
+            inst = fa.pick_by_date(cur, activity, L["date"])
+            if inst is None:
+                return None, None, shot, f"FlightAware doesn't list {ident} on {L['date']} yet"
+            L["fa_id"] = inst["fa_id"]
+            if cur and inst["fa_id"] == cur["fa_id"]:
+                return cur, "FlightAware page data", shot, None
+            boot2, shot = load(browser, fa.id_url(inst["fa_id"]), lid, L, "flight (dated)")
+            c2, _ = fa.flights_from_bootstrap(boot2)
+            return (c2 or inst), "FlightAware page data", shot, None
         if L.get("extra"):
             if cur:
                 return cur, "FlightAware page data", shot, None
@@ -357,13 +454,18 @@ def fetch_flight(browser, L):
             L["fa_id"] = inst["fa_id"]
             if cur and inst["fa_id"] == cur["fa_id"]:
                 return cur, "FlightAware page data", shot, None
-            boot2, shot = browser.load(fa.id_url(inst["fa_id"]), lid)
+            boot2, shot = load(browser, fa.id_url(inst["fa_id"]), lid, L, "flight (matched day)")
             c2, _ = fa.flights_from_bootstrap(boot2)
             return (c2 or inst), "FlightAware page data", shot, None
     # No page data: read the screenshot.
     if browser.client:
-        when = datetime.fromtimestamp(L["sched_out"], alerting.tz_for(L.get("dep"))).strftime("%a %d %b %H:%M")
+        when = L.get("date") or datetime.fromtimestamp(L["sched_out"], alerting.tz_for(L.get("dep"))).strftime("%a %d %b %H:%M")
         f = browser.read_screenshot(shot, ident, L.get("dep"), when)
+        with LOCK:
+            STATE["debug"] = (STATE["debug"] + [{"at": time.time(), "leg": L.get("display"), "leg_id": lid,
+                                                  "what": "Gemini read screenshot", "url": "",
+                                                  "shot": lid, "has_shot": True,
+                                                  "found": (f or {}).get("status_text") or "nothing usable"}])[-60:]
         if f:
             return f, "screenshot (Gemini)", shot, None
         return None, None, shot, "The page screenshot shows no matching flight"
@@ -408,7 +510,7 @@ def update_leg(browser, lid):
         f = L.get("flight") or {}
         if f.get("inbound_fa_id") and ph == "scheduled":
             try:
-                boot, _ = browser.load(fa.id_url(f["inbound_fa_id"]), lid + "-inbound")
+                boot, _ = load(browser, fa.id_url(f["inbound_fa_id"]), lid + "-inbound", L, "inbound aircraft")
                 inb, _ = fa.flights_from_bootstrap(boot)
                 if inb:
                     for side in ("origin", "destination"):
@@ -515,6 +617,7 @@ def worker():
                 forced.add(REFRESH_Q.get_nowait())
             if now - last_sched > 300 or "all" in forced:
                 reload_schedule(force="all" in forced)
+                expire_manual(now)
                 sync_extras()
                 last_sched = now
             if now - (STATE["nas_at"] or 0) > CFG["nas_minutes"] * 60 or "all" in forced:
@@ -550,13 +653,15 @@ def leg_summary(L, now, nas, full=False):
     f = L.get("flight")
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra",
                                   "sched_out", "sched_in", "summary", "source", "note", "error", "updated",
-                                  "next_check", "shot", "fa_id")}
+                                  "next_check", "shot", "fa_id", "date", "manual")}
     out["status"] = alerting.status_label(L, CFG)
     out["phase"] = fa.phase(f, now)
     out["watching"] = watched(L, now)
     out["finished"] = finished(L, now)
     if out["finished"] and out["phase"] == "scheduled":
         out["status"] = "Completed"
+    elif out["finished"] and out["phase"] in ("airborne", "landed"):
+        out["status"] = "Departed"
     out["problems"] = alerting.problems(L, CFG, nas if out["watching"] else [])
     out["delay"] = fa.delay_minutes(f, L["sched_out"]) if f else None
     out["arr_delay"] = fa.arrival_delay_minutes(f, L["sched_in"]) if f else None
@@ -621,6 +726,30 @@ def api_state():
     return data
 
 
+def api_debug():
+    now = time.time()
+    with LOCK:
+        path = CFG["ics_file_path"]
+        legs = sorted((L for L in STATE["legs"].values() if not L.get("extra")), key=lambda L: L["sched_out"])
+        return {
+            "now": now, "version": VERSION,
+            "worker": STATE["worker"],
+            "fetches": list(reversed(STATE["debug"])),
+            "schedule": {**STATE["schedule"], "path": path, "exists": os.path.exists(path),
+                         "legs": [{"summary": L["summary"], "ident": L.get("ident"), "dep": L["dep"],
+                                   "arr": L["arr"], "dh": L.get("dh"), "sched_out": L["sched_out"],
+                                   "watching": watched(L, now), "finished": finished(L, now)}
+                                  for L in legs[:40]]},
+            "config": {"airline_icao": CFG["airline_icao"] or "(not set)",
+                       "notify": f"notify.{CFG['notify_service']}" if CFG.get("notify_service")
+                       else "persistent notification (notify_service not set)",
+                       "ingress": INGRESS["path"] or "(unknown)", "gemini": bool(CFG.get("gemini_api_key")),
+                       "gemini_model": CFG.get("gemini_model"), "watch_hours": CFG["watch_hours"],
+                       "home_tz": TZNAME, "viewer_port": 6080},
+            "manual": STATE["manual"],
+        }
+
+
 def api_leg(lid):
     now = time.time()
     with LOCK:
@@ -655,6 +784,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/index.html"
         if path == "/api/state":
             return self._send(200, api_state())
+        if path == "/api/debug":
+            return self._send(200, api_debug())
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
@@ -674,8 +805,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, f.read(), STATIC[ext], "no-cache")
         return self._send(404, {"error": "not found"})
 
+    def _json(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+        except Exception:
+            return {}
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        if path == "/api/flights":
+            body = self._json()
+            try:
+                lid = add_manual(body.get("ident"), body.get("date"))
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
+            REFRESH_Q.put(lid)
+            WAKE.set()
+            return self._send(200, {"ok": True, "id": lid})
+        if path == "/api/flights/remove":
+            remove_manual(self._json().get("id") or "")
+            return self._send(200, {"ok": True})
+        if path == "/api/test-notify":
+            ok, detail = notify({"title": "Flight Tracker test", "level": "warn", "tag": "test", "key": "notify",
+                                 "message": f"Notifications work. Sent {datetime.now(HOME_TZ):%H:%M} via "
+                                            f"{CFG.get('notify_service') or 'persistent notification'}."})
+            return self._send(200 if ok else 502, {"ok": ok, "detail": detail})
         m = re.match(r"^/api/refresh(?:/([\w-]+))?$", path)
         if m:
             REFRESH_Q.put(m.group(1) or "all")

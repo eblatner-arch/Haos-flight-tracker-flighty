@@ -178,3 +178,28 @@ class Nas(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Lifecycle(unittest.TestCase):
+    def test_stops_at_takeoff_and_by_date(self):
+        os.environ.setdefault("FT_DATA", "/nonexistent")
+        import server
+        L = {"id": "a", "sched_out": T0 + H, "sched_in": T0 + 4 * H, "dep": "EWR", "arr": "SFO"}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + H))
+        self.assertTrue(server.watched(L, T0))
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + H, off_a=T0 + 1.2 * H))
+        self.assertTrue(server.finished(L, T0 + 1.3 * H))
+        self.assertFalse(server.watched(L, T0 + 1.3 * H))
+        X = dict(L, extra=True)
+        self.assertFalse(server.watched(X, T0 + 1.3 * H))
+
+    def test_pick_by_date(self):
+        b1 = boot(fa_id="A", out_s=T0)            # 2025-10-14 local NY
+        b2 = boot(fa_id="B", out_s=T0 + 24 * H)
+        cur, _ = fa.flights_from_bootstrap(b1)
+        act = [fa.normalize(list(b2["flights"].values())[0])]
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        d2 = datetime.fromtimestamp(T0 + 24 * H, ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        self.assertEqual(fa.pick_by_date(cur, act, d2)["fa_id"], "B")
+        self.assertIsNone(fa.pick_by_date(cur, act, "1999-01-01"))

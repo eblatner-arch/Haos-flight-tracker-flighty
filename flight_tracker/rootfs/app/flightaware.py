@@ -217,3 +217,22 @@ def arrival_delay_minutes(f, sched_in=None):
     if s is None or e is None:
         return None
     return int(round((e - s) / 60))
+
+
+def pick_by_date(cur, activity, date_str):
+    """The instance departing on date_str (YYYY-MM-DD, origin local time), or None."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    for f in ([cur] if cur else []) + list(activity):
+        if not f or not f.get("fa_id"):
+            continue
+        t = f["times"]["out"]["scheduled"] or f["times"]["off"]["scheduled"]
+        if t is None:
+            continue
+        try:
+            tz = ZoneInfo(f["origin"].get("tz") or "UTC")
+        except Exception:
+            tz = timezone.utc
+        if datetime.fromtimestamp(t, tz).strftime("%Y-%m-%d") == date_str:
+            return f
+    return None

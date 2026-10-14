@@ -83,15 +83,30 @@
     return L.marker(pos, { icon, title, zIndexOffset: 1000 });
   }
 
+  // Free basemaps, no API key: Esri's gray canvas, falling back to OpenStreetMap if it won't load.
+  function addTiles(map, dark) {
+    const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
+    const base = L.tileLayer(esri(dark ? "World_Dark_Gray_Base" : "World_Light_Gray_Base"),
+      { maxZoom: 16, attribution: "Tiles &copy; Esri" }).addTo(map);
+    const labels = L.tileLayer(esri(dark ? "World_Dark_Gray_Reference" : "World_Light_Gray_Reference"),
+      { maxZoom: 16, pane: "overlayPane", opacity: 0.85 }).addTo(map);
+    let errors = 0, switched = false;
+    base.on("tileerror", () => {
+      if (switched || ++errors < 4) return;
+      switched = true;
+      map.removeLayer(base); map.removeLayer(labels);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { maxZoom: 16, className: dark ? "osm-dark" : "", attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+    });
+  }
+
   function drawMap(el, leg, { interactive = true } = {}) {
     if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     const map = L.map(el, { zoomControl: interactive, attributionControl: true, dragging: interactive,
       scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
     maps.push(map);
-    L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-      subdomains: "abcd", maxZoom: 12, attribution: '&copy; OpenStreetMap &copy; CARTO',
-    }).addTo(map);
+    addTiles(map, dark);
     const route = css("--route"), violet = css("--violet"), muted = css("--faint");
     const bounds = [];
     const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
@@ -302,9 +317,9 @@
         h += row(l);
       }
     }
-    if (extras.length) {
-      h += `<h2 class="section">Following</h2>` + extras.map(row).join("");
-    }
+    h += `<h2 class="section"><span>Following</span><a class="small" style="color:var(--accent)" href="#/add">+ Add flight</a></h2>`;
+    h += extras.length ? extras.map(row).join("")
+      : `<a class="card small muted" style="display:block" href="#/add">Follow any flight by number: family, a commute, a jumpseat option. Tap to add one.</a>`;
     const done = legs.filter((l) => l.finished).slice(-6).reverse();
     if (done.length) h += `<h2 class="section">Recent</h2>` + done.map(row).join("");
     h += `<h2 class="section"><span>National airspace</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>` + nasCard(myAirports);
@@ -341,7 +356,8 @@
       ["Live", leg.live ? `${leg.live.alt_ft ?? "?"} ft · ${leg.live.gs_kt ?? "?"} kt · ${ago(leg.live.at)}` : ""],
       ["Data from", leg.source || ""],
       ["Updated", leg.updated ? ago(leg.updated) : "not yet"],
-      ["Next check", leg.watching && leg.next_check ? hm(leg.next_check) : leg.watching ? "soon" : `starts ${STATE.settings.watch_hours} h before departure`],
+      ["Next check", leg.finished ? "none — tracking stops at takeoff" : leg.watching && leg.next_check ? hm(leg.next_check) : leg.watching ? "soon" : `starts ${STATE.settings.watch_hours} h before departure`],
+      ["Followed for", leg.extra ? (leg.date || "the next departure") : ""],
       ["Calendar", leg.summary],
     ].filter(([, v]) => v);
     destroyMaps();
@@ -372,7 +388,8 @@
       <div class="card"><div class="kv">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("")}</div>
         ${leg.note ? `<p class="small muted">${esc(leg.note)}</p>` : ""}${leg.error ? `<p class="err">${esc(leg.error)}</p>` : ""}
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" id="leg-refresh">Refresh this flight</button>
+          ${leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
+          ${leg.manual ? '<button class="btn" id="leg-remove">Stop following</button>' : ""}
           ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div></div>
       ${(leg.nas || []).length ? `<h2 class="section">NAS at your airports</h2><div class="card">${leg.nas.map((n) => `<div class="nas-item mine"><div class="apt">${esc(n.airport)}</div><div><div class="lbl">${esc(n.label)}</div><div class="det">${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</div></div></div>`).join("")}</div>` : ""}
@@ -380,11 +397,116 @@
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
     drawMap(document.getElementById("detail-map"), leg);
-    document.getElementById("leg-refresh").onclick = async (e) => {
+    const rb = document.getElementById("leg-refresh");
+    if (rb) rb.onclick = async (e) => {
       e.target.textContent = "Refreshing…";
       await api(`api/refresh/${leg.id}`, { method: "POST" });
       setTimeout(() => render(true), 25000);
     };
+    const xb = document.getElementById("leg-remove");
+    if (xb) xb.onclick = async () => {
+      await api("api/flights/remove", { method: "POST", body: JSON.stringify({ id: leg.id }) });
+      location.hash = "#/";
+    };
+  }
+
+  // ---------- add a flight ----------
+  function addView() {
+    destroyMaps();
+    const manual = STATE.legs.filter((l) => l.manual);
+    const today = new Date().toISOString().slice(0, 10);
+    $app.innerHTML = `
+      <a class="back" href="#/">‹ Flights</a>
+      <div class="card">
+        <h3 style="margin:0 0 4px">Follow a flight</h3>
+        <p class="small muted" style="margin:0 0 14px">Flight number with its airline code. Leave the date blank to follow the next departure.</p>
+        <form id="addform" class="form">
+          <label>Flight number<input id="f-ident" placeholder="UA1234" autocapitalize="characters" autocomplete="off" required></label>
+          <label>Date (optional)<input id="f-date" type="date" min="${today}"></label>
+          <button class="btn primary" type="submit">Follow</button>
+          <div id="f-msg" class="small"></div>
+        </form>
+      </div>
+      ${manual.length ? `<h2 class="section">Following from the app</h2>` + manual.map((l) => `<div class="row">
+          <div class="when">${esc(l.display || l.ident)}<small>${l.date ? esc(new Date(l.date + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "next"}</small></div>
+          <div class="what"><div class="r">${l.dep ? `${esc(l.dep)} → ${esc(l.arr)}` : "Looking up…"}</div><div class="s">${esc(l.note || l.status)}</div></div>
+          <button class="btn" data-remove="${esc(l.id)}">Remove</button></div>`).join("") : ""}
+      <p class="small faint" style="margin:16px 4px">Followed flights get pushes for gate changes, delays, pushback and takeoff, then tracking stops. App-added flights clear themselves a day and a half after departure.</p>`;
+    document.getElementById("addform").onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("f-msg");
+      msg.className = "small muted"; msg.textContent = "Adding…";
+      try {
+        const r = await fetch("api/flights", { method: "POST", body: JSON.stringify({
+          ident: document.getElementById("f-ident").value, date: document.getElementById("f-date").value }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || r.status);
+        msg.textContent = "Added. Looking it up on FlightAware…";
+        await load();
+        setTimeout(() => { location.hash = `#/leg/${d.id}`; }, 600);
+      } catch (err) { msg.className = "small err"; msg.textContent = err.message; }
+    };
+    $app.querySelectorAll("[data-remove]").forEach((b) => b.onclick = async () => {
+      await api("api/flights/remove", { method: "POST", body: JSON.stringify({ id: b.dataset.remove }) });
+      await load(); addView();
+    });
+  }
+
+  // ---------- tools: test push + debug ----------
+  async function toolsView() {
+    destroyMaps();
+    const d = await api("api/debug");
+    const sch = d.schedule || {};
+    const c = d.config;
+    const fetchRow = (x) => `<div class="fetch ${x.error ? "bad" : x.page_data === false ? "warn" : ""}">
+      ${x.has_shot ? `<a href="api/shot/${esc(x.shot)}.png?t=${Math.round(x.at)}" target="_blank" rel="noopener"><img loading="lazy" src="api/shot/${esc(x.shot)}.png?t=${Math.round(x.at)}" alt="" onerror="this.parentNode.remove()"></a>` : ""}
+      <div class="fx">
+        <div><b>${esc(x.leg || "")}</b> · ${esc(x.what)} <span class="faint">${fmt(x.at, undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}${x.ms ? ` · ${(x.ms / 1000).toFixed(1)} s` : ""}</span></div>
+        <div class="small">${x.error ? `<span class="err">${esc(x.error)}</span>`
+          : x.page_data === false ? `<span style="color:var(--amber)">Page loaded, but no flight data in it (CAPTCHA, sign-in or layout change?)</span>`
+          : x.page_data ? `Page data ✓ · ${x.flights} flight${x.flights === 1 ? "" : "s"}${x.found ? ` · ${esc(x.found)}` : ""}` : esc(x.found || "")}</div>
+        ${x.url ? `<div class="small faint mono" style="word-break:break-all">${esc(x.url)}</div>` : ""}
+      </div></div>`;
+    $app.innerHTML = `
+      <a class="back" href="#/">‹ Flights</a>
+      <div class="card">
+        <h3 style="margin:0 0 4px">Notifications</h3>
+        <p class="small muted" style="margin:0 0 12px">Sends to ${esc(c.notify)}.</p>
+        <button class="btn primary" id="t-notify">Send test notification</button>
+        <div id="t-msg" class="small" style="margin-top:8px"></div>
+      </div>
+      <h2 class="section">Setup check</h2>
+      <div class="card"><div class="kv">
+        <div class="k">Schedule file</div><div>${sch.exists ? "✓ " : '<span class="err">missing </span>'}<span class="mono small">${esc(sch.path)}</span></div>
+        <div class="k">Read</div><div>${sch.checked ? ago(sch.checked) : "not yet"}${sch.events != null ? ` · ${sch.events} events, ${sch.count} flights` : ""}</div>
+        ${sch.error ? `<div class="k">Error</div><div class="err">${esc(sch.error)}</div>` : ""}
+        <div class="k">Airline</div><div>${esc(c.airline_icao)}</div>
+        <div class="k">Screenshot reader</div><div>${c.gemini ? `Gemini (${esc(c.gemini_model)}), fallback only` : "off (no Gemini key)"}</div>
+        <div class="k">Worker</div><div>${d.worker.busy ? "checking a flight now" : "idle"}${d.worker.last_cycle ? ` · last cycle ${ago(d.worker.last_cycle)}` : ""}${d.worker.error ? ` · <span class="err">${esc(d.worker.error)}</span>` : ""}</div>
+        <div class="k">Browser viewer</div><div>http://&lt;your-ha-ip&gt;:${c.viewer_port}/vnc.html <span class="faint">(needs viewer_password)</span></div>
+        <div class="k">Version</div><div>${esc(d.version)}</div>
+      </div></div>
+      <h2 class="section">Flights found in your schedule</h2>
+      <div class="card">${(sch.legs || []).length ? sch.legs.map((l) => `<div class="sched-row">
+          <span class="mono small">${fmt(l.sched_out, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</span>
+          <span><b>${esc(l.ident || "—")}</b> ${esc(l.dep)}→${esc(l.arr)}${l.dh ? " DH" : ""} <span class="faint">${l.finished ? "done" : l.watching ? "watching" : ""}</span><br><span class="small faint">${esc(l.summary)}</span></span></div>`).join("")
+        : '<div class="small muted">None in the next three weeks.</div>'}
+        ${(sch.unmatched || []).length ? `<div class="small muted" style="margin-top:12px">Events not recognised as flights (fine if they're hotels, reserve, etc.):</div><div class="small faint mono">${sch.unmatched.map(esc).join("<br>")}</div>` : ""}
+      </div>
+      <h2 class="section"><span>Page loads &amp; screenshots</span><button class="btn small" id="t-reload">Reload</button></h2>
+      <div class="card">${d.fetches.length ? d.fetches.map(fetchRow).join("") : '<div class="small muted">No pages loaded yet. Flights are checked from ' + STATE.settings.watch_hours + ' h before departure; add a flight to test now.</div>'}</div>`;
+    document.getElementById("t-notify").onclick = async (e) => {
+      const msg = document.getElementById("t-msg");
+      e.target.disabled = true; msg.className = "small muted"; msg.textContent = "Sending…";
+      try {
+        const r = await fetch("api/test-notify", { method: "POST" });
+        const j = await r.json();
+        msg.className = j.ok ? "small" : "small err";
+        msg.textContent = j.ok ? `Sent via ${j.detail}. Check your phone.` : `Failed: ${j.detail}`;
+      } catch (err) { msg.className = "small err"; msg.textContent = err.message; }
+      e.target.disabled = false;
+    };
+    document.getElementById("t-reload").onclick = () => toolsView();
   }
 
   // ---------- loop ----------
@@ -398,7 +520,10 @@
     try {
       if (force || !STATE) await load();
       const m = route.match(/^#\/leg\/([\w-]+)/);
-      if (m) await legView(m[1]); else homeView();
+      if (m) await legView(m[1]);
+      else if (route.startsWith("#/add")) addView();
+      else if (route.startsWith("#/tools")) await toolsView();
+      else homeView();
       if (route !== lastRoute) window.scrollTo(0, 0);
       lastRoute = route;
     } catch (e) {
@@ -413,7 +538,7 @@
   };
   window.addEventListener("hashchange", () => render(false));
   // Re-render on a timer, but not while the user is panning a detail map.
-  setInterval(() => { if (!document.hidden && !(location.hash || "").startsWith("#/leg/")) render(true); }, 30000);
+  setInterval(() => { if (!document.hidden && ["", "#/", "#"].includes(location.hash)) render(true); }, 30000);
   setInterval(() => { if (!document.hidden && (location.hash || "").startsWith("#/leg/")) render(true); }, 120000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) render(true); });
   render(true);

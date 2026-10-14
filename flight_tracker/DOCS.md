@@ -57,6 +57,30 @@ are time-sensitive on iPhone (turn off with `time_sensitive`).
   with flight category, filed route, altitude and speed, its alert history and
   the latest page screenshot.
 
+## Following other flights
+
+Tap **+** to follow any flight by number (UA1234 or UAL1234), optionally on a
+given date. You can also list flights in `track_flights` on the Configuration
+tab. Followed flights get gate, delay, pushback and takeoff pushes.
+
+## Tools
+
+The wrench button opens Tools:
+
+- **Send test notification** to check `notify_service`.
+- **Setup check**: the schedule file, how many flights were found, airline,
+  screenshot reader, worker status.
+- **Flights found in your schedule**, plus calendar events that weren't read as
+  flights, so you can see if a title format is missed.
+- **Page loads & screenshots**: every FlightAware page the tracker opened, whether
+  it found flight data, and a thumbnail of the page (tap for full size).
+
+## When tracking stops
+
+A flight is tracked from `watch_hours` before departure until FlightAware shows
+it has taken off. After that it moves to Recent (or shows Departed under
+Following) and isn't checked again.
+
 ## Sensors
 
 - `sensor.flight_tracker_next_leg`: status of your next flight, with times,

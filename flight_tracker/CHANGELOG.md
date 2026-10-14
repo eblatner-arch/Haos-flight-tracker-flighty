@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0
+- Follow any flight from the app (+ button): flight number and optional date; remove it any time
+- Tracking stops once a flight has taken off
+- Map tiles are free with no API key (Esri gray canvas, OpenStreetMap fallback)
+- Tools page (wrench button): send a test notification, check setup, see which calendar events were read as flights, and every page load with its screenshot
+- The image is built on GitHub and downloaded, so installs and updates no longer build on your device
+
 ## 2.0.1
 - Much smaller image: Python slim base with only Chromium instead of the full Playwright image, so installs finish faster
 
