@@ -492,10 +492,13 @@
   function nasTrend(g) {
     const n = g.n;
     const sub = [n.detail, n.reason && n.reason[0].toUpperCase() + n.reason.slice(1)].filter(Boolean).join(" · ");
-    return `<div class="nas-trend"><span class="na-apt">${esc(n.airport)}</span><div><b>${esc(n.label)}</b>${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}</div></div>`;
+    const forWhom = g.uses.map((u) => `${u.leg.display || u.leg.ident || ""} ${u.leg.dep}→${u.leg.arr}${u.leg.dep !== n.airport && u.leg.arr !== n.airport ? "" : u.leg.dep === n.airport && n.dir === "arr" ? " (inbound)" : ""}`).join(" · ");
+    return `<div class="nas-trend"><span class="na-apt">${esc(n.airport)}</span><div><b>${esc(n.label)}</b>${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}${g.uses.length && legsShown > 1 ? `<div class="na-for">${esc(forWhom)}</div>` : ""}</div></div>`;
   }
   const TREND = ["delay"];
+  let legsShown = 1;
   const nasTop = (legs) => {
+    legsShown = legs.length;
     const gs = nasGroups(legs);
     return gs.filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("") + gs.filter((g) => TREND.includes(g.n.kind)).map(nasTrend).join("");
   };
@@ -575,7 +578,7 @@
       const d = x && x.scheduled && v ? (v - x.scheduled) / 60 : 0;
       return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${d >= 5 ? "late" : d <= -5 ? "early" : ""}">${hm(v, tz)}</div><div class="s">${k}${t && t.scheduled && v && Math.abs(v - t.scheduled) >= 300 ? ` · sched ${hm(t.scheduled, tz)}` : ""}</div></div>`;
     };
-    const wx = Object.entries(leg.wx || {}).filter(([, w]) => w).map(([c, w]) =>
+    const wx = Object.entries(leg.wx || {}).map(([c, w]) => !w ? `<div style="margin-top:8px"><b>${esc(c)}</b> <span class="small faint">no METAR yet</span></div>` :
       `<div style="margin-top:8px"><b>${esc(c)}</b>${w.category ? `<span class="cat ${esc(w.category)}">${esc(w.category)}</span>` : ""}
        <span class="small muted"> ${w.wind_kt != null ? `${w.wind_dir ?? "VRB"}° ${w.wind_kt}${w.gust_kt ? `G${w.gust_kt}` : ""} kt` : ""}${w.visibility != null ? ` · ${esc(w.visibility)} SM` : ""}${w.ceiling_ft != null ? ` · ceiling ${w.ceiling_ft} ft` : ""}</span>
        <div class="metar">${esc(w.raw || "")}</div></div>`).join("");

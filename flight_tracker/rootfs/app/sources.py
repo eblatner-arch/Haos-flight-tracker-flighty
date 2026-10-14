@@ -130,6 +130,7 @@ def parse_events(data):
                 det += f" and {(ad.get('trend') or d.get('trend')).lower()}"
             reason = d.get("reason") or ""
             out.append({"airport": arpt, "kind": "delay", "label": f"{typ.title()} delay trend",
+                        "dir": "dep" if typ.lower().startswith("dep") else "arr",
                         "reason": reason.split(":", 1)[-1] if ":" in reason else reason, "detail": det,
                         "key": f"{arpt}|delay|{typ}"})
         cl = a.get("airportClosure")

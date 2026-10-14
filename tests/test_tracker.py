@@ -351,6 +351,13 @@ class Followed(unittest.TestCase):
         imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["who"], i["hit"]) for i in imp], [("you", False)])   # ZBW isn't in scope: still shown
 
+    def test_delay_trend_direction(self):
+        items = sources.parse_events([{"airportId": "ORD", "departureDelay": {"reason": "VOL:Volume", "averageDelay": "15",
+                                       "arrivalDeparture": {"type": "Departure", "min": "1", "max": "2", "trend": "Increasing"}}},
+                                      {"airportId": "EWR", "arrivalDelay": {"reason": "WX", "arrivalDeparture": {"type": "Arrival"}}}])
+        self.assertEqual(alerts.nas_for({"dep": "EWR", "arr": "ORD"}, items), [])           # ORD departures, EWR arrivals: not you
+        self.assertEqual(sorted(n["airport"] for n in alerts.nas_for({"dep": "ORD", "arr": "EWR"}, items)), ["EWR", "ORD"])
+
     def test_ground_stop_push_extend_expand(self):
         L = {"id": "x", "dep": "BOS", "arr": "EWR", "display": "UA 1", "extra": True, "sched_out": T0 + H,
              "sched_in": T0 + 2 * H, "notified": {"watch": True}}

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.6
+- Delay trends only count where they affect the flight: departure delays at the airport you leave, arrival delays where you land (or where your inbound is still headed). An ORD departure delay no longer shows or pushes for EWR→ORD
+- Delay-trend cards on the Flights screen say which flight they're for when you're watching more than one
+- Weather: airports on a newly added or newly watched flight get their METAR within a minute instead of waiting up to 10; the flight page says "no METAR yet" instead of leaving the airport out
+
 ## 2.11.5
 - "Inbound departure delayed" is now "Inbound arriving late": it compares the inbound's estimated arrival at your airport with its scheduled arrival, not when it leaves its origin. The push includes the expected turn
 

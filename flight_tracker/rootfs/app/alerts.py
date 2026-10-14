@@ -126,6 +126,13 @@ def nas_for(leg, nas_items):
     for n in nas_items or []:
         if n["airport"] not in codes:
             continue
+        if n["kind"] == "delay":
+            # departure delays matter where you (or nobody) depart; arrival delays where you or your inbound arrive
+            dr = n.get("dir") or ("dep" if "depart" in n["label"].lower() else "arr" if "arriv" in n["label"].lower() else "")
+            if dr == "dep" and n["airport"] != dep:
+                continue
+            if dr == "arr" and n["airport"] != arr and not (n["airport"] == dep and inb_from and not inb_done):
+                continue
         m = dict(n)
         m["here"] = "dep" if n["airport"] == dep else "arr"
         impact = []

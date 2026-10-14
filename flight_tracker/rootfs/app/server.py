@@ -1208,13 +1208,25 @@ def refresh_nas(now):
         log.warning("NAS status: %s", e)
 
 
+def wx_codes(now):
+    codes = set()
+    for L in list(STATE["legs"].values()):
+        if watched(L, now) or (L["sched_out"] - now < 36 * HOUR and not finished(L, now)):
+            for c in (L.get("dep"), L.get("arr")):
+                codes.add(airports.icao(c) or ("K" + c if c and len(c) == 3 else ""))
+    codes.discard("")
+    return codes
+
+
+def wx_missing(now):
+    """Airports on a current flight with no METAR yet (a flight added since the last fetch)."""
+    have = STATE.get("wx") or {}
+    return [c for c in wx_codes(now) if c not in have]
+
+
 def refresh_wx(now):
     with LOCK:
-        codes = set()
-        for L in STATE["legs"].values():
-            if watched(L, now) or (L["sched_out"] - now < 36 * HOUR and not finished(L, now)):
-                for c in (L.get("dep"), L.get("arr")):
-                    codes.add(airports.icao(c) or ("K" + c if c and len(c) == 3 else ""))
+        codes = wx_codes(now)
     try:
         wx = sources.fetch_metars(codes)
         with LOCK:
@@ -1245,7 +1257,8 @@ def worker():
                 last_sched = now
             if now - (STATE["nas_at"] or 0) > CFG["nas_minutes"] * 60 or "all" in forced:
                 refresh_nas(now)
-            if now - STATE.get("wx_at", 0) > 600 or "all" in forced:
+            if now - STATE.get("wx_at", 0) > 600 or "all" in forced \
+                    or (now - STATE.get("wx_at", 0) > 60 and wx_missing(now)):
                 refresh_wx(now)
             with LOCK:
                 due = sorted((L["next_check"] if L["id"] not in forced and "all" not in forced else 0, L["id"])
