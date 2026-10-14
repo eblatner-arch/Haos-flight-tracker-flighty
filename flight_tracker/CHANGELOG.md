@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.0
+- NAS status now comes from the FAA's live airport-events feed (the same data nasstatus.faa.gov shows), including ground-stop scope, probability of extension and the advisory link. The older XML feed is the fallback
+- Ground stops and delay programs show at the top of the Flights screen and the flight page, with the departure centers in scope. Your departure's (or your inbound's) center is highlighted, and the card says whether the program includes it — or doesn't include it yet
+- Every ground stop at either airport pushes, whatever its scope; the push says whether it includes your departure or inbound. A ground stop or delay program also pushes when it's extended or expanded to more centers
+- NAS applies to followed flights too (each NAS event has a Followed switch on the Notifications page, on by default)
+
 ## 2.10.2
 - Short turn: a turn that was skipped because of a setting no longer counts as already sent, so changing the setting pushes it on the next check
 

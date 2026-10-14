@@ -377,7 +377,7 @@
   }
 
   function problemBanners(leg) {
-    return (leg.problems || []).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
+    return (leg.problems || []).filter((p) => !p.nas).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
   }
 
   function hero(leg) {
@@ -448,6 +448,45 @@
       ${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
   }
 
+  // ---------- NAS ----------
+  const MAJOR = ["gs", "closure", "gdp"];
+  const aptTz = (leg, apt) => apt === leg.dep ? leg.dep_ap.tz : apt === leg.arr ? leg.arr_ap.tz : undefined;
+  // groups: [{n, tz, uses: [{leg, impact}]}] — one card per program, listing every flight it touches
+  function nasGroups(legs) {
+    const by = new Map();
+    for (const l of legs) for (const n of l.nas || []) {
+      if (!by.has(n.key)) by.set(n.key, { n, tz: aptTz(l, n.airport), uses: [] });
+      by.get(n.key).uses.push({ leg: l, impact: n.impact || [] });
+    }
+    return [...by.values()].sort((a, b) => MAJOR.indexOf(a.n.kind) - MAJOR.indexOf(b.n.kind) || a.n.airport.localeCompare(b.n.airport));
+  }
+  function nasAlert(g) {
+    const n = g.n, tz = g.tz;
+    const hits = new Set(), lines = [];
+    for (const u of g.uses) for (const i of u.impact) {
+      if (i.center) hits.add(i.center);
+      hits.add(i.from);
+      const who = i.who === "you" ? `${esc(u.leg.display || u.leg.ident || "Your flight")} from ${esc(i.from)}` : `${esc(u.leg.display || "Your flight")}'s inbound from ${esc(i.from)}`;
+      const where = i.center ? ` (${esc(i.center)})` : "";
+      lines.push(i.hit === true ? `<div class="na-hit yes">Includes ${who}${where}</div>`
+        : i.hit === false ? `<div class="na-hit no">Doesn't include ${who}${where} — yet</div>`
+        : `<div class="na-hit">Can't tell if it includes ${who}</div>`);
+    }
+    if (!lines.length) lines.push(...g.uses.map((u) => `<div class="na-hit">${esc(u.leg.display || u.leg.ident || "")} ${esc(u.leg.dep)}→${esc(u.leg.arr)}</div>`));
+    const when = n.end ? `${n.start && n.start > Date.now() / 1000 ? hm(n.start, tz) + "–" : "until "}${hm(n.end, tz)} ${tzAbbr(n.end, tz)}` : "";
+    const sub = [n.reason && n.reason[0].toUpperCase() + n.reason.slice(1), n.detail, n.prob && `extension probability ${n.prob.toLowerCase()}`].filter(Boolean).join(" · ");
+    const scope = (n.scope || []).length ? `<div class="na-scope"><span class="faint">Departures from</span> ${n.scope.map((c) => `<span class="cc ${hits.has(c) ? "on" : ""}">${esc(c)}</span>`).join("")}</div>`
+      : n.flights ? `<div class="na-scope faint">${esc(n.flights)}</div>` : "";
+    return `<div class="nas-alert k-${esc(n.kind)}">
+      <div class="na-top"><span class="na-apt">${esc(n.airport)}</span><span class="na-kind">${esc(n.label)}</span><span class="na-when">${esc(when)}</span></div>
+      ${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}
+      ${scope}${lines.join("")}
+      ${n.advisory ? `<a class="na-adv" href="${esc(n.advisory)}" target="_blank" rel="noopener">FAA advisory ↗</a>` : ""}
+    </div>`;
+  }
+  const nasTop = (legs) => nasGroups(legs).filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("");
+  const nasMinor = (legs) => nasGroups(legs).filter((g) => !MAJOR.includes(g.n.kind)).map((g) => g.n);
+
   function alertsCard(list) {
     if (!list.length) return "";
     return `<div class="card">${list.slice(0, 15).map((a) => `<div class="alert">
@@ -463,9 +502,10 @@
     const all = [...STATE.legs].sort((a, b) => sortKey(a) - sortKey(b));
     const live = all.filter((l) => !l.finished);
     const next = live[0];
-    // NAS only for airports on your own flights in the watch window.
-    const myAirports = new Set(all.filter((l) => !l.extra && l.watching).flatMap((l) => [l.dep, l.arr]).filter(Boolean));
-    let h = "";
+    // NAS for airports on any flight in the watch window; programs go up top, minor delays below.
+    const watching = live.filter((l) => l.watching);
+    const myAirports = new Set(watching.flatMap((l) => [l.dep, l.arr]).filter(Boolean));
+    let h = nasTop(watching);
     if (STATE.schedule && STATE.schedule.error) h += `<div class="banner critical"><span class="dot critical"></span><div><b>Schedule</b><br>${esc(STATE.schedule.error)}</div></div>`;
     if (next) {
       h += problemBanners(next);
@@ -489,9 +529,9 @@
       h += `<div class="card small muted">Nothing else scheduled.</div>`;
     }
     if (myAirports.size) {
-      const mine = (STATE.nas || []).filter((n) => myAirports.has(n.airport));
+      const minor = nasMinor(watching), major = nasGroups(watching).length - minor.length;
       h += `<h2 class="section"><span>NAS · ${esc([...myAirports].join(" · "))}</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>`;
-      h += mine.length ? nasCard(mine) : `<div class="card small muted">No ground stops, delay programs or closures at your airports.</div>`;
+      h += minor.length ? nasCard(minor) : `<div class="card small muted">${major ? "Programs shown at the top. No other delays at your airports." : "No ground stops, delay programs or closures at your airports."}${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
     }
     const done = all.filter((l) => l.finished).sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 6);
     if (done.length) h += `<h2 class="section">Recent</h2>` + done.map(row).join("");
@@ -543,6 +583,7 @@
     destroyMaps();
     $app.innerHTML = `
       <a class="back" href="#/">‹ Flights</a>
+      ${nasTop([leg])}
       ${problemBanners(leg)}
       <div class="detail-map" id="detail-map"></div>
       <div class="card">
@@ -574,7 +615,7 @@
           ${leg.manual ? '<button class="btn" id="leg-remove">Stop following</button>' : ""}
           ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div></div>
-      ${(leg.nas || []).length ? `<h2 class="section">NAS at your airports</h2><div class="card">${leg.nas.map((n) => `<div class="nas-item mine"><div class="apt">${esc(n.airport)}</div><div><div class="lbl">${esc(n.label)}</div><div class="det">${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</div></div></div>`).join("")}</div>` : ""}
+      ${nasMinor([leg]).length ? `<h2 class="section">Delays at these airports</h2>${nasCard(nasMinor([leg]))}` : ""}
       ${(leg.alerts || []).length ? `<h2 class="section">Alerts for this flight</h2>${alertsCard(leg.alerts)}` : ""}
       ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
           <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
@@ -683,7 +724,7 @@
         <div id="n-msg" class="small" style="margin-top:8px"></div>
       </div>
       ${groups.map((g) => `<h2 class="section">${esc(g.name)}</h2><div class="card nlist">${g.rows.map(rowHtml).join("")}</div>`).join("")}
-      <p class="small faint" style="margin:16px 4px">Gates assigned while a rule's window is closed are pushed once when it opens, with the gate at that moment. NAS and weather only apply to flights you're working or deadheading.</p>`;
+      <p class="small faint" style="margin:16px 4px">Gates assigned while a rule's window is closed are pushed once when it opens, with the gate at that moment. Ground stops push whatever their scope and say whether they include your departure or your inbound. Weather only applies to flights you're working or deadheading.</p>`;
     const msg = document.getElementById("n-msg");
     let timer = null;
     const pending = {};

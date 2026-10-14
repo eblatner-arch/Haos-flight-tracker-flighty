@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import airports
+import artcc
 import flightaware as fa
 import rules as rules_mod
 
@@ -99,20 +100,62 @@ def problems(leg, cfg, nas_items, rules=None):
                             "text": f"Short turn: {mins(t)}"})
     if ph not in ("arrived", "cancelled"):
         for n in nas_for(leg, nas_items):
-            out.append({"level": "warn", "text": f"{n['airport']}: {n['label']}"})
+            hit = any(i["hit"] for i in n.get("impact") or [])
+            out.append({"level": "critical" if n["kind"] in ("gs", "closure") and hit is not False else "warn",
+                        "text": f"{n['airport']}: {n['label']}", "nas": True})
     return out
 
 
 def nas_for(leg, nas_items):
-    """NAS programs at either end of a flight you're on. Flights you only follow get none."""
-    if leg.get("extra"):
-        return []
+    """NAS programs at either end of a flight, each with how its scope touches this flight:
+    impact = [{who: "you"|"inbound", from, center, hit: True/False/None}]."""
     f = leg.get("flight") or {}
-    codes = {(leg.get("dep") or "").upper(), (leg.get("arr") or "").upper(),
-             ((f.get("origin") or {}).get("iata") or "").upper(),
+    dep = (leg.get("dep") or (f.get("origin") or {}).get("iata") or "").upper()
+    arr = (leg.get("arr") or (f.get("destination") or {}).get("iata") or "").upper()
+    codes = {dep, arr, ((f.get("origin") or {}).get("iata") or "").upper(),
              ((f.get("destination") or {}).get("iata") or "").upper()}
     codes.discard("")
-    return [n for n in nas_items or [] if n["airport"] in codes]
+    inb = leg.get("inbound") or {}
+    inb_from = ((inb.get("origin") or {}).get("iata") or "").upper()
+    inb_done = fa.phase(inb, 0) in ("arrived", "cancelled", "diverted") if inb else True
+    out = []
+    for n in nas_items or []:
+        if n["airport"] not in codes:
+            continue
+        m = dict(n)
+        impact = []
+        if n["kind"] in ("gs", "gdp") and (n.get("scope") or n.get("flights")):
+            if n["airport"] == arr and dep:
+                impact.append({"who": "you", "from": dep, "center": artcc.center_of(dep), "hit": artcc.in_scope(n, dep)})
+            if n["airport"] == dep and inb_from and not inb_done:
+                impact.append({"who": "inbound", "from": inb_from, "center": artcc.center_of(inb_from),
+                               "hit": artcc.in_scope(n, inb_from)})
+        m["impact"] = impact
+        out.append(m)
+    return out
+
+
+def nas_text(n, tz):
+    """One push-sized description of a NAS program, including what its scope means for you."""
+    bits = [n["label"]]
+    if n.get("end") and n["kind"] in ("gs", "gdp", "closure"):
+        bits[0] += f" until {hhmm(n['end'], tz)}"
+    if n.get("detail"):
+        bits.append(n["detail"])
+    if n.get("reason"):
+        bits.append(n["reason"])
+    if n.get("prob"):
+        bits.append(f"extension probability {n['prob'].lower()}")
+    if n.get("scope"):
+        bits.append("departures from " + " ".join(n["scope"]))
+    for i in n.get("impact") or []:
+        where = f"{i['from']}" + (f" ({i['center']})" if i.get("center") else "")
+        whose = "your departure" if i["who"] == "you" else "your inbound"
+        if i["hit"] is True:
+            bits.append(f"includes {whose} from {where}")
+        elif i["hit"] is False:
+            bits.append(f"doesn't include {whose} from {where} yet")
+    return " · ".join(bits)
 
 
 NAS_EVENT = {"gs": "nas_gs", "gdp": "nas_gdp", "delay": "nas_delay", "closure": "nas_closure"}
@@ -340,13 +383,30 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
     # NAS programs at either end
     if ph not in ("arrived", "cancelled"):
         seen = set(nt.get("nas") or [])
+        ext = nt.get("nas_ext") or {}
+        cur = {}
         for n in nas_for(leg, nas_items):
-            if n["key"] in seen:
-                continue
-            seen.add(n["key"])
-            text = n["label"] + (f" ({n['detail']})" if n["detail"] else "") + (f" — {n['reason']}" if n["reason"] else "")
-            add(NAS_EVENT.get(n["kind"], "nas_other"), f"{n['airport']}: {n['label']}", f"{ident} {route}: {text}", "warn")
+            ev = NAS_EVENT.get(n["kind"], "nas_other")
+            atz = dep_tz if n["airport"] == dep else arr_tz
+            hit = any(i["hit"] for i in n.get("impact") or [])
+            level = "critical" if hit and n["kind"] in ("gs", "closure") else "warn"
+            prev = ext.get(n["key"])
+            cur[n["key"]] = {"end": n.get("end"), "scope": n.get("scope") or []}
+            if n["key"] not in seen:
+                seen.add(n["key"])
+                add(ev, f"{n['airport']}: {n['label']}", f"{ident} {route}: {nas_text(n, atz)}", level)
+            elif prev and n["kind"] in ("gs", "gdp"):
+                if prev.get("end") and n.get("end") and n["end"] > prev["end"] + 60:
+                    add(ev, f"{n['airport']}: {n['label'].lower()} extended",
+                        f"{ident} {route}: now until {hhmm(n['end'], atz)} (was {hhmm(prev['end'], atz)}) · "
+                        + nas_text(n, atz).split(" · ", 1)[-1], level)
+                added = [c for c in n.get("scope") or [] if c not in (prev.get("scope") or [])]
+                if added and prev.get("scope"):
+                    add(ev, f"{n['airport']}: {n['label'].lower()} expanded",
+                        f"{ident} {route}: now also {' '.join(added)} · {nas_text(n, atz)}", level)
         nt["nas"] = sorted(seen)
+        # keep what we knew about a program through a feed hiccup, so extensions are still compared
+        nt["nas_ext"] = {**{k: v for k, v in ext.items() if k in seen}, **cur}
 
     # Weather at either end
     if wx and ph == "scheduled":

@@ -73,17 +73,17 @@ CATALOG = [
      dict(on=True, hours=None, mine=True, dh=True, followed=False, ts=True), {}),
     ("inbound_changed", "Inbound", "Different inbound linked", "FlightAware links a different inbound flight.",
      dict(on=False, hours=2, mine=True, dh=False, followed=False, ts=False), {}),
-    # NAS (own flights only)
-    ("nas_gs", "NAS", "Ground stop", "At your departure or arrival airport.",
-     dict(on=True, hours=None, mine=True, dh=True, followed=None, ts=True), {}),
-    ("nas_gdp", "NAS", "Ground delay program", "At your departure or arrival airport.",
-     dict(on=True, hours=None, mine=True, dh=True, followed=None, ts=True), {}),
-    ("nas_delay", "NAS", "Arrival / departure delays", "FAA-reported delays at your airports.",
-     dict(on=True, hours=None, mine=True, dh=True, followed=None, ts=False), {}),
-    ("nas_closure", "NAS", "Airport closure", "Closures at your airports.",
-     dict(on=True, hours=None, mine=True, dh=True, followed=None, ts=True), {}),
+    # NAS (any flight; ground stops push whatever their scope, and say whether it includes you)
+    ("nas_gs", "NAS", "Ground stop", "At either airport, even if its scope doesn't include you yet; also when it's extended or expanded.",
+     dict(on=True, hours=None, mine=True, dh=True, followed=True, ts=True), {}),
+    ("nas_gdp", "NAS", "Ground delay program", "At either airport; also when it's extended or expanded.",
+     dict(on=True, hours=None, mine=True, dh=True, followed=True, ts=True), {}),
+    ("nas_delay", "NAS", "Arrival / departure delays", "FAA-reported delays at either airport.",
+     dict(on=True, hours=None, mine=True, dh=True, followed=True, ts=False), {}),
+    ("nas_closure", "NAS", "Airport closure", "Closures at either airport.",
+     dict(on=True, hours=None, mine=True, dh=True, followed=True, ts=True), {}),
     ("nas_other", "NAS", "Other NAS programs", "Deicing and anything else the FAA lists.",
-     dict(on=False, hours=None, mine=True, dh=True, followed=None, ts=False), {}),
+     dict(on=False, hours=None, mine=True, dh=True, followed=True, ts=False), {}),
     # Weather
     ("wx_ifr", "Weather", "IFR at departure or arrival", "Latest METAR drops to IFR or LIFR.",
      dict(on=False, hours=3, mine=True, dh=False, followed=None, ts=False), {}),
@@ -168,7 +168,7 @@ def merge(saved, cfg):
             if f in v:
                 base[k][f] = v[f]
         for f in ("mine", "dh", "followed"):
-            if f in v and base[k].get(f) is not None:
+            if f in v and v[f] is not None and base[k].get(f) is not None:
                 base[k][f] = v[f]
         for p, val in (v.get("params") or {}).items():
             if p in base[k]["params"]:

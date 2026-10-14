@@ -10,6 +10,7 @@ log = logging.getLogger("flight_tracker")
 
 UA = {"User-Agent": "haos-flight-tracker (+https://github.com/eblatner-arch/haos-flight-tracker)"}
 NAS_URL = "https://nasstatus.faa.gov/api/airport-status-information"
+EVENTS_URL = "https://nasstatus.faa.gov/api/airport-events"
 METAR_URL = "https://aviationweather.gov/api/data/metar"
 ADSB_URL = "https://api.adsb.lol/v2/callsign/{}"
 
@@ -70,7 +71,86 @@ def parse_nas(xml_text):
     return out
 
 
+def _epoch(s):
+    if not s:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _list(v):
+    if isinstance(v, list):
+        return [str(x).strip().upper() for x in v if str(x).strip()]
+    if isinstance(v, str):
+        return [x.upper() for x in v.replace(",", " ").split() if x.strip()]
+    return []
+
+
+def parse_events(data):
+    """FAA airport-events JSON (what nasstatus.faa.gov itself shows) -> NAS items with scope."""
+    out = []
+    for a in data or []:
+        arpt = (a.get("airportId") or "").upper()
+        if not arpt:
+            continue
+        gs = a.get("groundStop")
+        if gs:
+            prob = (gs.get("probabilityOfExtension") or "").title()
+            out.append({"airport": arpt, "kind": "gs", "label": "Ground stop",
+                        "reason": gs.get("impactingCondition") or "", "detail": "",
+                        "start": _epoch(gs.get("startTime")), "end": _epoch(gs.get("endTime")),
+                        "prob": prob, "center": gs.get("center") or "", "scope": _list(gs.get("includedFacilities")),
+                        "flights": (gs.get("includedFlights") or "").strip(" :"), "advisory": gs.get("advisoryUrl") or "",
+                        "key": f"{arpt}|gs|{gs.get('id') or gs.get('startTime')}"})
+        gd = a.get("groundDelay")
+        if gd:
+            avg, mx = gd.get("avgDelay"), gd.get("maxDelay")
+            det = ", ".join(x for x in (f"avg {round(float(avg))} min" if avg not in (None, "") else "",
+                                        f"max {mx} min" if mx not in (None, "") else "") if x)
+            out.append({"airport": arpt, "kind": "gdp", "label": "Ground delay program",
+                        "reason": gd.get("impactingCondition") or "", "detail": det,
+                        "start": _epoch(gd.get("startTime")), "end": _epoch(gd.get("endTime")),
+                        "avg": avg, "max": mx, "center": gd.get("center") or "",
+                        "scope": _list(gd.get("includedFacilities")),
+                        "flights": (gd.get("includedFlights") or "").strip(" :"), "advisory": gd.get("advisoryUrl") or "",
+                        "key": f"{arpt}|gdp|{gd.get('id') or gd.get('startTime')}"})
+        for fld in ("arrivalDelay", "departureDelay"):
+            d = a.get(fld)
+            if not d:
+                continue
+            ad = d.get("arrivalDeparture") or {}
+            typ = ad.get("type") or ("Arrival" if fld == "arrivalDelay" else "Departure")
+            det = f"{ad.get('min') or '?'}–{ad.get('max') or '?'}".replace(" minutes", "") + " min"
+            if ad.get("trend") or d.get("trend"):
+                det += f", {(ad.get('trend') or d.get('trend')).lower()}"
+            reason = d.get("reason") or ""
+            out.append({"airport": arpt, "kind": "delay", "label": f"{typ.title()} delays",
+                        "reason": reason.split(":", 1)[-1] if ":" in reason else reason, "detail": det,
+                        "key": f"{arpt}|delay|{typ}"})
+        cl = a.get("airportClosure")
+        if cl:
+            out.append({"airport": arpt, "kind": "closure", "label": "Airport closure",
+                        "reason": cl.get("text") or "", "detail": "",
+                        "start": _epoch(cl.get("startTime")), "end": _epoch(cl.get("endTime")),
+                        "key": f"{arpt}|closure|{cl.get('id') or cl.get('startTime')}"})
+        di = a.get("deicing")
+        if di:
+            out.append({"airport": arpt, "kind": "deice", "label": "Deicing", "reason": "", "detail": "",
+                        "key": f"{arpt}|deice"})
+    return out
+
+
 def fetch_nas():
+    """FAA's current airport events (with ground-stop scope); the older XML feed if that fails."""
+    try:
+        r = requests.get(EVENTS_URL, headers=UA, timeout=20)
+        r.raise_for_status()
+        return parse_events(r.json())
+    except Exception as e:
+        log.warning("NAS events feed: %s; using the status XML", e)
     r = requests.get(NAS_URL, headers=UA, timeout=20)
     r.raise_for_status()
     return parse_nas(r.text)

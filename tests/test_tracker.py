@@ -2,6 +2,7 @@
 
 import os
 import sys
+import json
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "flight_tracker", "rootfs", "app"))
@@ -295,10 +296,51 @@ class Followed(unittest.TestCase):
         self.assertEqual(fa.pick_followed(gone, [a, b], "EWR", "ORD", "", T0)["fa_id"], "A")
         self.assertIsNone(fa.pick_followed(gone, [a, b], "EWR", "SFO", "", T0))
 
-    def test_nas_only_for_own_legs(self):
+    def test_nas_for_any_flight(self):
         nas = [{"airport": "EWR", "kind": "gs", "label": "Ground stop", "reason": "", "detail": "", "key": "k"}]
-        self.assertEqual(alerts.nas_for({"dep": "EWR", "arr": "SFO", "extra": True}, nas), [])
+        self.assertEqual(len(alerts.nas_for({"dep": "EWR", "arr": "SFO", "extra": True}, nas)), 1)
         self.assertEqual(len(alerts.nas_for({"dep": "EWR", "arr": "SFO"}, nas)), 1)
+        self.assertEqual(alerts.nas_for({"dep": "BOS", "arr": "SFO"}, nas), [])
+
+    EVENTS = [{"airportId": "EWR", "groundStop": {
+        "id": "gs1", "impactingCondition": "thunderstorms", "startTime": "2026-10-14T16:19:00Z",
+        "endTime": "2026-10-14T17:45:00Z", "probabilityOfExtension": "MEDIUM", "center": "ZNY",
+        "includedFacilities": ["ZDC", "ZJX", "ZTL", "ZMA"], "includedFlights": "", "advisoryUrl": "https://x"},
+        "groundDelay": None, "arrivalDelay": None, "airportClosure": None, "deicing": None,
+        "departureDelay": {"reason": "VOL:Volume", "arrivalDeparture": {"type": "Departure", "min": "16 minutes",
+                                                                       "max": "30 minutes", "trend": "Increasing"}}}]
+
+    def test_ground_stop_scope(self):
+        items = sources.parse_events(self.EVENTS)
+        gs = [i for i in items if i["kind"] == "gs"][0]
+        self.assertEqual((gs["scope"], gs["prob"], gs["key"]), (["ZDC", "ZJX", "ZTL", "ZMA"], "Medium", "EWR|gs|gs1"))
+        dl = [i for i in items if i["kind"] == "delay"][0]
+        self.assertEqual((dl["label"], dl["detail"], dl["reason"]), ("Departure delays", "16–30 min, increasing", "Volume"))
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN", out_s=T0, origin="TPA", dest="EWR", inbound_id=None))
+        # GS at my departure airport: holds my inbound from TPA (ZJX); MCO->EWR: includes my departure
+        out = alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": inb}, items)
+        imp = [n for n in out if n["kind"] == "gs"][0]["impact"]
+        self.assertEqual([(i["who"], i["from"], i["center"], i["hit"]) for i in imp], [("inbound", "TPA", "ZJX", True)])
+        imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
+        self.assertEqual([(i["who"], i["hit"]) for i in imp], [("you", False)])   # ZBW isn't in scope: still shown
+
+    def test_ground_stop_push_extend_expand(self):
+        L = {"id": "x", "dep": "BOS", "arr": "EWR", "display": "UA 1", "extra": True, "sched_out": T0 + H,
+             "sched_in": T0 + 2 * H, "notified": {"watch": True}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(origin="BOS", dest="EWR", out_s=T0 + H))
+        items = sources.parse_events(self.EVENTS)
+        keys = [a["title"] for a in alerts.evaluate(L, CFG, T0, items)]
+        self.assertIn("EWR: Ground stop", keys)                 # pushes though BOS (ZBW) isn't in scope
+        msg = [a for a in alerts.evaluate(L, CFG, T0, []) + [] if a]  # nothing new
+        self.assertEqual(msg, [])
+        ev = json.loads(json.dumps(self.EVENTS))
+        ev[0]["groundStop"]["endTime"] = "2026-10-14T18:30:00Z"
+        ev[0]["groundStop"]["includedFacilities"].append("ZBW")
+        a = alerts.evaluate(L, CFG, T0 + 60, sources.parse_events(ev))
+        titles = [x["title"] for x in a]
+        self.assertIn("EWR: ground stop extended", titles)
+        self.assertIn("EWR: ground stop expanded", titles)
+        self.assertIn("includes your departure from BOS (ZBW)", [x for x in a if "expanded" in x["title"]][0]["message"])
 
 
 class Cleanup(unittest.TestCase):
@@ -655,7 +697,7 @@ class Rules(unittest.TestCase):
         r = self.rules.clean({"delay": {"on": False, "hours": "3", "params": {"threshold": "25"}},
                               "nas_gs": {"followed": True}, "bogus": {}}, self.R)
         self.assertEqual((r["delay"]["on"], r["delay"]["hours"], r["delay"]["params"]["threshold"]), (False, 3.0, 25))
-        self.assertIsNone(r["nas_gs"]["followed"])            # not applicable stays n/a
+        self.assertTrue(r["nas_gs"]["followed"])
         m = self.rules.merge(r, {"gate_alert_hours": 2})
         self.assertEqual(m["delay"]["params"]["threshold"], 25)
         seeded = self.rules.seed_from_config({"notify_watch_start": False, "inbound_alert_minutes": 45,
