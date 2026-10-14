@@ -86,6 +86,23 @@ def _alt_ft(v):
     return int(v * 100) if v < 1000 else int(v)
 
 
+def same_flight(a, b, slack=6 * 3600):
+    """Do two FlightAware flight IDs mean the same flight? IDs look like
+    UAL147-1760398500-schedule-0001 and change their tail end (schedule -> airline) as
+    FlightAware's data firms up, so compare the flight number and scheduled time instead."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    pa, pb = str(a).split("-"), str(b).split("-")
+    if len(pa) < 2 or len(pb) < 2 or pa[0].upper() != pb[0].upper():
+        return False
+    try:
+        return abs(int(pa[1]) - int(pb[1])) <= slack
+    except ValueError:
+        return False
+
+
 def thin(track, n):
     """Keep at most n points spread over the whole flight (first and last always kept),
     instead of dropping the start."""

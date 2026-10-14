@@ -765,12 +765,23 @@
     pending = setTimeout(async () => { pending = null; await render(true); }, 400);
   }
   let es = null;
+  const $live = document.getElementById("live");
+  let lastEvent = null;
+  function setLive(on, v) {
+    if (v) lastEvent = Date.now();
+    if (!$live) return;
+    $live.classList.toggle("on", !!on);
+    $live.title = on ? `Live: connected${lastEvent ? ` · last update ${Math.round((Date.now() - lastEvent) / 1000)} s ago` : ""}`
+                     : "Not live: checking every 30 s";
+    if (v) { $live.classList.remove("flash"); void $live.offsetWidth; $live.classList.add("flash"); }
+  }
   function connect() {
     if (es || !window.EventSource) return;
     try {
       es = new EventSource("api/events");
-      es.onmessage = liveRefresh;
-      es.onerror = () => { try { es.close(); } catch {} es = null; setTimeout(connect, 8000); };
+      es.onopen = () => setLive(true);
+      es.onmessage = (e) => { setLive(true, e.data); liveRefresh(); };
+      es.onerror = () => { setLive(false); try { es.close(); } catch {} es = null; setTimeout(connect, 8000); };
     } catch { es = null; }
   }
   connect();

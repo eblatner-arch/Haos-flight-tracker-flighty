@@ -332,7 +332,7 @@ class AeroAPI(unittest.TestCase):
         server.STATE["aero_calls"] = []
         server.STATE["debug"] = []
         self.calls, self.pages = [], []
-        self.tail, self.inbound = None, "IN-1"
+        self.tail, self.inbound = None, "UAL567-1760400000-airline-1"
         self.out = T0 + 17 * H
 
         def query(key, ident, start, end):
@@ -398,7 +398,7 @@ class AeroAPI(unittest.TestCase):
         self.tail = "N1"
         self.add()
         self.run_at("a1", T0)
-        self.inbound = "IN-2"                                  # page now links another airplane
+        self.inbound = "UAL903-1760390000-airline-9"                                  # page now links another airplane
         self.tail = "N2"
         self.run_at("a1", T0 + 120)
         self.run_at("a1", T0 + 2 * H)
@@ -804,3 +804,30 @@ class TrackThinning(unittest.TestCase):
         raw = {"flightId": "x", "track": [{"coord": [p[1], p[0]], "alt": 350, "gs": 450, "timestamp": p[4]} for p in pts],
                "origin": {}, "destination": {}}
         self.assertEqual(fa.normalize(raw)["track"][0][0], 40.0)
+
+
+class SameInbound(unittest.TestCase):
+    def test_id_variants_are_the_same_flight(self):
+        self.assertTrue(fa.same_flight("UAL147-1760398500-schedule-0001", "UAL147-1760398500-airline-0123p"))
+        self.assertFalse(fa.same_flight("UAL147-1760398500-airline-1", "UAL148-1760398500-airline-1"))
+        self.assertFalse(fa.same_flight("UAL147-1760398500-airline-1", "UAL147-1760484900-airline-1"))  # next day
+
+    def test_no_second_aeroapi_call_for_the_same_inbound(self):
+        import server
+        server.CFG.update(aeroapi_key="k", aeroapi_monthly_budget=5.0, aeroapi_cost_per_query=0.005,
+                          aeroapi_max_per_leg=6, watch_hours=18)
+        L = {"id": "s", "ident": "UAL1", "sched_out": T0 + 6 * H, "sched_in": T0 + 9 * H,
+             "aero": {"at": T0, "tail": "N797UA", "inbound_id": "UAL147-1760398500-schedule-0001", "calls": 1}}
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0 + 6 * H, inbound_id="UAL147-1760398500-airline-0123p"))
+        self.assertEqual(server.aero_reason(L, f, T0 + 120), (None, None))
+
+
+    def test_real_inbound_change_calls_once_unless_page_shows_same_tail(self):
+        import server
+        L = {"id": "s2", "ident": "UAL1", "sched_out": T0 + 6 * H, "sched_in": T0 + 9 * H,
+             "aero": {"at": T0, "tail": "N797UA", "inbound_id": "UAL147-1760398500-schedule-0001", "calls": 1}}
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0 + 6 * H, tail=None, inbound_id="UAL903-1760390000-airline-9"))
+        reason, _ = server.aero_reason(L, f, T0 + 120)
+        self.assertIn("UAL903 vs AeroAPI UAL147", reason)
+        f["tail"] = "N797UA"                                   # page shows the same airplane: no query
+        self.assertEqual(server.aero_reason(L, f, T0 + 120), (None, None))

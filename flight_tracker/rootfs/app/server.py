@@ -680,7 +680,7 @@ def inbound_needs_check(L, f):
     """Re-check the inbound until it's at the gate. After that, only if the aircraft
     changes: a different tail on our flight, or FlightAware links a different inbound."""
     inb = L.get("inbound") or {}
-    if not inb or inb.get("fa_id") != f.get("inbound_fa_id"):
+    if not inb or not fa.same_flight(inb.get("fa_id"), f.get("inbound_fa_id")):
         return True
     if f.get("tail") and inb.get("checked_for_tail") and f["tail"] != inb["checked_for_tail"]:
         return True
@@ -796,8 +796,12 @@ def aero_reason(L, f, now):
     if not a.get("at"):
         return None, None
     scraped = f.get("inbound_fa_id")
-    if scraped and a.get("inbound_id") and scraped != a["inbound_id"] and scraped != a.get("rechecked_for"):
-        return "FlightAware page shows a different inbound", None
+    page_tail = (f.get("tail") or "").upper() if not f.get("tail_source") else ""
+    same_plane = bool(page_tail) and page_tail == (a.get("tail") or "").upper()
+    if scraped and a.get("inbound_id") and not same_plane and not fa.same_flight(scraped, a["inbound_id"]) \
+            and not fa.same_flight(scraped, a.get("rechecked_for")):
+        short = lambda x: "-".join(str(x).split("-")[:1]) if x else "?"
+        return f"FlightAware page shows a different inbound ({short(scraped)} vs AeroAPI {short(a['inbound_id'])})", None
     if not a.get("tail"):
         out_t = fa.best_time(f["times"], "out") or L["sched_out"]
         for h in AERO_RETRY_HOURS:
@@ -915,7 +919,7 @@ def resolve_tail(browser, L, f, now):
     leg of the same airplane seen in flight, then whatever FlightAware's page says."""
     info = dict(L.get("tail_info") or {})
     page_tail = f.get("tail") if not f.get("tail_source") else None
-    if info.get("kind") == "chain" and info.get("root") != f.get("inbound_fa_id"):
+    if info.get("kind") == "chain" and not fa.same_flight(info.get("root"), f.get("inbound_fa_id")):
         info = {}  # a different inbound is a different airplane
     if info.get("kind") in ("page", "aeroapi"):
         info = {}  # re-derived every time
@@ -1084,7 +1088,7 @@ def update_leg(browser, lid):
                 f["inbound_fa_id"] = ai  # the page didn't link one; AeroAPI did
         ti = L.get("tail_info") or {}
         if f and not f.get("tail") and ti.get("tail") and ti.get("kind") in ("own", "chain") \
-                and (ti.get("kind") == "own" or ti.get("root") == f.get("inbound_fa_id")):
+                and (ti.get("kind") == "own" or fa.same_flight(ti.get("root"), f.get("inbound_fa_id"))):
             f["tail"], f["tail_source"] = ti["tail"], ti["source"]
         if f.get("inbound_fa_id") and ph == "scheduled" and inbound_needs_check(L, f):
             try:

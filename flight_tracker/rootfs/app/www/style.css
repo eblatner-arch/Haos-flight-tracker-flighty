@@ -350,3 +350,13 @@ a.card.inbound { display: block; }
 .leaflet-container { isolation: isolate; z-index: 0; }
 /* close hairline seams between map tiles on high-density screens */
 .leaflet-tile-container img.leaflet-tile { width: 256.6px !important; height: 256.6px !important; }
+
+/* live-update indicator */
+.live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+        text-transform: uppercase; color: var(--faint); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.live.on { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.live.on i { background: var(--green); }
+.live.flash i { animation: livepulse .9s ease-out; }
+@keyframes livepulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 70%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+@media (max-width: 420px) { .live { padding: 3px 6px; } .top-right { gap: 6px; } .icon-btn { width: 34px; height: 34px; } }
