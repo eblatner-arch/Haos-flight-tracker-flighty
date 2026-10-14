@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.3
+- FAA delay trends at your airports show at the top again, as a quiet gray card with an amber edge (below any ground stop or program), not as a red alert
+
 ## 2.11.2
 - Ground stops and delay programs hold flights headed to that airport, not ones leaving it. A program at your departure airport only matters for an inbound that hasn't taken off; the card and push say "doesn't hold departures from EWR"
 - A program that doesn't hold you or your inbound is still shown at the top, but toned down (gray card, amber label) instead of red

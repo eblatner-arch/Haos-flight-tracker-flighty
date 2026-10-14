@@ -488,8 +488,18 @@
       ${n.advisory ? `<a class="na-adv" href="${esc(n.advisory)}" target="_blank" rel="noopener">FAA advisory ↗</a>` : ""}
     </div>`;
   }
-  const nasTop = (legs) => nasGroups(legs).filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("");
-  const nasMinor = (legs) => nasGroups(legs).filter((g) => !MAJOR.includes(g.n.kind)).map((g) => g.n);
+  // FAA delay trends: they do affect you, so they sit up top too, but as a quiet card, not an alert.
+  function nasTrend(g) {
+    const n = g.n;
+    const sub = [n.detail, n.reason && n.reason[0].toUpperCase() + n.reason.slice(1)].filter(Boolean).join(" · ");
+    return `<div class="nas-trend"><span class="na-apt">${esc(n.airport)}</span><div><b>${esc(n.label)}</b>${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}</div></div>`;
+  }
+  const TREND = ["delay"];
+  const nasTop = (legs) => {
+    const gs = nasGroups(legs);
+    return gs.filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("") + gs.filter((g) => TREND.includes(g.n.kind)).map(nasTrend).join("");
+  };
+  const nasMinor = (legs) => nasGroups(legs).filter((g) => !MAJOR.includes(g.n.kind) && !TREND.includes(g.n.kind)).map((g) => g.n);
 
   function alertsCard(list) {
     if (!list.length) return "";
@@ -533,9 +543,9 @@
       h += `<div class="card small muted">Nothing else scheduled.</div>`;
     }
     if (myAirports.size) {
-      const minor = nasMinor(watching), major = nasGroups(watching).length - minor.length;
+      const minor = nasMinor(watching), major = nasGroups(watching).length - minor.length;  // major = shown up top
       h += `<h2 class="section"><span>NAS · ${esc([...myAirports].join(" · "))}</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>`;
-      h += minor.length ? nasCard(minor) : `<div class="card small muted">${major ? "Programs shown at the top. No other delays at your airports." : "No ground stops, delay programs or closures at your airports."}${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
+      h += minor.length ? nasCard(minor) : `<div class="card small muted">${major ? "Shown at the top." : "No ground stops, delay programs or closures at your airports."}${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
     }
     const done = all.filter((l) => l.finished).sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 6);
     if (done.length) h += `<h2 class="section">Recent</h2>` + done.map(row).join("");
@@ -619,7 +629,7 @@
           ${leg.manual ? '<button class="btn" id="leg-remove">Stop following</button>' : ""}
           ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div></div>
-      ${nasMinor([leg]).length ? `<h2 class="section">FAA delay trends</h2>${nasCard(nasMinor([leg]))}` : ""}
+      ${nasMinor([leg]).length ? `<h2 class="section">Other NAS items</h2>${nasCard(nasMinor([leg]))}` : ""}
       ${(leg.alerts || []).length ? `<h2 class="section">Alerts for this flight</h2>${alertsCard(leg.alerts)}` : ""}
       ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
           <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>

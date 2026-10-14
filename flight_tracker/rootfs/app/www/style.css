@@ -389,3 +389,7 @@ a.card.inbound { display: block; }
 /* program at your airport that doesn't hold you or your inbound: still shown, toned down */
 .nas-alert.clear { border-color: var(--line); background: var(--card); }
 .nas-alert.clear .na-kind { color: var(--amber); }
+.nas-trend { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; padding: 12px 16px; margin-bottom: 12px;
+  border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--amber); }
+.nas-trend .na-apt { font-size: 17px; }
+.nas-trend .na-sub { margin-top: 2px; }
