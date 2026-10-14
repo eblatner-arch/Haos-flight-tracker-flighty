@@ -353,7 +353,10 @@ a.card.inbound { display: block; }
 /* Tile seams: Leaflet draws tiles with mix-blend-mode: plus-lighter, which turns any sub-pixel
    overlap into a bright line on dark maps. Draw them normally, and paint the map background in
    the tiles' own grey so a sub-pixel gap can't show either. */
+/* Tile seams: Safari can leave a hairline between tiles. Base-map tiles overlap by half a pixel
+   (drawn normally, so the overlap can't brighten); the transparent label tiles are left alone. */
 .leaflet-container img.leaflet-tile { mix-blend-mode: normal !important; }
+.leaflet-tile-pane img.leaflet-tile { width: 256.5px !important; height: 256.5px !important; }
 .leaflet-container { background: #e4e4e4 !important; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-container { background: #262626 !important; } }
 
@@ -394,3 +397,4 @@ a.card.inbound { display: block; }
 .nas-trend .na-apt { font-size: 17px; }
 .nas-trend .na-sub { margin-top: 2px; }
 .na-for { font-size: 12.5px; color: var(--faint); margin-top: 3px; }
+.apt-label.faint { opacity: .75; font-size: 11px; }

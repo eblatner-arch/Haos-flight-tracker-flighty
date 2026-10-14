@@ -234,6 +234,21 @@
       if (ip) { add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); bounds.push([ip[0], ip[1]]); }
       if (ia && interactive) { bounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
     }
+    // Earlier legs of the same airplane that still matter (not yet arrived), fainter the further back.
+    (leg.chain || []).forEach((c, i) => {
+      const ca = ll(c.origin), cb = ll(c.destination), op = Math.max(0.35, 0.75 - i * 0.15);
+      const ct = (c.track || []).filter((p) => p[0] != null);
+      if (ct.length > 1) add(L.polyline(ct.map((p) => [p[0], p[1]]), { color: violet, weight: 2, opacity: op }));
+      const cw = (c.waypoints || []).filter((p) => p[0] != null);
+      if (cw.length > 1) add(L.polyline(cw, { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
+      else if (ca && cb) add(L.polyline(gcPoints(ca, cb), { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
+      if (c.phase === "airborne" && ct.length) {
+        const p = ct[ct.length - 1];
+        add(planeMarker([p[0], p[1]], ct.length > 1 ? bearing(ct[ct.length - 2], p) : 0, violet, c.display_ident || "Earlier leg"));
+        bounds.push([p[0], p[1]]);
+      }
+      if (ca) { bounds.push(ca); add(L.marker(ca, { icon: L.divIcon({ className: "", html: `<span class="apt-label faint" style="border-color:${violet}">${esc(c.origin.iata || "")}</span>`, iconSize: null }) })); }
+    });
     for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
       if (!pos) continue;
       bounds.push(pos);
@@ -319,6 +334,26 @@
   }
 
   // ---------- the airplane's day: your inbound, its inbound, ... ----------
+  // From rotation index `start` back: legs that still matter. Stops before an arrived leg, and
+  // after the one the airplane is flying now (nothing earlier matters then).
+  function chainFrom(rot, start) {
+    const out = [];
+    for (let i = start; i < (rot || []).length; i++) {
+      const r = rot[i];
+      if (!r || ["arrived", "cancelled", "diverted"].includes(r.phase)) break;
+      out.push(r);
+      if (["taxi_out", "airborne", "landed"].includes(r.phase)) break;
+    }
+    return out;
+  }
+
+  // Your flight's map also shows the inbound's own inbound (and so on) while they still matter.
+  function withChain(leg) {
+    const inbPh = leg.inbound && (leg.rotation || [])[0] ? leg.rotation[0].phase : null;
+    leg.chain = leg.phase === "scheduled" && inbPh === "scheduled" ? chainFrom(leg.rotation, 1) : [];
+    return leg;
+  }
+
   async function aircraftView(id, n) {
     let leg;
     try { leg = await api(`api/leg/${id}`); } catch { go("#/"); return; }
@@ -373,7 +408,9 @@
         : `<div class="card small muted">${h.inbound_fa_id ? "The earlier leg will appear on the next check." : "FlightAware hasn't linked the leg before this one yet."}</div>`}
       <p class="small faint" style="margin:4px 4px 10px">${h.fetched ? `Data from FlightAware, fetched ${ago(h.fetched)}${finished ? "" : " · refreshes every 10 min"}` : "Data from FlightAware with your flight's last check"}</p>
       ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}`;
-    drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: null, live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
+    const earlier = h.phase === "scheduled" ? chainFrom(rot, n + 1) : [];
+    drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
+      chain: earlier.slice(1), live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
   }
 
   function problemBanners(leg) {
@@ -560,8 +597,8 @@
     if (hm_ && next) {
       const opt = { interactive: false, key: `hero-${next.id}` };
       // draw straight away from the last full copy so the map never shows blank, then update
-      if (LEGS[next.id]) drawMap(hm_, LEGS[next.id], opt);
-      api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), full, opt); })
+      if (LEGS[next.id]) drawMap(hm_, withChain(LEGS[next.id]), opt);
+      api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), withChain(full), opt); })
         .catch(() => { if (!LEGS[next.id]) drawMap(hm_, next, opt); });
     }
   }
@@ -643,7 +680,7 @@
         </div>`).join("")}</div>` : ""}
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
-    drawMap(document.getElementById("detail-map"), leg, { key: `leg-${leg.id}` });
+    drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
     const rb = document.getElementById("leg-refresh");
     if (rb) rb.onclick = async (e) => {
       e.target.textContent = "Refreshing…";
