@@ -22,7 +22,7 @@ configuration:
     description: Gates are tracked all along but only pushed from this many hours before departure; changes after that push right away. 0 pushes any time. Delays, cancellations and inbound problems always push.
   inbound_alert_minutes:
     name: Inbound alerts only for turns under (minutes)
-    description: Inbound pushes (departed, running late, at the gate, cancelled) only when the inbound is scheduled to land within this many minutes of your scheduled departure. The inbound is still shown in the app. 0 always pushes.
+    description: Inbound pushes (departed, running late, at the gate) only when the inbound is scheduled to land within this many minutes of your scheduled departure. A cancelled or diverted inbound always pushes. The inbound is still shown in the app. 0 always pushes.
   delay_threshold_minutes:
     name: Delay alert threshold
     description: Push when the departure is this many minutes late.

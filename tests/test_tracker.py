@@ -496,3 +496,19 @@ class InboundWindow(unittest.TestCase):
         keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
         self.assertIn("turn", keys)
         self.assertIn("inbound_off", keys)
+
+
+class InboundCancel(unittest.TestCase):
+    def test_cancel_pushes_even_on_long_turn(self):
+        cfg = dict(CFG, inbound_alert_minutes=60)
+        out = T0 + 10 * H
+        L = {"id": "c", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO",
+             "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True, "dep_gate": "C71"}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out))
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN", out_s=out - 6 * H, origin="ORD", dest="EWR",
+                                               inbound_id=None, cancelled=True))
+        inb["times"]["in"]["scheduled"] = out - 3 * H                     # 3-hour scheduled turn
+        L["inbound"] = inb
+        a = [x for x in alerts.evaluate(L, cfg, T0, []) if x["key"] == "inbound"]
+        self.assertEqual(len(a), 1)
+        self.assertEqual(a[0]["level"], "critical")

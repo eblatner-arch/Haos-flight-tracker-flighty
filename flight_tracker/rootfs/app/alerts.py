@@ -215,15 +215,16 @@ def evaluate(leg, cfg, now, nas_items):
     if tail:
         nt["tail"] = tail
 
-    # 6. Inbound aircraft: only pushed when it's scheduled to land within
-    #    inbound_alert_minutes of your departure (a tight scheduled turn).
-    if inb and ph == "scheduled" and inbound_close(leg, cfg):
+    # 6. Inbound aircraft. A cancelled or diverted inbound always pushes; everything else only
+    #    when it's scheduled to land within inbound_alert_minutes of your departure.
+    if inb and ph == "scheduled":
         iid = inb.get("display_ident") or inb.get("ident") or leg.get("inbound_ident") or "Inbound"
         ifrom = (inb.get("origin") or {}).get("iata") or ""
         iph = fa.phase(inb, now)
         if iph in ("cancelled", "diverted") and nt.get("inbound_bad") != inb.get("fa_id"):
             nt["inbound_bad"] = inb.get("fa_id")
             add("inbound", f"Inbound {iid} {iph}", f"The aircraft for {ident} ({iid} from {ifrom}) is {iph}.", "critical")
+    if inb and ph == "scheduled" and inbound_close(leg, cfg):
         t = turn_minutes(leg)
         min_turn = int(cfg.get("min_turn_minutes", 35))
         last = nt.get("turn")

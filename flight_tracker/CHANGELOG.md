@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.5.4
+- A cancelled or diverted inbound always pushes, whatever the scheduled turn
+
 ## 2.5.3
 - Fix: a tail found by the first AeroAPI lookup showed as "not known yet" on the flight page
 
