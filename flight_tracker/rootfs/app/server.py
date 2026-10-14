@@ -46,6 +46,7 @@ DEFAULTS = {
     "notify_progress_deadhead": True,
     "time_sensitive": True,
     "gate_alert_hours": 2,
+    "swap_alert_hours": 2,
     "inbound_alert_minutes": 60,
     "delay_threshold_minutes": 15,
     "delay_step_minutes": 10,

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.3
+- Aircraft swap pushes only from 2 hours before departure (`swap_alert_hours`); swaps earlier are tracked and shown in the lookup log
+
 ## 2.6.2
 - The "aircraft identified" push only goes out when "Alert when tracking starts" is on, and never for flights you follow; aircraft swaps still always push
 

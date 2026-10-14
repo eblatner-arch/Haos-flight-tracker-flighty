@@ -44,7 +44,7 @@ def boot(fa_id="UAL1234-1760000000-airline-0001", gate="C71", out_s=T0 + 10 * H,
     return {"flights": {fa_id: f}}
 
 
-CFG = {"airline_icao": "UAL", "gate_alert_hours": 0, "inbound_alert_minutes": 0, "delay_threshold_minutes": 15, "delay_step_minutes": 10, "min_turn_minutes": 35,
+CFG = {"airline_icao": "UAL", "gate_alert_hours": 0, "swap_alert_hours": 0, "inbound_alert_minutes": 0, "delay_threshold_minutes": 15, "delay_step_minutes": 10, "min_turn_minutes": 35,
        "notify_watch_start": True, "notify_inbound_progress": True, "notify_progress": False,
        "notify_progress_deadhead": True}
 
@@ -547,3 +547,18 @@ class FirstTailQuiet(unittest.TestCase):
             self.assertEqual(n, expect, (watch_push, extra))
             L["flight"]["tail"] = "N2"                                    # a swap always pushes
             self.assertEqual(len([a for a in alerts.evaluate(L, cfg, T0 + 60, []) if a["key"] == "tail"]), 1)
+
+
+
+class SwapWindow(unittest.TestCase):
+    def test_swaps_only_push_inside_two_hours(self):
+        cfg = dict(CFG, swap_alert_hours=2)
+        out = T0 + 8 * H
+        L = {"id": "s", "ident": "UAL1", "display": "UA 1", "dep": "EWR", "arr": "SFO",
+             "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True, "tail": "N1"}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, tail="N2"))
+        self.assertEqual([a for a in alerts.evaluate(L, cfg, T0, []) if a["key"] == "tail"], [])   # 8 h out
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, tail="N3"))
+        a = [x for x in alerts.evaluate(L, cfg, out - H, []) if x["key"] == "tail"]
+        self.assertEqual(len(a), 1)
+        self.assertIn("N2 → N3", a[0]["message"])

@@ -206,7 +206,10 @@ def evaluate(leg, cfg, now, nas_items):
     # 5. Aircraft: first sighting, then swaps
     tail = f.get("tail")
     src = f" · from {f['tail_source']}" if f.get("tail_source") else ""
-    if tail and nt.get("tail") and tail != nt["tail"] and ph == "scheduled":
+    swap_hours = float(cfg.get("swap_alert_hours", 2) or 0)
+    out_now = fa.best_time(f["times"], "out") or leg.get("sched_out") or now
+    swap_window = swap_hours <= 0 or out_now - now <= swap_hours * 3600
+    if tail and nt.get("tail") and tail != nt["tail"] and ph == "scheduled" and swap_window:
         add("tail", f"{ident} aircraft swap",
             f"{nt['tail']} → {tail} {f.get('aircraft_type') or ''}".strip() + src, "warn")
     elif tail and not nt.get("tail") and ph == "scheduled" and nt.get("watch_sent_tail") != tail \
