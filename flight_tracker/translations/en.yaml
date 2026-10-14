@@ -17,6 +17,9 @@ configuration:
   track_flights:
     name: Also follow
     description: Other flights to follow, by flight number (UA1234 or UAL1234), e.g. family. Shown under Following.
+  gate_alert_hours:
+    name: Gate alerts from (hours before departure)
+    description: Gates are tracked all along but only pushed from this many hours before departure; changes after that push right away. 0 pushes any time. Delays, cancellations and inbound problems always push.
   delay_threshold_minutes:
     name: Delay alert threshold
     description: Push when the departure is this many minutes late.

@@ -142,6 +142,13 @@ def evaluate(leg, cfg, now, nas_items):
     # 3. Gates
     dg = (f.get("origin") or {}).get("gate")
     dterm = (f.get("origin") or {}).get("terminal")
+    # Gates are tracked all along but only pushed from gate_alert_hours before departure:
+    # the first push then carries the current gate, later changes push as they happen.
+    gate_hours = float(cfg.get("gate_alert_hours", 2) or 0)
+    out_now = fa.best_time(f["times"], "out") or leg.get("sched_out") or now
+    gate_window = gate_hours <= 0 or out_now - now <= gate_hours * 3600
+    if not gate_window:
+        dg = None
     if dg and ph in ("scheduled",) and dg != nt.get("dep_gate"):
         old = nt.get("dep_gate")
         where = f"Terminal {dterm} · " if dterm else ""

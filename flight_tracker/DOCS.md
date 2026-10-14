@@ -29,7 +29,7 @@ Open it from **Flights** in the Home Assistant sidebar.
 | When | Example |
 |---|---|
 | A flight enters the watch window | Tracking UA 1234 EWR→SFO · departs 14:05 · gate C71 · B39M N37502 |
-| Gate assigned or changed | UA 1234 gate change: EWR gate C71 → C80 |
+| Gate assigned or changed (from `gate_alert_hours`, default 2 h, before departure) | UA 1234 gate change: EWR gate C71 → C80 |
 | Departure delayed, delay grows/shrinks, back on time | UA 1234 delayed 25 min · now departs 14:30 (was 14:05) |
 | Aircraft swap | N37502 → N12345 |
 | Inbound aircraft departs / reaches the gate | Inbound UA567 departed ORD · due in 13:20 |

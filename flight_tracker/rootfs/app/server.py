@@ -45,6 +45,7 @@ DEFAULTS = {
     "notify_progress": False,
     "notify_progress_deadhead": True,
     "time_sensitive": True,
+    "gate_alert_hours": 2,
     "delay_threshold_minutes": 15,
     "delay_step_minutes": 10,
     "min_turn_minutes": 35,

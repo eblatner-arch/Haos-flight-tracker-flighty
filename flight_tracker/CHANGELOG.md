@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.1
+- Gate pushes wait until 2 hours before departure (`gate_alert_hours`); gates are still tracked and shown all along,
+  the first push carries the current gate and later changes push immediately. Delays, cancellations, diversions,
+  swaps and inbound problems push whenever they happen
+
 ## 2.5.0
 - Nothing runs for a flight until 18 hours before departure (new default `watch_hours`: 18), then the first look is AeroAPI
 - Page checks and screenshots start right after, as the comparison; AeroAPI is asked again only when they show a different

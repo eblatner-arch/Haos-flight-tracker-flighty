@@ -44,7 +44,7 @@ def boot(fa_id="UAL1234-1760000000-airline-0001", gate="C71", out_s=T0 + 10 * H,
     return {"flights": {fa_id: f}}
 
 
-CFG = {"airline_icao": "UAL", "delay_threshold_minutes": 15, "delay_step_minutes": 10, "min_turn_minutes": 35,
+CFG = {"airline_icao": "UAL", "gate_alert_hours": 0, "delay_threshold_minutes": 15, "delay_step_minutes": 10, "min_turn_minutes": 35,
        "notify_watch_start": True, "notify_inbound_progress": True, "notify_progress": False,
        "notify_progress_deadhead": True}
 
@@ -437,3 +437,25 @@ class AeroAPI(unittest.TestCase):
                "scheduled_out": "2026-10-14T18:05:00Z", "estimated_out": None, "actual_out": None}
         n = self.aeroapi.normalize(raw)
         self.assertEqual((n["tail"], n["inbound_fa_id"], n["origin"]["gate"]), ("N37502", "UAL9-x", "C71"))
+
+
+class GateWindow(unittest.TestCase):
+    def test_gate_waits_for_two_hours_but_delays_do_not(self):
+        cfg = dict(CFG, gate_alert_hours=2)
+        out = T0 + 8 * H
+        L = {"id": "g", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO",
+             "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C71", out_e=out + 30 * 60))
+        keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]      # 8 h out
+        self.assertNotIn("dep_gate", keys)
+        self.assertIn("delay", keys)                                     # important stuff still comes
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C80", out_e=out + 30 * 60))
+        self.assertNotIn("dep_gate", [a["key"] for a in alerts.evaluate(L, cfg, T0 + H, [])])
+        # the estimate is out + 30 min, so the 2-hour mark is out - 1.5 h
+        self.assertNotIn("dep_gate", [x["key"] for x in alerts.evaluate(L, cfg, out - 1.6 * H, [])])
+        a = [x for x in alerts.evaluate(L, cfg, out - 1.4 * H, []) if x["key"] == "dep_gate"]
+        self.assertEqual(len(a), 1)                                      # first gate push at 2 h
+        self.assertIn("C80", a[0]["title"])
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C90", out_e=out + 30 * 60))
+        a = [x for x in alerts.evaluate(L, cfg, out - 1.0 * H, []) if x["key"] == "dep_gate"]
+        self.assertIn("change", a[0]["title"])                           # later changes push
