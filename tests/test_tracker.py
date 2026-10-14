@@ -373,6 +373,18 @@ class AeroAPI(unittest.TestCase):
         L = self.run_at("a1", T0)                              # 17 h out: first look
         self.assertEqual((len(self.calls), len(self.pages)), (1, 0))
         self.assertEqual(L["source"], "AeroAPI")
+        self.run_at("a1", T0 + 120)
+
+    def test_first_lookup_tail_has_source(self):
+        self.tail = "N77"
+        self.add()
+        L = self.run_at("a1", T0)
+        self.assertEqual(L["flight"]["tail"], "N77")
+        self.assertEqual(L["flight"]["tail_source"], "AeroAPI (airline assignment)")
+
+    def test_first_then_compare(self):
+        self.add()
+        self.run_at("a1", T0)
         self.run_at("a1", T0 + 120)                            # comparison by page check, no AeroAPI
         self.assertEqual(len(self.calls), 1)
         self.assertGreater(len(self.pages), 0)

@@ -791,6 +791,10 @@ def update_leg(browser, lid):
                 L["fa_id"] = first.get("fa_id") or L.get("fa_id")
         if first:
             flight, source, shot, note = first, "AeroAPI", None, None
+            if first.get("tail"):
+                first["tail_source"] = "AeroAPI (airline assignment)"
+                L["tail_info"] = {"tail": first["tail"].upper(), "kind": "aeroapi", "at": now,
+                                  "source": "AeroAPI (airline assignment)"}
         elif not watched(L, now):
             flight, source, shot, note = None, None, None, (
                 "AeroAPI didn't find this flight yet; will look again" if (L.get("aero") or {}).get("at") else None)

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.5.3
+- Fix: a tail found by the first AeroAPI lookup showed as "not known yet" on the flight page
+
 ## 2.5.2
 - Inbound pushes (departed, running late, at the gate, cancelled) only when the inbound is scheduled to land within
   60 minutes of your scheduled departure (`inbound_alert_minutes`); the inbound is still tracked and shown in the app
