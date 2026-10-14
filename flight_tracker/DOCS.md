@@ -24,6 +24,13 @@ Open it from **Flights** in the Home Assistant sidebar.
    (Developer Tools → Actions → search "notify.mobile_app" to find yours).
 4. Start the add-on and open **Flights** from the sidebar.
 
+## Opening the app
+
+Use **Flights** in the Home Assistant sidebar. To open it outside Home Assistant (e.g. as a
+home-screen app), set a port next to 8099 under **Network** on the add-on's page and browse to
+`http://<your-ha-ip>:<that port>/`. That port has no login, so only use it on your home network.
+Port 6080 is the tracker's browser viewer, not the app.
+
 ## Notifications
 
 Open the **bell** in the app. Every event the tracker can detect is listed by group

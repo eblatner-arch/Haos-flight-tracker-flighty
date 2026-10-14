@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "2.7.1"
+version: "2.7.2"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -20,8 +20,10 @@ map:
     read_only: false
 ports:
   6080/tcp: 6080
+  8099/tcp: null
 ports_description:
   6080/tcp: Live browser viewer (noVNC)
+  8099/tcp: "Direct web access to the app without a Home Assistant login (leave blank unless you need it)"
 options:
   ics_file_path: /homeassistant/ics2gcal/feed.ics
   airline_icao: ""

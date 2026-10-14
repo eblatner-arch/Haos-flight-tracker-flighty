@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.7.2
+- The viewer port (6080) opens the browser viewer directly instead of a file listing
+- Optional direct port for the app (8099, off by default) for use outside the Home Assistant app
+
 ## 2.7.1
 - New icon and logo (add-on store, browser tab, home-screen icon)
 
