@@ -506,6 +506,71 @@
     });
   }
 
+  // ---------- notification settings ----------
+  async function notifyView() {
+    destroyMaps();
+    const d = await api("api/rules");
+    const groups = [];
+    for (const r of d.rules) {
+      let g = groups.find((x) => x.name === r.group);
+      if (!g) groups.push(g = { name: r.group, rows: [] });
+      g.rows.push(r);
+    }
+    const kinds = [["mine", "My legs"], ["dh", "Deadheads"], ["followed", "Followed"]];
+    const rowHtml = (r) => {
+      const v = r.rule;
+      return `<div class="nrow ${v.on ? "" : "off"}" data-key="${esc(r.key)}">
+        <div class="nrow-head">
+          <label class="switch"><input type="checkbox" data-f="on" ${v.on ? "checked" : ""}><span></span></label>
+          <div class="nrow-txt"><div class="nrow-label">${esc(r.label)}</div><div class="small faint">${esc(r.desc)}</div></div>
+        </div>
+        <div class="nrow-opts">
+          ${kinds.filter(([k]) => v[k] !== null && v[k] !== undefined).map(([k, lbl]) =>
+            `<button type="button" class="kchip ${v[k] ? "on" : ""}" data-f="${k}">${lbl}</button>`).join("")}
+          ${r.group === "System" && r.key !== "watch_start" ? "" : `<label class="hrs">from <input type="number" min="0" max="48" step="0.5" inputmode="decimal" data-f="hours" value="${v.hours ?? ""}" placeholder="any"> h out</label>`}
+          <button type="button" class="kchip ts ${v.ts ? "on" : ""}" data-f="ts" title="Time-sensitive: breaks through Focus">⚡ Urgent</button>
+          ${r.params.map((p) => `<label class="hrs">${esc(p.label)} <input type="number" min="0" inputmode="numeric" data-p="${esc(p.name)}" value="${v.params[p.name] ?? ""}"> ${esc(p.unit)}</label>`).join("")}
+        </div>
+      </div>`;
+    };
+    $app.innerHTML = `
+      <a class="back" href="#/">‹ Flights</a>
+      <div class="card">
+        <h3 style="margin:0 0 4px">Notifications</h3>
+        <p class="small muted" style="margin:0">Every change the tracker can see. For each: on or off, which flights it applies to,
+          how close to departure it starts pushing (blank = any time), and whether it's urgent (time-sensitive on iPhone).
+          Changes save as you make them. Tracking itself always runs; this only decides what pushes.</p>
+        <div id="n-msg" class="small" style="margin-top:8px"></div>
+      </div>
+      ${groups.map((g) => `<h2 class="section">${esc(g.name)}</h2><div class="card nlist">${g.rows.map(rowHtml).join("")}</div>`).join("")}
+      <p class="small faint" style="margin:16px 4px">Gates assigned while a rule's window is closed are pushed once when it opens, with the gate at that moment. NAS and weather only apply to flights you're working or deadheading.</p>`;
+    const msg = document.getElementById("n-msg");
+    let timer = null;
+    const pending = {};
+    const save = () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const body = { rules: { ...pending } };
+        for (const k in pending) delete pending[k];
+        try {
+          const r = await fetch("api/rules", { method: "POST", body: JSON.stringify(body) });
+          if (!r.ok) throw new Error(r.status);
+          msg.className = "small muted"; msg.textContent = "Saved";
+          setTimeout(() => { if (msg.textContent === "Saved") msg.textContent = ""; }, 1500);
+        } catch (e) { msg.className = "small err"; msg.textContent = `Couldn't save: ${e.message}`; }
+      }, 400);
+    };
+    $app.querySelectorAll(".nrow").forEach((row) => {
+      const key = row.dataset.key;
+      const upd = (patch) => { pending[key] = { ...(pending[key] || {}), ...patch, params: { ...((pending[key] || {}).params || {}), ...(patch.params || {}) } }; save(); };
+      row.querySelector('[data-f="on"]').onchange = (e) => { row.classList.toggle("off", !e.target.checked); upd({ on: e.target.checked }); };
+      row.querySelectorAll("button.kchip").forEach((b) => b.onclick = () => { b.classList.toggle("on"); upd({ [b.dataset.f]: b.classList.contains("on") }); });
+      const h = row.querySelector('[data-f="hours"]');
+      if (h) h.onchange = () => upd({ hours: h.value === "" ? null : h.value });
+      row.querySelectorAll("[data-p]").forEach((i) => i.onchange = () => upd({ params: { [i.dataset.p]: i.value } }));
+    });
+  }
+
   // ---------- tools: test push + debug ----------
   async function toolsView() {
     destroyMaps();
@@ -587,6 +652,7 @@
       if (m) await legView(m[1]);
       else if (route.startsWith("#/add")) addView();
       else if (route.startsWith("#/tools")) await toolsView();
+      else if (route.startsWith("#/notify")) await notifyView();
       else homeView();
       if (route !== lastRoute) window.scrollTo(0, 0);
       lastRoute = route;

@@ -17,6 +17,7 @@ import aeroapi
 import airports
 import alerts as alerting
 import flightaware as fa
+import rules as rules_mod
 import schedule
 import sources
 
@@ -92,10 +93,12 @@ STATE_PATH = os.path.join(DATA_DIR, "state.json")
 STATE = {"legs": {}, "nas": [], "nas_at": None, "nas_error": None, "wx": {}, "wx_at": 0,
          "alerts": [], "schedule": {"mtime": None, "error": None, "count": 0, "checked": None},
          "worker": {"busy": None, "last_cycle": None, "error": None},
-         "manual": [], "debug": [], "gemini_calls": [], "aero_calls": []}
-PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls", "aero_calls")
+         "manual": [], "debug": [], "gemini_calls": [], "aero_calls": [], "rules": {}, "flags": {},
+         "blocked_streak": 0}
+PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls", "aero_calls", "rules", "flags")
 INGRESS = {"path": None}
 
+STATE["rules"] = rules_mod.seed_from_config(CFG)  # replaced by the saved rules in init_rules()
 ICAO_TO_IATA = {v: k for k, v in schedule.IATA_TO_ICAO.items()}
 
 
@@ -113,6 +116,34 @@ def load_state():
         pass
     except Exception as e:
         log.warning("Could not read saved state (%s); starting fresh", e)
+
+
+def init_rules():
+    STATE["rules"] = rules_mod.merge(STATE.get("rules"), CFG)
+    sync_rule_cfg()
+
+
+def sync_rule_cfg():
+    """Display thresholds (status label, problem banners) follow the rules."""
+    R = STATE["rules"]
+    CFG["delay_threshold_minutes"] = R["delay"]["params"]["threshold"]
+    CFG["min_turn_minutes"] = R["inbound_late"]["params"]["min_turn"]
+    CFG["inbound_alert_minutes"] = R["inbound_late"]["params"]["max_sched_turn"]
+
+
+def push_event(event, title, message, level="info", leg=None, tag=None, out_time=None):
+    """A push that isn't tied to one flight's evaluation (schedule, system)."""
+    now = time.time()
+    ok, _ = rules_mod.allowed(STATE["rules"], event, leg, now, out_time)
+    if not ok:
+        return
+    a = {"key": event, "title": title, "message": message, "level": level, "at": now,
+         "tag": tag or f"sys-{event}", "ts": bool(STATE["rules"][event].get("ts"))}
+    with LOCK:
+        STATE["alerts"] = (STATE["alerts"] + [{**a, "leg": (leg or {}).get("id"), "display": (leg or {}).get("display"),
+                                               "route": f"{(leg or {}).get('dep', '')}→{(leg or {}).get('arr', '')}"
+                                               if leg else ""}])[-200:]
+    notify(a)
 
 
 def save_state():
@@ -155,7 +186,7 @@ def notify(alert):
     if INGRESS["path"]:
         data["url"] = INGRESS["path"]
         data["clickAction"] = INGRESS["path"]
-    if alert["level"] in ("warn", "critical") and CFG.get("time_sensitive", True):
+    if alert.get("ts", alert["level"] in ("warn", "critical")):
         data["push"] = {"interruption-level": "time-sensitive"}
         data["ttl"] = 0
         data["priority"] = "high"
@@ -245,6 +276,20 @@ def publish():
 # schedule
 # --------------------------------------------------------------------------
 
+def check_schedule_stale(now):
+    mt = STATE["schedule"].get("mtime")
+    limit = (STATE["rules"]["sys_schedule_stale"]["params"].get("hours") or 24) * HOUR
+    flags = STATE.setdefault("flags", {})
+    if mt and now - mt > limit:
+        if not flags.get("stale"):
+            flags["stale"] = True
+            push_event("sys_schedule_stale", "Schedule file not updating",
+                       f"{CFG['ics_file_path']} last changed {int((now - mt) / HOUR)} h ago. Check the ICS2GCAL add-on.",
+                       "warn")
+    else:
+        flags["stale"] = False
+
+
 def display_ident(airline, flight):
     al = ICAO_TO_IATA.get(airline, airline)
     return f"{al} {flight}".strip() if flight else ""
@@ -265,8 +310,14 @@ def reload_schedule(force=False):
         STATE["schedule"].update(error=str(e), checked=now)
         log.error("Schedule: %s", e)
         return
+    first_load = STATE["schedule"].get("mtime") is None and not any(
+        not x.get("extra") for x in STATE["legs"].values())
+    changes = []
     with LOCK:
         cur = STATE["legs"]
+        before = {lid: dict(sched_out=x["sched_out"], display=x.get("display"), dep=x.get("dep"), arr=x.get("arr"),
+                            dh=x.get("dh"), id=lid)
+                  for lid, x in cur.items() if not x.get("extra")}
         seen = set()
         for L in legs:
             if L["dh"] and not CFG.get("track_deadheads", True):
@@ -295,6 +346,32 @@ def reload_schedule(force=False):
                             and e["start"] > now - 2 * HOUR})
         STATE["schedule"].update(mtime=mtime, error=None, count=len(legs), checked=now, path=path,
                                  events=len(events), unmatched=unmatched[:25])
+        horizon = now + 72 * HOUR
+        after = {lid: x for lid, x in cur.items() if not x.get("extra")}
+        for lid, x in after.items():
+            if now < x["sched_out"] < horizon:
+                b = before.get(lid)
+                if b is None:
+                    changes.append(("added", x, None))
+                elif abs(b["sched_out"] - x["sched_out"]) >= 300:
+                    changes.append(("retimed", x, b["sched_out"]))
+        for lid, b in before.items():
+            if lid not in after and now < b["sched_out"] < horizon:
+                changes.append(("removed", b, None))
+    if not first_load:
+        for kind, x, old_out in changes[:10]:
+            tz = alerting.tz_for(x.get("dep"))
+            when = datetime.fromtimestamp(x["sched_out"], tz).strftime("%a %d %b %H:%M")
+            what = f"{x.get('display') or 'Flight'} {x.get('dep')}→{x.get('arr')}"
+            if kind == "added":
+                push_event("schedule_change", "Schedule: flight added", f"{what} {when}", "warn", leg=x,
+                           tag=f"sched-{x['id']}")
+            elif kind == "removed":
+                push_event("schedule_change", "Schedule: flight removed", f"{what} {when}", "warn", leg=x,
+                           tag=f"sched-{x['id']}")
+            else:
+                push_event("schedule_change", "Schedule: flight retimed",
+                           f"{what} {alerting.hhmm(old_out, tz)} → {when}", "warn", leg=x, tag=f"sched-{x['id']}")
     log.info("Schedule: %d flights in the next 3 weeks", len(legs))
 
 
@@ -499,6 +576,15 @@ def load(browser, url, shot, L, what):
     finally:
         with LOCK:
             STATE["debug"] = (STATE["debug"] + [rec])[-60:]
+            streak = None
+            if "page_data" in rec or "error" in rec:
+                STATE["blocked_streak"] = 0 if rec.get("page_data") else STATE.get("blocked_streak", 0) + 1
+                streak = STATE["blocked_streak"]
+        need = STATE["rules"]["sys_blocked"]["params"].get("count") or 3
+        if streak == need:
+            push_event("sys_blocked", "FlightAware checks failing",
+                       f"The last {need} page checks found no flight data. Open the browser viewer on port 6080 "
+                       "to clear a CAPTCHA or sign in.", "warn")
 
 
 def fetch_flight(browser, L):
@@ -614,6 +700,10 @@ def aero_call(L, now, reason, retry_h=None, observed_inbound=None, observed_tail
     if spent + cost > float(CFG.get("aeroapi_monthly_budget") or 0) + 1e-9:
         if a.get("blocked") != _month(now):
             a["blocked"] = _month(now)
+            if STATE["flags"].get("budget100") != _month(now):
+                STATE["flags"]["budget100"] = _month(now)
+                push_event("sys_budget", "AeroAPI budget used up",
+                           f"${spent:.2f} spent this month; AeroAPI is paused until next month.", "warn")
             log.warning("AeroAPI monthly budget reached ($%.2f); skipping (%s)", spent, reason)
         return None
     rec = {"at": now, "leg": L.get("display"), "leg_id": L["id"], "reason": reason, "billed": True, "pages": 1}
@@ -647,6 +737,11 @@ def aero_call(L, now, reason, retry_h=None, observed_inbound=None, observed_tail
         a["rechecked_tail"] = observed_tail
     with LOCK:
         STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
+    _, spent = aero_month(now)
+    budget = float(CFG.get("aeroapi_monthly_budget") or 0)
+    if budget and spent >= 0.8 * budget and STATE["flags"].get("budget80") != _month(now):
+        STATE["flags"]["budget80"] = _month(now)
+        push_event("sys_budget", "AeroAPI budget 80% used", f"${spent:.2f} of ${budget:.2f} this month.")
     return flight
 
 
@@ -963,7 +1058,8 @@ def update_leg(browser, lid):
 
     with LOCK:
         nas = list(STATE["nas"])
-        new_alerts = alerting.evaluate(L, CFG, now, nas) if not L.get("extra") or L.get("flight") else []
+        new_alerts = alerting.evaluate(L, CFG, now, nas, rules=STATE["rules"], wx=STATE.get("wx")) \
+            if not L.get("extra") or L.get("flight") else []
         live = STATE["legs"].get(lid)
         if live is None:
             return
@@ -1034,6 +1130,7 @@ def worker():
                 forced.add(REFRESH_Q.get_nowait())
             if now - last_sched > 300 or "all" in forced:
                 reload_schedule(force="all" in forced)
+                check_schedule_stale(now)
                 expire_manual(now)
                 clean_screenshots(now)
                 sync_extras()
@@ -1218,6 +1315,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, api_state())
         if path == "/api/debug":
             return self._send(200, api_debug())
+        if path == "/api/rules":
+            with LOCK:
+                return self._send(200, {"rules": rules_mod.catalog_for_ui(STATE["rules"])})
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
@@ -1260,6 +1360,13 @@ class Handler(BaseHTTPRequestHandler):
             remove_manual(self._json().get("id") or "")
             save_state()
             return self._send(200, {"ok": True})
+        if path == "/api/rules":
+            with LOCK:
+                STATE["rules"] = rules_mod.clean(self._json().get("rules"), STATE["rules"])
+                sync_rule_cfg()
+            save_state()
+            with LOCK:
+                return self._send(200, {"ok": True, "rules": rules_mod.catalog_for_ui(STATE["rules"])})
         if path == "/api/test-notify":
             ok, detail = notify({"title": "Flight Tracker test", "level": "warn", "tag": "test", "key": "notify",
                                  "message": f"Notifications work. Sent {datetime.now(HOME_TZ):%H:%M} via "
@@ -1287,6 +1394,7 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
     load_state()
+    init_rules()
     if not CFG["airline_icao"]:
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")
     find_ingress()

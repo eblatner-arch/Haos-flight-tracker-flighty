@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.0
+- New Notifications page (bell button): 37 events, each with on/off, which flights (my legs / deadheads / followed),
+  how close to departure it starts pushing, urgent (time-sensitive) and its own thresholds
+- New events: terminal change, earlier than scheduled, reinstated after cancel, aircraft type change, inbound departure
+  delayed, different inbound linked, per-type NAS (ground stop / GDP / delays / closure / other), IFR and gust alerts,
+  filed route change, crew schedule changes (next 3 days), AeroAPI budget, page checks failing, schedule file stale
+- Held-back gate pushes catch up when their window opens, with the gate at that moment
+- Existing Configuration-tab notification settings become the starting values; the page is where to change them now
+
 ## 2.6.3
 - Aircraft swap pushes only from 2 hours before departure (`swap_alert_hours`); swaps earlier are tracked and shown in the lookup log
 

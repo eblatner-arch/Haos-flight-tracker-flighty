@@ -105,20 +105,20 @@ class Alerts(unittest.TestCase):
         L = self.leg()
         L["flight"], _ = fa.flights_from_bootstrap(boot())
         a = alerts.evaluate(L, CFG, T0, [])
-        self.assertEqual([x["key"] for x in a], ["watch", "dep_gate"])
+        self.assertEqual([x["key"] for x in a], ["watch_start", "dep_gate_assigned"])
         self.assertIn("C71", a[1]["message"])
         self.assertEqual(alerts.evaluate(L, CFG, T0 + 60, []), [])  # nothing new → nothing pushed
 
         L["flight"], _ = fa.flights_from_bootstrap(boot(gate="C80", out_e=T0 + 10 * H + 25 * 60, tail="N12345"))
         keys = [x["key"] for x in alerts.evaluate(L, CFG, T0 + 120, [])]
-        self.assertEqual(keys, ["dep_gate", "delay", "tail"])
+        self.assertEqual(keys, ["dep_gate_change", "delay", "swap"])
         # small wobble in the delay is not news
         L["flight"], _ = fa.flights_from_bootstrap(boot(gate="C80", out_e=T0 + 10 * H + 30 * 60, tail="N12345"))
         self.assertEqual(alerts.evaluate(L, CFG, T0 + 180, []), [])
         # back on time
         L["flight"], _ = fa.flights_from_bootstrap(boot(gate="C80", out_e=T0 + 10 * H + 5 * 60, tail="N12345"))
         a = alerts.evaluate(L, CFG, T0 + 240, [])
-        self.assertEqual([x["key"] for x in a], ["delay"])
+        self.assertEqual([x["key"] for x in a], ["back_on_time"])
         self.assertIn("back on time", a[0]["title"])
 
     def test_inbound_and_nas(self):
@@ -134,10 +134,10 @@ class Alerts(unittest.TestCase):
                {"airport": "BOS", "kind": "gs", "label": "Ground stop", "reason": "", "detail": "", "key": "BOS|gs"}]
         a = alerts.evaluate(L, CFG, T0, nas)
         keys = [x["key"] for x in a]
-        self.assertIn("turn", keys)
-        self.assertIn("inbound_off", keys)
-        self.assertEqual([x for x in a if x["key"] == "nas"][0]["title"], "EWR: Ground delay program")
-        self.assertEqual(len([x for x in a if x["key"] == "nas"]), 1)
+        self.assertIn("inbound_late", keys)
+        self.assertIn("inbound_departed", keys)
+        self.assertEqual([x for x in a if x["key"] == "nas_gdp"][0]["title"], "EWR: Ground delay program")
+        self.assertEqual(len([x for x in a if x["key"].startswith("nas")]), 1)
         self.assertEqual(alerts.evaluate(L, CFG, T0 + 60, nas), [])
         probs = [p["text"] for p in alerts.problems(L, CFG, nas)]
         self.assertTrue(any("turn" in p for p in probs))
@@ -148,7 +148,7 @@ class Alerts(unittest.TestCase):
         L["notified"] = {"watch": True, "dep_gate": "C71"}
         L["flight"], _ = fa.flights_from_bootstrap(boot(cancelled=True))
         a = alerts.evaluate(L, CFG, T0, [])
-        self.assertEqual([x["key"] for x in a], ["cancelled"])
+        self.assertEqual([x["key"] for x in a if x["key"] != "tail_identified"], ["cancelled"])
         self.assertEqual(a[0]["level"], "critical")
         self.assertEqual(alerts.status_label(L, CFG), "Cancelled")
 
@@ -252,7 +252,7 @@ class TailChain(unittest.TestCase):
         self.assertEqual(f["tail"], "N777UA")
         self.assertEqual(L["tail_info"]["kind"], "chain")
         self.assertEqual([c["phase"] for c in L["chain"]], ["scheduled", "airborne"])
-        a = [x for x in alerts.evaluate(L, CFG, T0, []) if x["key"] == "tail"]
+        a = [x for x in alerts.evaluate(L, CFG, T0, []) if x["key"] == "tail_identified"]
         self.assertEqual(len(a), 1)
         self.assertIn("in flight", a[0]["message"])
 
@@ -262,7 +262,7 @@ class TailChain(unittest.TestCase):
         L["flight"] = f2
         server.resolve_tail(FB(), L, f2, T0 + 6 * H - 80 * 60)
         self.assertEqual(f2["tail"], "N888UA")
-        a = [x for x in alerts.evaluate(L, CFG, T0 + 6 * H - 80 * 60, []) if x["key"] == "tail"]
+        a = [x for x in alerts.evaluate(L, CFG, T0 + 6 * H - 80 * 60, []) if x["key"] == "swap"]
         self.assertEqual(len(a), 1)
         self.assertIn("swap", a[0]["title"])
         self.assertIn("transponder", a[0]["message"])
@@ -459,17 +459,17 @@ class GateWindow(unittest.TestCase):
              "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True}}
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C71", out_e=out + 30 * 60))
         keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]      # 8 h out
-        self.assertNotIn("dep_gate", keys)
+        self.assertNotIn("dep_gate_assigned", keys)
         self.assertIn("delay", keys)                                     # important stuff still comes
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C80", out_e=out + 30 * 60))
-        self.assertNotIn("dep_gate", [a["key"] for a in alerts.evaluate(L, cfg, T0 + H, [])])
+        self.assertNotIn("dep_gate_assigned", [a["key"] for a in alerts.evaluate(L, cfg, T0 + H, [])])
         # the estimate is out + 30 min, so the 2-hour mark is out - 1.5 h
-        self.assertNotIn("dep_gate", [x["key"] for x in alerts.evaluate(L, cfg, out - 1.6 * H, [])])
-        a = [x for x in alerts.evaluate(L, cfg, out - 1.4 * H, []) if x["key"] == "dep_gate"]
+        self.assertNotIn("dep_gate_assigned", [x["key"] for x in alerts.evaluate(L, cfg, out - 1.6 * H, [])])
+        a = [x for x in alerts.evaluate(L, cfg, out - 1.4 * H, []) if x["key"] == "dep_gate_assigned"]
         self.assertEqual(len(a), 1)                                      # first gate push at 2 h
         self.assertIn("C80", a[0]["title"])
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, gate="C90", out_e=out + 30 * 60))
-        a = [x for x in alerts.evaluate(L, cfg, out - 1.0 * H, []) if x["key"] == "dep_gate"]
+        a = [x for x in alerts.evaluate(L, cfg, out - 1.0 * H, []) if x["key"] == "dep_gate_change"]
         self.assertIn("change", a[0]["title"])                           # later changes push
 
 
@@ -490,12 +490,12 @@ class InboundWindow(unittest.TestCase):
 
         L["inbound"] = inbound(out - 3 * H, out - 10 * 60)      # scheduled 3 h before: late, but no push
         keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
-        self.assertFalse(any(k.startswith("inbound") or k == "turn" for k in keys))
+        self.assertFalse(any(k.startswith("inbound") for k in keys))
         L["notified"] = {"watch": True, "dep_gate": "C71"}
         L["inbound"] = inbound(out - 45 * 60, out - 10 * 60)    # scheduled 45 min before: pushes
         keys = [a["key"] for a in alerts.evaluate(L, cfg, T0, [])]
-        self.assertIn("turn", keys)
-        self.assertIn("inbound_off", keys)
+        self.assertIn("inbound_late", keys)
+        self.assertIn("inbound_departed", keys)
 
 
 class InboundCancel(unittest.TestCase):
@@ -509,7 +509,7 @@ class InboundCancel(unittest.TestCase):
                                                inbound_id=None, cancelled=True))
         inb["times"]["in"]["scheduled"] = out - 3 * H                     # 3-hour scheduled turn
         L["inbound"] = inb
-        a = [x for x in alerts.evaluate(L, cfg, T0, []) if x["key"] == "inbound"]
+        a = [x for x in alerts.evaluate(L, cfg, T0, []) if x["key"] == "inbound_cancelled"]
         self.assertEqual(len(a), 1)
         self.assertEqual(a[0]["level"], "critical")
 
@@ -543,10 +543,10 @@ class FirstTailQuiet(unittest.TestCase):
             L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, tail="N1"))
             L["flight"]["tail_source"] = "AeroAPI (airline assignment)"
             cfg = dict(CFG, notify_watch_start=watch_push)
-            n = len([a for a in alerts.evaluate(L, cfg, T0, []) if a["key"] == "tail"])
+            n = len([a for a in alerts.evaluate(L, cfg, T0, []) if a["key"] == "tail_identified"])
             self.assertEqual(n, expect, (watch_push, extra))
             L["flight"]["tail"] = "N2"                                    # a swap always pushes
-            self.assertEqual(len([a for a in alerts.evaluate(L, cfg, T0 + 60, []) if a["key"] == "tail"]), 1)
+            self.assertEqual(len([a for a in alerts.evaluate(L, cfg, T0 + 60, []) if a["key"] == "swap"]), extra is False and 1 or 0)
 
 
 
@@ -557,8 +557,130 @@ class SwapWindow(unittest.TestCase):
         L = {"id": "s", "ident": "UAL1", "display": "UA 1", "dep": "EWR", "arr": "SFO",
              "sched_out": out, "sched_in": out + 6 * H, "notified": {"watch": True, "tail": "N1"}}
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, tail="N2"))
-        self.assertEqual([a for a in alerts.evaluate(L, cfg, T0, []) if a["key"] == "tail"], [])   # 8 h out
+        self.assertEqual([a for a in alerts.evaluate(L, cfg, T0, []) if a["key"] == "swap"], [])   # 8 h out
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, tail="N3"))
-        a = [x for x in alerts.evaluate(L, cfg, out - H, []) if x["key"] == "tail"]
+        a = [x for x in alerts.evaluate(L, cfg, out - H, []) if x["key"] == "swap"]
         self.assertEqual(len(a), 1)
         self.assertIn("N2 → N3", a[0]["message"])
+
+
+class Rules(unittest.TestCase):
+    def setUp(self):
+        import rules
+        self.rules = rules
+        self.R = rules.defaults()
+        self.out = T0 + 5 * H
+
+    def leg(self, **kw):
+        L = {"id": "r", "ident": "UAL1", "display": "UA 1", "dep": "EWR", "arr": "SFO",
+             "sched_out": self.out, "sched_in": self.out + 6 * H, "notified": {"watch": True, "dep_gate": "C1",
+                                                                             "tail": "N1", "atype": "B39M"}}
+        L.update(kw)
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=self.out, gate="C1", tail="N1"))
+        return L
+
+    def keys(self, L, t=T0, wx=None):
+        return [a["key"] for a in alerts.evaluate(L, CFG, t, [], rules=self.R, wx=wx)]
+
+    def test_new_events(self):
+        L = self.leg()
+        L["flight"]["origin"]["terminal"] = "C"
+        self.keys(L)
+        L["flight"]["origin"]["terminal"] = "A"
+        L["flight"]["aircraft_type"] = "B738"
+        L["flight"]["times"]["out"]["estimated"] = self.out - 20 * 60
+        L["flight"]["route"] = "NEW ROUTE"
+        k = self.keys(L, self.out - H)
+        self.assertIn("aircraft_type", k)
+        self.assertIn("early", k)
+        L["notified"]["route"] = "OLD|"
+        self.R["route_change"]["on"] = True
+        self.R["terminal_change"]["hours"] = None
+        L["flight"]["origin"]["terminal"] = "B"
+        k = self.keys(L, self.out - H)
+        self.assertIn("route_change", k)
+        self.assertIn("terminal_change", k)
+
+    def test_reinstated(self):
+        L = self.leg()
+        L["notified"]["cancelled"] = True
+        self.assertIn("reinstated", self.keys(L))
+
+    def test_weather(self):
+        L = self.leg()
+        self.R["wx_ifr"].update(on=True, hours=None)
+        self.R["wx_gust"].update(on=True, hours=None)
+        wx = {"KSFO": {"category": "IFR", "gust_kt": 35, "raw": "KSFO ..."}}
+        k = self.keys(L, wx=wx)
+        self.assertIn("wx_ifr", k)
+        self.assertIn("wx_gust", k)
+        self.assertEqual([x for x in self.keys(L, wx=wx) if x.startswith("wx")], [])   # once
+
+    def test_flight_kind_filters(self):
+        L = self.leg(extra=True)
+        L["notified"]["cancelled"] = False
+        L["flight"]["cancelled"] = True
+        self.R["cancelled"]["followed"] = False
+        self.assertNotIn("cancelled", self.keys(L))
+        L2 = self.leg(dh=True)
+        L2["flight"]["cancelled"] = True
+        self.assertIn("cancelled", self.keys(L2))
+        L3 = self.leg()
+        L3["flight"]["cancelled"] = True
+        self.R["cancelled"]["on"] = False
+        self.assertNotIn("cancelled", self.keys(L3))
+
+    def test_inbound_events(self):
+        L = self.leg()
+        L["notified"].pop("tail")
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN1", out_s=self.out - 3 * H, origin="ORD", dest="EWR",
+                                               inbound_id=None, out_e=self.out - 3 * H + 40 * 60))
+        inb["times"]["in"]["scheduled"] = self.out - 40 * 60
+        L["inbound"] = inb
+        k = self.keys(L)
+        self.assertIn("inbound_delayed", k)
+        inb2, _ = fa.flights_from_bootstrap(boot(fa_id="IN2", out_s=self.out - 3 * H, origin="DEN", dest="EWR",
+                                                inbound_id=None))
+        L["inbound"] = inb2
+        self.R["inbound_changed"].update(on=True, hours=None)
+        self.assertIn("inbound_changed", self.keys(L))
+
+    def test_clean_and_merge(self):
+        r = self.rules.clean({"delay": {"on": False, "hours": "3", "params": {"threshold": "25"}},
+                              "nas_gs": {"followed": True}, "bogus": {}}, self.R)
+        self.assertEqual((r["delay"]["on"], r["delay"]["hours"], r["delay"]["params"]["threshold"]), (False, 3.0, 25))
+        self.assertIsNone(r["nas_gs"]["followed"])            # not applicable stays n/a
+        m = self.rules.merge(r, {"gate_alert_hours": 2})
+        self.assertEqual(m["delay"]["params"]["threshold"], 25)
+        seeded = self.rules.seed_from_config({"notify_watch_start": False, "inbound_alert_minutes": 45,
+                                              "swap_alert_hours": 2, "min_turn_minutes": 35})
+        self.assertFalse(seeded["watch_start"]["on"])
+        self.assertEqual(seeded["inbound_late"]["params"]["max_sched_turn"], 45)
+
+
+class ScheduleChange(unittest.TestCase):
+    def test_added_removed_retimed(self):
+        import time as _t
+        import server
+        pushed = []
+        server.notify = lambda a: pushed.append(a["title"])
+        now = _t.time()
+        evs = [{"oid": "a", "start": now + 5 * H, "end": now + 8 * H, "allday": False, "summary": "1 EWR-ORD",
+                "location": ""},
+               {"oid": "b", "start": now + 20 * H, "end": now + 23 * H, "allday": False, "summary": "2 ORD-EWR",
+                "location": ""}]
+        server.schedule.load_file = lambda p: (b"x", now)
+        server.schedule.parse_ics = lambda d, tz, n: [dict(e) for e in evs]
+        server.STATE["legs"] = {}
+        server.STATE["schedule"] = {"mtime": None, "error": None, "count": 0, "checked": None}
+        server.CFG["airline_icao"] = "UAL"
+        server.reload_schedule(force=True)                   # first load: silent
+        self.assertEqual(pushed, [])
+        evs[0]["start"] += 3600
+        evs[0]["end"] += 3600
+        evs.pop(1)
+        evs.append({"oid": "c", "start": now + 30 * H, "end": now + 33 * H, "allday": False,
+                    "summary": "3 EWR-DEN", "location": ""})
+        server.reload_schedule(force=True)
+        self.assertEqual(sorted(pushed), ["Schedule: flight added", "Schedule: flight removed",
+                                          "Schedule: flight retimed"])

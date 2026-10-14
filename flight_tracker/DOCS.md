@@ -24,23 +24,21 @@ Open it from **Flights** in the Home Assistant sidebar.
    (Developer Tools → Actions → search "notify.mobile_app" to find yours).
 4. Start the add-on and open **Flights** from the sidebar.
 
-## What you get pushed
+## Notifications
 
-| When | Example |
-|---|---|
-| A flight enters the watch window | Tracking UA 1234 EWR→SFO · departs 14:05 · gate C71 · B39M N37502 |
-| Gate assigned or changed (from `gate_alert_hours`, default 2 h, before departure) | UA 1234 gate change: EWR gate C71 → C80 |
-| Departure delayed, delay grows/shrinks, back on time | UA 1234 delayed 25 min · now departs 14:30 (was 14:05) |
-| Aircraft swap | N37502 → N12345 |
-| Inbound aircraft departs / reaches the gate | Inbound UA567 departed ORD · due in 13:20 |
-| Inbound running late for your departure | UA567 from ORD due 13:50 — 15 min turn for your 14:05 departure |
-| Inbound or your flight cancelled / diverted | |
-| Ground stop, ground delay program, delays or closure at either end | EWR: Ground delay program (avg 1 hour) — low ceilings |
-| Off, takeoff, landing, on (deadheads and followed flights; working legs optional) | |
+Open the **bell** in the app. Every event the tracker can detect is listed by group
+(Departure, Arrival, Status, Aircraft, Inbound, NAS, Weather, Route, Schedule, System), and each has:
 
-Each piece of news is pushed once. Gate and delay pushes replace the earlier
-one on your lock screen. Delays, gate changes, tight turns and NAS programs
-are time-sensitive on iPhone (turn off with `time_sensitive`).
+- **On / off**
+- **Which flights:** My legs, Deadheads, Followed
+- **From … h out:** only push once departure is this close (blank = any time). A gate held back
+  this way is pushed when the window opens, with the gate at that moment.
+- **Urgent:** time-sensitive on iPhone (breaks through Focus)
+- Its own thresholds where it has any (delay minutes, minimum turn, gust knots, …)
+
+Changes save as you make them. Tracking itself always runs; this only decides what reaches
+your phone. Your old Configuration-tab choices (gate/swap hours, inbound rules, tracking-start
+push, delay thresholds) were used as the starting values.
 
 ## The app
 
