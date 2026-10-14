@@ -95,7 +95,7 @@ STATE = {"legs": {}, "nas": [], "nas_at": None, "nas_error": None, "wx": {}, "wx
          "worker": {"busy": None, "last_cycle": None, "error": None},
          "manual": [], "debug": [], "gemini_calls": [], "aero_calls": [], "rules": {}, "flags": {},
          "blocked_streak": 0}
-PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls", "aero_calls", "rules", "flags")
+PERSIST = ("legs", "alerts", "nas", "nas_at", "wx", "manual", "gemini_calls", "aero_calls", "rules", "flags", "app_settings")
 INGRESS = {"path": None}
 CHANGE = threading.Condition()
 CHANGE_V = [0]
@@ -125,6 +125,45 @@ def load_state():
         pass
     except Exception as e:
         log.warning("Could not read saved state (%s); starting fresh", e)
+
+
+# Settings that live in the app (Settings page) rather than the add-on configuration.
+# key: (kind, min, max, label, help)
+APP_SETTINGS = {
+    "watch_hours": ("int", 1, 48, "Start watching", "Hours before departure. Nothing runs for a flight before this; then the first look is AeroAPI, then page checks."),
+    "track_deadheads": ("bool", None, None, "Track deadheads", "Also watch flights marked DH in your schedule."),
+    "poll_far_minutes": ("int", 5, 120, "Check every (more than 3 h out)", "Minutes between page checks."),
+    "poll_near_minutes": ("int", 2, 60, "Check every (within 3 h)", "Minutes between page checks."),
+    "poll_fast_minutes": ("int", 1, 30, "Check every (last 45 min, taxi, airborne)", "Minutes between page checks."),
+    "nas_minutes": ("int", 2, 60, "FAA NAS status every", "Minutes between NAS status checks."),
+    "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne."),
+}
+
+
+def init_app_settings():
+    """First run: carry over whatever the add-on configuration had; afterwards the app owns them."""
+    s = STATE.setdefault("app_settings", {})
+    for k in APP_SETTINGS:
+        if k not in s:
+            s[k] = CFG.get(k, DEFAULTS.get(k))
+    CFG.update({k: s[k] for k in APP_SETTINGS})
+
+
+def clean_app_settings(new):
+    out = dict(STATE.get("app_settings") or {})
+    for k, v in (new or {}).items():
+        spec = APP_SETTINGS.get(k)
+        if not spec:
+            continue
+        kind, lo, hi = spec[0], spec[1], spec[2]
+        if kind == "bool":
+            out[k] = bool(v)
+        else:
+            try:
+                out[k] = max(lo, min(hi, int(float(v))))
+            except (TypeError, ValueError):
+                pass
+    return out
 
 
 def init_rules():
@@ -1266,8 +1305,8 @@ def worker():
             forced = set()
             while not REFRESH_Q.empty():
                 forced.add(REFRESH_Q.get_nowait())
-            if now - last_sched > 300 or "all" in forced:
-                reload_schedule(force="all" in forced)
+            if now - last_sched > 300 or "all" in forced or "schedule" in forced:
+                reload_schedule(force="all" in forced or "schedule" in forced)
                 check_schedule_stale(now)
                 expire_manual(now)
                 clean_screenshots(now)
@@ -1470,6 +1509,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/rules":
             with LOCK:
                 return self._send(200, {"rules": rules_mod.catalog_for_ui(STATE["rules"])})
+        if path == "/api/settings":
+            with LOCK:
+                return self._send(200, {"settings": [{"key": k, "kind": v[0], "min": v[1], "max": v[2], "label": v[3],
+                                                      "help": v[4], "value": STATE["app_settings"].get(k)}
+                                                     for k, v in APP_SETTINGS.items()]})
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
@@ -1537,6 +1581,18 @@ class Handler(BaseHTTPRequestHandler):
             save_state()
             bump()
             return self._send(200, {"ok": True})
+        if path == "/api/settings":
+            body = self._json().get("settings") or {}
+            with LOCK:
+                before = dict(STATE["app_settings"])
+                STATE["app_settings"] = clean_app_settings(body)
+                CFG.update(STATE["app_settings"])
+                if before.get("track_deadheads") != STATE["app_settings"].get("track_deadheads"):
+                    REFRESH_Q.put("schedule")  # re-read the schedule with the new deadhead setting
+            save_state()
+            WAKE.set()
+            bump()
+            return self._send(200, {"ok": True})
         if path == "/api/rules":
             with LOCK:
                 STATE["rules"] = rules_mod.clean(self._json().get("rules"), STATE["rules"])
@@ -1571,6 +1627,7 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
     load_state()
+    init_app_settings()
     init_rules()
     if not CFG["airline_icao"]:
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")

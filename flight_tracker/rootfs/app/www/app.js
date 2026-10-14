@@ -9,6 +9,7 @@
   const $app = {
     set innerHTML(html) { if (morphing) morph($root, html); else $root.innerHTML = html; },
     querySelectorAll: (s) => $root.querySelectorAll(s),
+    querySelector: (s) => $root.querySelector(s),
   };
   function morph(target, html) {
     const tpl = document.createElement("template");
@@ -828,9 +829,14 @@
   // ---------- tools: test push + debug ----------
   async function toolsView() {
     destroyMaps();
-    const d = await api("api/debug");
+    const [d, st] = await Promise.all([api("api/debug"), api("api/settings").catch(() => ({ settings: [] }))]);
     const sch = d.schedule || {};
     const c = d.config;
+    const setRow = (x) => x.kind === "bool"
+      ? `<div class="nrow"><div class="nrow-head"><label class="switch"><input type="checkbox" data-s="${esc(x.key)}" ${x.value ? "checked" : ""}><span></span></label>
+          <div class="nrow-txt"><div class="nrow-label">${esc(x.label)}</div><div class="small faint">${esc(x.help)}</div></div></div></div>`
+      : `<div class="nrow"><div class="set-num"><div class="nrow-txt"><div class="nrow-label">${esc(x.label)}</div><div class="small faint">${esc(x.help)}</div></div>
+          <label class="hrs"><input type="number" min="${x.min}" max="${x.max}" inputmode="numeric" data-s="${esc(x.key)}" value="${x.value ?? ""}"> ${x.key === "watch_hours" ? "h" : "min"}</label></div></div>`;
     const fetchRow = (x) => `<div class="fetch ${x.error ? "bad" : x.page_data === false ? "warn" : ""}">
       ${x.has_shot ? `<a href="api/shot/${esc(x.shot)}.png?t=${Math.round(x.at)}" target="_blank" rel="noopener"><img loading="lazy" src="api/shot/${esc(x.shot)}.png?t=${Math.round(x.at)}" alt="" onerror="this.parentNode.remove()"></a>` : ""}
       <div class="fx">
@@ -842,6 +848,9 @@
       </div></div>`;
     $app.innerHTML = `
       <a class="back" href="#/">‹ Flights</a>
+      <h2 class="section"><span>Tracking</span><span id="s-msg" class="small"></span></h2>
+      <div class="card nlist">${st.settings.map(setRow).join("")}</div>
+      <p class="small faint" style="margin:-4px 4px 14px">Alerts are on the bell page. Schedule file, notify service and API keys are in the add-on's Configuration tab in Home Assistant.</p>
       <div class="card">
         <h3 style="margin:0 0 4px">Notifications</h3>
         <p class="small muted" style="margin:0 0 12px">Sends to ${esc(c.notify)}.</p>
@@ -891,6 +900,19 @@
       e.target.disabled = false;
     };
     document.getElementById("t-reload").onclick = () => toolsView();
+    const sMsg = document.getElementById("s-msg");
+    $app.querySelectorAll("[data-s]").forEach((inp) => inp.onchange = async () => {
+      const body = {};
+      $app.querySelectorAll("[data-s]").forEach((x) => { body[x.dataset.s] = x.type === "checkbox" ? x.checked : x.value; });
+      sMsg.className = "small muted"; sMsg.textContent = "Saving…";
+      try {
+        const r = await fetch("api/settings", { method: "POST", body: JSON.stringify({ settings: body }) });
+        if (!r.ok) throw new Error(r.status);
+        sMsg.textContent = "Saved"; setTimeout(() => { if (sMsg.textContent === "Saved") sMsg.textContent = ""; }, 1500);
+        const fresh = await api("api/settings");
+        for (const x of fresh.settings) { const el = $app.querySelector(`[data-s="${x.key}"]`); if (el && el.type !== "checkbox") el.value = x.value; }
+      } catch (e) { sMsg.className = "small err"; sMsg.textContent = `Couldn't save: ${e.message}`; }
+    });
   }
 
   // ---------- loop ----------

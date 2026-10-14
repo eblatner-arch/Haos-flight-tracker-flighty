@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "2.11.14"
+version: "2.12.0"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -28,25 +28,6 @@ options:
   ics_file_path: /homeassistant/ics2gcal/feed.ics
   airline_icao: ""
   notify_service: ""
-  watch_hours: 18
-  track_deadheads: true
-  track_flights: []
-  gate_alert_hours: 2
-  swap_alert_hours: 2
-  inbound_alert_minutes: 60
-  delay_threshold_minutes: 15
-  delay_step_minutes: 10
-  min_turn_minutes: 35
-  notify_watch_start: true
-  notify_inbound_progress: true
-  notify_progress: false
-  notify_progress_deadhead: true
-  time_sensitive: true
-  poll_far_minutes: 30
-  poll_near_minutes: 10
-  poll_fast_minutes: 3
-  nas_minutes: 5
-  live_positions: true
   aeroapi_key: ""
   aeroapi_monthly_budget: 5
   gemini_api_key: ""
@@ -58,29 +39,6 @@ schema:
   airline_icao: str?
   notify_service: str?
   notification_url: str?
-  watch_hours: int(1,48)
-  track_deadheads: bool
-  track_flights:
-    - ident: str
-      from: str?
-      to: str?
-      date: str?
-  gate_alert_hours: float(0,24)
-  swap_alert_hours: float(0,24)
-  inbound_alert_minutes: int(0,600)
-  delay_threshold_minutes: int(1,180)
-  delay_step_minutes: int(1,120)
-  min_turn_minutes: int(0,180)
-  notify_watch_start: bool
-  notify_inbound_progress: bool
-  notify_progress: bool
-  notify_progress_deadhead: bool
-  time_sensitive: bool
-  poll_far_minutes: int(5,120)
-  poll_near_minutes: int(2,60)
-  poll_fast_minutes: int(1,30)
-  nas_minutes: int(2,60)
-  live_positions: bool
   aeroapi_key: password?
   aeroapi_monthly_budget: float(0,1000)
   aeroapi_cost_per_query: float(0,1)?

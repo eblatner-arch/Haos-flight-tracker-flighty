@@ -54,10 +54,10 @@ push, delay thresholds) were used as the starting values.
   struck through; gate, terminal, arrival gate, bags, aircraft and tail;
   countdown or progress bar.
 - **Inbound aircraft**: where your airplane is coming from, its ETA, and your
-  turn time against `min_turn_minutes`. It's drawn on the map in purple.
+  turn time against your Short turn minimum (bell page). It's drawn on the map in purple.
 - **Upcoming** legs for the next three weeks, **Following** (extra flights from
-  `track_flights`), **Recent**.
-- **NAS**: ground stops, delay programs and closures at the airports on your own flights in the next `watch_hours`.
+  the + button), **Recent**.
+- **NAS**: ground stops, delay programs and closures at the airports on the flights you're watching.
 - Tap a flight for full times (gate out, takeoff, landing, gate in), METARs
   with flight category, filed route, altitude and speed, its alert history and
   the latest page screenshot.
@@ -80,7 +80,7 @@ appear once the airplane's previous flight is in the air.
 With a FlightAware AeroAPI **Personal** key in `aeroapi_key`, every flight (yours
 and followed ones) is handled the same way:
 
-1. **Nothing runs** until `watch_hours` (18) before departure: no AeroAPI, no page checks.
+1. **Nothing runs** until the watch window (Settings → Start watching, 18 h) before departure: no AeroAPI, no page checks.
 2. **First look: AeroAPI.** One query gets the times, gates, the airline's tail
    assignment and the inbound flight.
 3. **Then page checks and screenshots** every 30 / 10 / 3 minutes (more than 3 hours
@@ -101,7 +101,7 @@ Tap **+** to follow any flight: flight number (UA1234 or UAL1234), From and To
 airports, and optionally a date (blank means the next departure). The airports
 matter because one flight number often flies several legs. Followed flights
 appear in the timeline in departure order. You can also list them in
-`track_flights` on the Configuration tab with `ident`, `from`, `to` and `date`.
+the + button in the app with the flight number, from, to and an optional date.
 NAS programs are only shown and pushed for your own flights, not followed ones. Followed flights get gate, delay, pushback and takeoff pushes.
 
 ## Tools
@@ -118,7 +118,7 @@ The wrench button opens Tools:
 
 ## When tracking stops
 
-A flight is tracked from `watch_hours` before departure until FlightAware shows
+A flight is tracked from the watch window (Settings → Start watching) before departure until FlightAware shows
 it has taken off. After that it moves to Recent (or shows Departed under
 Following) and isn't checked again.
 
@@ -150,9 +150,9 @@ Signing in to a free FlightAware account also tends to show more detail.
 
 ## Check intervals
 
-More than 3 hours before departure every `poll_far_minutes` (30), within 3
-hours every `poll_near_minutes` (10), and from 45 minutes before departure
-through arrival every `poll_fast_minutes` (3). Each check loads one or two
+More than 3 hours before departure every 30 minutes, within 3
+hours every 10 minutes, and from 45 minutes before departure
+through arrival every 3 minutes (all adjustable under Settings → Tracking). Each check loads one or two
 FlightAware pages, plus one for the inbound aircraft.
 
 ## Troubleshooting
@@ -163,3 +163,10 @@ FlightAware pages, plus one for the inbound aircraft.
   list this departure yet").
 - **Wrong or missing flight numbers**: set `airline_icao`, or a custom
   `flight_regex` with named groups `dep`, `arr` and `flt`.
+
+## Where settings live
+
+- **Add-on Configuration tab (Home Assistant):** schedule file, airline code, notify service, notification link, AeroAPI key and budget, Gemini key and model, browser viewer, and the advanced flight pattern and time zone.
+- **In the app, wrench → Tracking:** watch window, deadheads, check intervals, NAS interval, live ADS-B positions.
+- **In the app, bell:** every notification, its window, urgency and thresholds (gate and swap windows, delay thresholds, short turn, inbound settings).
+- **In the app, +:** flights you follow.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.0
+- The add-on Configuration tab only has setup and API items now: schedule file, airline code, notify service and link, AeroAPI key/budget, Gemini key/model, browser viewer, and the advanced pattern/time zone
+- New Tracking settings in the app (wrench page): watch window, deadheads, check intervals, NAS interval, live ADS-B positions. Your current values carry over
+- Notification settings that were also in the config (gate/swap windows, delay thresholds, turn minimums, progress and urgency switches) live only on the bell page, where they already were. Followed flights are added with +
+
 ## 2.11.14
 - Map dragging is now switched on per touch: only a touch that lands inside a map's visible box can drag it; any other touch turns that map's dragging off before the map sees it
 

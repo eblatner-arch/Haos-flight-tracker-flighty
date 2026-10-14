@@ -178,6 +178,28 @@ class Nas(unittest.TestCase):
 
 
 
+class AppSettings(unittest.TestCase):
+    def test_carry_over_and_api(self):
+        import server, threading, urllib.request
+        server.STATE["app_settings"] = {}
+        server.CFG["watch_hours"], server.CFG["poll_far_minutes"] = 12, 45     # what the old config had
+        server.init_app_settings()
+        self.assertEqual((server.STATE["app_settings"]["watch_hours"], server.STATE["app_settings"]["poll_far_minutes"]), (12, 45))
+        self.assertEqual(server.clean_app_settings({"watch_hours": "99", "live_positions": 0, "bogus": 1})["watch_hours"], 48)
+        server.save_state = lambda: None
+        srv = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        got = json.load(urllib.request.urlopen(base + "/api/settings"))
+        self.assertIn("watch_hours", [x["key"] for x in got["settings"]])
+        req = urllib.request.Request(base + "/api/settings", data=json.dumps({"settings": {"watch_hours": 20, "track_deadheads": False}}).encode(), method="POST")
+        self.assertTrue(json.load(urllib.request.urlopen(req))["ok"])
+        self.assertEqual((server.CFG["watch_hours"], server.CFG["track_deadheads"]), (20, False))
+        self.assertEqual(server.REFRESH_Q.get_nowait(), "schedule")                 # deadhead change re-reads the schedule
+        srv.shutdown()
+        server.CFG["watch_hours"], server.CFG["track_deadheads"] = 18, True
+
+
 class Startup(unittest.TestCase):
     def test_init_rules_with_old_saved_rules(self):
         """Rules saved by older versions (with settings since removed) must still load."""
