@@ -350,6 +350,9 @@ a.card.inbound { display: block; }
 /* keep map layers (zoom buttons, markers) under the sticky header */
 .top { z-index: 5000; }
 .leaflet-container { isolation: isolate; z-index: 0; }
+/* Hard-clip the map to its box. iOS doesn't clip the map's moving layers for touches, so the
+   off-screen tiles below a map grabbed swipes that started on the card underneath. */
+.leaflet-container { contain: paint; clip-path: inset(0 round var(--radius)); }
 /* Tile seams: Leaflet draws tiles with mix-blend-mode: plus-lighter, which turns any sub-pixel
    overlap into a bright line on dark maps. Draw them normally, and paint the map background in
    the tiles' own grey so a sub-pixel gap can't show either. */
@@ -398,6 +401,3 @@ a.card.inbound { display: block; }
 .nas-trend .na-sub { margin-top: 2px; }
 .na-for { font-size: 12.5px; color: var(--faint); margin-top: 3px; }
 .apt-label.faint { opacity: .75; font-size: 11px; }
-.map-tip { position: absolute; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; pointer-events: none;
-  background: rgba(0,0,0,.45); color: #fff; font-weight: 700; font-size: 15px; opacity: 0; transition: opacity .2s; }
-.map-tip.on { opacity: 1; }

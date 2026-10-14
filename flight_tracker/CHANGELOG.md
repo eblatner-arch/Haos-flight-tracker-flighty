@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.10
+- One finger moves the map again (2.11.9's two-finger mode is gone)
+- Fix: swipes that started below a map could drag the map. Maps are now hard-clipped to their box, so the off-screen part of the map can't catch touches
+
 ## 2.11.9
 - On phones, scrolling over a map scrolls the page instead of dragging the map away. Move the map with two fingers (pinch to zoom still works); a one-finger drag shows a short "Use two fingers" hint
 
