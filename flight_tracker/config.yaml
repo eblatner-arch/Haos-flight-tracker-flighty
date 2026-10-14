@@ -3,6 +3,7 @@ version: "2.0.1"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
+image: ghcr.io/eblatner-arch/flight-tracker
 arch: [amd64, aarch64]
 startup: application
 boot: auto
