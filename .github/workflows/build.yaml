@@ -19,7 +19,9 @@ jobs:
 
       - name: Read version
         id: v
-        run: echo "version=$(grep -m1 '^version:' flight_tracker/config.yaml | sed -E 's/version: *\"?([^\"]+)\"?/\1/')" >> "$GITHUB_OUTPUT"
+        run: |
+          v=$(python3 -c "import yaml;print(yaml.safe_load(open('flight_tracker/config.yaml'))['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
