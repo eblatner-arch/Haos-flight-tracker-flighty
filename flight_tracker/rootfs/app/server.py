@@ -1029,8 +1029,8 @@ def update_leg(browser, lid):
     prev_aero_at = (L.get("aero") or {}).get("at")
     prev_tail_at = (L.get("tail_info") or {}).get("at")
     sources = []
+    first = None
     try:
-        first = None
         if first_lookup_due(L, now):
             first = aero_call(L, now, "first lookup")
             if first:
@@ -1180,6 +1180,10 @@ def update_leg(browser, lid):
         notify(a)
     log.info("%s %s→%s: %s%s", L.get("display"), L.get("dep"), L.get("arr"),
              alerting.status_label(L, CFG), f" ({L['note']})" if L.get("note") else "")
+    # AeroAPI answers in a second; go straight on to the FlightAware pages (comparison and the
+    # inbound aircraft) instead of waiting for the next cycle, so the inbound shows up right away.
+    if first and watched(L, time.time()) and not finished(L, time.time()):
+        update_leg(browser, lid)
 
 
 def refresh_nas(now):

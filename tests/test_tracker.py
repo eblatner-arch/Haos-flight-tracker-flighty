@@ -371,9 +371,14 @@ class AeroAPI(unittest.TestCase):
     def test_first_lookup_is_aeroapi_then_pages_compare(self):
         self.add()
         L = self.run_at("a1", T0)                              # 17 h out: first look
-        self.assertEqual((len(self.calls), len(self.pages)), (1, 0))
-        self.assertEqual(L["source"], "AeroAPI")
+        self.assertEqual(len(self.calls), 1)                   # one AeroAPI call...
+        self.assertTrue(any("UAL567" in u for u in self.pages))  # ...then the pages right away, inbound included
+        self.assertTrue(L.get("inbound"))
+        self.assertTrue(L.get("compared"))
+        sources_logged = [h.get("sources") for h in L.get("history") or []]
+        self.assertTrue(any("AeroAPI" in (s or []) for s in sources_logged), sources_logged)
         self.run_at("a1", T0 + 120)
+        self.assertEqual(len(self.calls), 1)
 
     def test_first_lookup_tail_has_source(self):
         self.tail = "N77"

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.10.0
+- The first AeroAPI lookup is followed immediately by the FlightAware page check (comparison and inbound aircraft) instead of waiting for the next cycle, so the inbound shows up right away
+
 ## 2.9.9
 - Fix: changing pages reloaded the whole app (blank "Loading…" flash). Navigation now stays inside the page and never changes the address, so Home Assistant doesn't reload the panel
 - The Flights map draws immediately from the last data instead of appearing blank first
