@@ -351,13 +351,16 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
         def close(ev):
             mx = P(ev, "max_sched_turn")
             return not mx or (st is not None and st <= mx)
-        idly = fa.delay_minutes(inb)
+        # Late inbound = its arrival at your airport, not when it leaves its origin.
+        idly = fa.arrival_delay_minutes(inb)
         if idly is not None and idly >= (P("inbound_delayed", "threshold") or 15) and not nt.get("inb_delay") \
-                and iph in ("scheduled", "taxi_out", "airborne") and close("inbound_delayed"):
+                and iph in ("scheduled", "taxi_out", "airborne", "landed") and close("inbound_delayed"):
             nt["inb_delay"] = True
-            add("inbound_delayed", f"Inbound {iid} delayed {mins(idly)}",
-                f"Leaves {ifrom} {hhmm(fa.best_time(inb['times'], 'out'), tz_for(ifrom, inb.get('origin')))}, "
-                f"due {dep} {hhmm(fa.best_time(inb['times'], 'in'), dep_tz)}", "warn")
+            tt = turn_minutes(leg)
+            ti = inb["times"]["in"]
+            add("inbound_delayed", f"Inbound {iid} arriving {mins(idly)} late",
+                f"Due {dep} {hhmm(fa.best_time(inb['times'], 'in'), dep_tz)} (sched {hhmm(ti.get('scheduled'), dep_tz)})"
+                + (f" · {mins(tt)} turn for your {hhmm(out_now, dep_tz)} departure" if tt is not None else ""), "warn")
         t = turn_minutes(leg)
         last = nt.get("turn")
         if t is not None and t < (P("inbound_late", "min_turn") or 35) and iph not in ("arrived", "cancelled", "diverted") \

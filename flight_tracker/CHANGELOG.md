@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.5
+- "Inbound departure delayed" is now "Inbound arriving late": it compares the inbound's estimated arrival at your airport with its scheduled arrival, not when it leaves its origin. The push includes the expected turn
+
 ## 2.11.4
 - Fix: the add-on crashed on start after 2.10.1 (KeyError max_sched_turn) while reading the removed short-turn setting
 

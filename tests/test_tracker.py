@@ -712,7 +712,10 @@ class Rules(unittest.TestCase):
         inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN1", out_s=self.out - 3 * H, origin="ORD", dest="EWR",
                                                inbound_id=None, out_e=self.out - 3 * H + 40 * 60))
         inb["times"]["in"]["scheduled"] = self.out - 40 * 60
+        inb["times"]["in"]["estimated"] = self.out - 40 * 60      # left late but making it up: not late
         L["inbound"] = inb
+        self.assertNotIn("inbound_delayed", self.keys(json.loads(json.dumps(L))))
+        inb["times"]["in"]["estimated"] = self.out - 10 * 60      # arriving 30 min late
         k = self.keys(L)
         self.assertIn("inbound_delayed", k)
         inb2, _ = fa.flights_from_bootstrap(boot(fa_id="IN2", out_s=self.out - 3 * H, origin="DEN", dest="EWR",

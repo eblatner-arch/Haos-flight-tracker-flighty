@@ -59,7 +59,7 @@ CATALOG = [
     ("inbound_departed", "Inbound", "Inbound departed", "Your inbound aircraft took off.",
      dict(on=True, hours=None, mine=True, dh=True, followed=False, ts=False),
      {"max_sched_turn": ("Only if scheduled turn under", 60, "min")}),
-    ("inbound_delayed", "Inbound", "Inbound departure delayed", "Your inbound left (or will leave) its origin late.",
+    ("inbound_delayed", "Inbound", "Inbound arriving late", "Your inbound's estimated arrival at your airport is later than scheduled.",
      dict(on=True, hours=None, mine=True, dh=False, followed=False, ts=True),
      {"threshold": ("Late by at least", 15, "min"), "max_sched_turn": ("Only if scheduled turn under", 60, "min")}),
     ("inbound_late", "Inbound", "Short turn",
