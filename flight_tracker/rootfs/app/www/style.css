@@ -353,6 +353,11 @@ a.card.inbound { display: block; }
 /* Hard-clip the map to its box. iOS doesn't clip the map's moving layers for touches, so the
    off-screen tiles below a map grabbed swipes that started on the card underneath. */
 .leaflet-container { contain: paint; clip-path: inset(0 round var(--radius)); }
+/* Leaflet draws routes in an SVG that's 10% bigger than the map (so panning doesn't show gaps), and
+   that SVG took touches in the strip just below the map on iOS. Nothing on our maps is tappable,
+   so routes, markers and labels ignore touches; dragging still works on the map itself. */
+.leaflet-container .leaflet-overlay-pane svg, .leaflet-container .leaflet-overlay-pane svg *,
+.leaflet-container .leaflet-marker-pane, .leaflet-container .leaflet-marker-pane * { pointer-events: none !important; }
 /* Tile seams: Leaflet draws tiles with mix-blend-mode: plus-lighter, which turns any sub-pixel
    overlap into a bright line on dark maps. Draw them normally, and paint the map background in
    the tiles' own grey so a sub-pixel gap can't show either. */

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.11.11
+- Fix: a swipe starting just below a map still dragged it on iPhone. Leaflet's route layer is drawn 10% larger than the map and was catching those touches; routes, markers and labels now ignore touches (dragging the map itself is unchanged)
+
 ## 2.11.10
 - One finger moves the map again (2.11.9's two-finger mode is gone)
 - Fix: swipes that started below a map could drag the map. Maps are now hard-clipped to their box, so the off-screen part of the map can't catch touches
