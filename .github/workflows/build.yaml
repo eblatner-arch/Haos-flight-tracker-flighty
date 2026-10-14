@@ -1,0 +1,48 @@
+name: Build add-on image
+
+on:
+  push:
+    branches: [main]
+    paths: ["flight_tracker/**", ".github/workflows/build.yaml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: v
+        run: echo "version=$(grep -m1 '^version:' flight_tracker/config.yaml | sed -E 's/version: *\"?([^\"]+)\"?/\1/')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 + aarch64)
+        uses: docker/build-push-action@v6
+        with:
+          context: flight_tracker
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: BUILD_VERSION=${{ steps.v.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            io.hass.version=${{ steps.v.outputs.version }}
+            io.hass.type=app
+          tags: |
+            ghcr.io/eblatner-arch/flight-tracker:${{ steps.v.outputs.version }}
+            ghcr.io/eblatner-arch/flight-tracker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
