@@ -86,6 +86,15 @@ def _alt_ft(v):
     return int(v * 100) if v < 1000 else int(v)
 
 
+def thin(track, n):
+    """Keep at most n points spread over the whole flight (first and last always kept),
+    instead of dropping the start."""
+    if not track or len(track) <= n:
+        return list(track or [])
+    step = (len(track) - 1) / (n - 1)
+    return [track[round(i * step)] for i in range(n)]
+
+
 def normalize(f):
     """One FlightAware flight object -> our flight dict."""
     if not isinstance(f, dict):
@@ -122,7 +131,7 @@ def normalize(f):
         "distance_nm": _num(_first(plan.get("directDistance"), plan.get("plannedDistance"))),
         "ete": _num(plan.get("ete")),
         "waypoints": waypoints[:2000],
-        "track": track[-800:],
+        "track": thin(track, 800),
         "inbound_fa_id": _first(inbound.get("fa_flight_id"), inbound.get("flightId"), inbound.get("id")),
         "inbound_ident": _first(inbound.get("ident"), inbound.get("displayIdent")),
     }

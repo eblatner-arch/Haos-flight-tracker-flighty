@@ -835,6 +835,8 @@ def _fill_airports(fl):
 def final(h, now):
     """A leg is frozen only once we've fetched it after it finished, so its track is complete."""
     ph = fa.phase(h, now)
+    if h.get("track_v") != 2:
+        return False  # saved before tracks were thinned evenly: fetch once more
     if ph in ("cancelled", "diverted"):
         return True
     if ph != "arrived":
@@ -874,7 +876,8 @@ def update_rotation(browser, L, now):
             if nxt is not cached:
                 _fill_airports(nxt)
                 nxt["fetched"] = now
-                nxt["track"] = (nxt.get("track") or [])[-300:]
+                nxt["track_v"] = 2
+                nxt["track"] = fa.thin(nxt.get("track") or [], 300)
         rot.append(nxt)
         cur = nxt
     L["rotation"] = rot
@@ -1060,7 +1063,7 @@ def update_leg(browser, lid):
             if old_track and flight.get("track") and flight["track"][0][4] and old_track[0][4] \
                     and old_track[0][4] < flight["track"][0][4] and L.get("fa_id") == flight.get("fa_id"):
                 flight["track"] = [p for p in old_track if p[4] and p[4] < flight["track"][0][4]] + flight["track"]
-                flight["track"] = flight["track"][-1500:]
+                flight["track"] = fa.thin(flight["track"], 1500)
             L["flight"], L["source"] = flight, source
         L["note"] = note
         if shot or not first:

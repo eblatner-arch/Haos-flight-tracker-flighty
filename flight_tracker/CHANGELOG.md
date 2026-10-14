@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.9.4
+- Fix: long flights lost the start of their track (only the most recent points were kept). Tracks are now thinned evenly
+  over the whole flight; legs saved the old way are fetched once more
+
 ## 2.9.3
 - Fix: an earlier leg saved while it was still flying could freeze with half a track. A leg is now only frozen once it
   has been fetched after it arrived

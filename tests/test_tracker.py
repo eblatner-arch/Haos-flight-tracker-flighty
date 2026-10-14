@@ -792,3 +792,15 @@ class RotationFreshness(Rotation):
         self.assertNotEqual(fa.phase(f, T0), "arrived")
         f["status_text"] = "Arrived at gate"
         self.assertEqual(fa.phase(f, T0), "arrived")
+
+
+class TrackThinning(unittest.TestCase):
+    def test_long_track_keeps_its_start(self):
+        pts = [[40 - i * 0.01, -74 - i * 0.02, 350, 450, T0 + i * 15] for i in range(2000)]
+        t = fa.thin(pts, 300)
+        self.assertEqual(len(t), 300)
+        self.assertEqual(t[0], pts[0])            # departure end kept (this was being cut off)
+        self.assertEqual(t[-1], pts[-1])
+        raw = {"flightId": "x", "track": [{"coord": [p[1], p[0]], "alt": 350, "gs": 450, "timestamp": p[4]} for p in pts],
+               "origin": {}, "destination": {}}
+        self.assertEqual(fa.normalize(raw)["track"][0][0], 40.0)
