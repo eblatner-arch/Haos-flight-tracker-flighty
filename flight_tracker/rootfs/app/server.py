@@ -178,13 +178,30 @@ def ha(method, path, body=None, timeout=10):
 
 
 def find_ingress():
+    """Where a tapped notification should open: the add-on's sidebar panel in the HA app.
+    notification_url overrides it; otherwise the panel path is /<add-on slug>."""
+    manual = (CFG.get("notification_url") or "").strip()
+    if manual:
+        if "://" in manual:  # pasted a full browser URL: keep just the path
+            manual = "/" + manual.split("://", 1)[1].split("/", 1)[-1] if "/" in manual.split("://", 1)[1] else "/"
+        INGRESS["path"] = manual if manual.startswith("/") else "/" + manual
+        INGRESS["how"] = "notification_url option"
+        return
+    slug = None
     try:
         info = ha("GET", "/addons/self/info")
         slug = (info or {}).get("data", {}).get("slug")
-        if slug:
-            INGRESS["path"] = f"/hassio/ingress/{slug}"
+        INGRESS["how"] = "add-on info"
     except Exception as e:
-        log.info("Could not look up the ingress path (%s); notifications won't open the app", e)
+        log.info("Could not look up the add-on slug (%s); using the container name", e)
+    if not slug:
+        host = os.environ.get("HOSTNAME", "")
+        if host and "-" in host:
+            slug = host.replace("-", "_")
+            INGRESS["how"] = "container name"
+    if slug:
+        INGRESS["path"] = f"/{slug}"
+    log.info("Notifications open %s", INGRESS.get("path") or "(nothing: set notification_url)")
 
 
 def notify(alert):
@@ -1332,7 +1349,7 @@ def api_debug():
             "config": {"airline_icao": CFG["airline_icao"] or "(not set)",
                        "notify": f"notify.{CFG['notify_service']}" if CFG.get("notify_service")
                        else "persistent notification (notify_service not set)",
-                       "ingress": INGRESS["path"] or "(unknown)", "gemini": bool(CFG.get("gemini_api_key")),
+                       "ingress": f"{INGRESS['path']} (from {INGRESS.get('how', '?')})" if INGRESS.get("path") else "(unknown: set notification_url)", "gemini": bool(CFG.get("gemini_api_key")),
                        "gemini_model": CFG.get("gemini_model"), "watch_hours": CFG["watch_hours"],
                        "home_tz": TZNAME, "viewer_port": 6080},
             "manual": STATE["manual"],

@@ -8,6 +8,9 @@ configuration:
   notify_service:
     name: Notify service
     description: Your phone's notify service without "notify.", e.g. mobile_app_erics_iphone. Blank sends alerts to Home Assistant notifications instead.
+  notification_url:
+    name: Notification link (optional)
+    description: Where tapping a push opens in the Home Assistant app. Leave blank to open the Flights panel. If that doesn't work, open Flights in a browser and paste the address from the address bar here.
   watch_hours:
     name: Start watching (hours before departure)
     description: Nothing runs for a flight before this. At this point the first look is AeroAPI (if set up), then page checks. Default 18.

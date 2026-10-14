@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.2
+- Fix: tapping a push opened the default dashboard. It now opens the Flights panel (the same address as the sidebar entry),
+  with a fallback when the add-on can't look itself up, and a `notification_url` option to set it by hand
+- Tools shows where tapping a push will take you
+
 ## 2.9.1
 - Check interval uses the earlier of scheduled and estimated departure, so a delay never slows checks down
   (e.g. 3-minute checks start 45 min before the original departure even if it's now 1.5 h late)

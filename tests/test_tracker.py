@@ -747,3 +747,23 @@ class PollAfterDelay(unittest.TestCase):
         L = {"id": "p", "sched_out": out, "sched_in": out + 3 * H}
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=out, out_e=out + 1.5 * H))  # now 2 h out
         self.assertEqual(server.poll_seconds(L, T0), 180)
+
+
+class NotifyLink(unittest.TestCase):
+    def test_link_sources(self):
+        import server
+        server.ha = lambda *a, **k: {"data": {"slug": "83459ff1_flight_tracker"}}
+        server.CFG["notification_url"] = ""
+        server.find_ingress()
+        self.assertEqual(server.INGRESS["path"], "/83459ff1_flight_tracker")
+        server.CFG["notification_url"] = "http://192.168.1.51:8123/83459ff1_flight_tracker"
+        server.find_ingress()
+        self.assertEqual(server.INGRESS["path"], "/83459ff1_flight_tracker")
+
+        def boom(*a, **k):
+            raise OSError("no supervisor")
+        server.ha = boom
+        server.CFG["notification_url"] = ""
+        os.environ["HOSTNAME"] = "83459ff1-flight-tracker"
+        server.find_ingress()
+        self.assertEqual(server.INGRESS["path"], "/83459ff1_flight_tracker")
