@@ -1508,7 +1508,8 @@ def inbound_adsb(now):
         bump()
 
 
-BACKUP = {"dirty": True, "tried": 0, "running": False}
+BACKUP = {"dirty": True, "tried": 0, "running": False, "changed": 0, "failed": False}
+BACKUP_WAKE = threading.Event()
 
 
 def backup_extra():
@@ -1524,23 +1525,36 @@ def backup_files():
 
 
 def run_backup(force=False):
-    """Upload the backup to Drive when History changed (at most every 10 min) and once a day."""
+    """Upload the backup to Drive. Changes go up ~15 s after things settle (backup_loop); once a day regardless."""
     if BACKUP["running"] or not gdrive.state().get("refresh_token"):
         return False
     now = time.time()
-    last = gdrive.state().get("last_backup") or 0
-    if not force and not ((BACKUP["dirty"] and now - BACKUP["tried"] > 600) or now - last > 86400):
+    g = gdrive.state()
+    if not force and not (BACKUP["dirty"] or now - (g.get("last_backup") or 0) > 86400):
         return False
-    BACKUP.update(running=True, tried=now)
+    BACKUP.update(running=True, tried=now, dirty=False)
     bump()
     try:
+        n = len(history.flights())
+        before = g.get("last_count")
+        if before and n < before - 5 and n < before * 0.9:
+            # a big delete: keep the old backup next to the new one, in case it wasn't meant
+            name = f"Flight Tracker backup before delete {datetime.now(HOME_TZ):%Y-%m-%d %H%M} ({before} flights).zip"
+            try:
+                if gdrive.copy("Flight Tracker backup.zip", name):
+                    log.info("Drive: %d -> %d flights, kept the old backup as %s", before, n, name)
+            except Exception as e:
+                log.warning("Drive: couldn't keep the old backup: %s", e)
         files, _ = backup_files()
         ok = gdrive.upload(files)
         if ok:
-            BACKUP["dirty"] = False
-            log.info("Drive backup done (%d flights)", len(history.flights()))
+            gdrive.note(last_count=n)
+            log.info("Drive backup done (%d flights)", n)
+        else:
+            BACKUP["dirty"] = True
         return ok
     except Exception as e:
+        BACKUP["dirty"] = True
         log.warning("Drive backup: %s", e)
         return False
     finally:
@@ -1548,8 +1562,29 @@ def run_backup(force=False):
         bump()
 
 
+def backup_loop():
+    """Uploads after any change once things have been quiet for 15 s (a burst of edits = one upload);
+    retries a failed upload after 2 min; and the daily backup."""
+    while True:
+        BACKUP_WAKE.wait(60)
+        BACKUP_WAKE.clear()
+        try:
+            if not gdrive.state().get("refresh_token"):
+                continue
+            while time.time() - BACKUP["changed"] < 15:
+                time.sleep(3)
+            now = time.time()
+            if BACKUP["dirty"] and now - BACKUP["tried"] < 120 and BACKUP["failed"]:
+                continue
+            ran = run_backup()
+            BACKUP["failed"] = bool(ran is False and BACKUP["dirty"])
+        except Exception:
+            log.exception("Backup loop")
+
+
 def mark_dirty():
-    BACKUP["dirty"] = True
+    BACKUP.update(dirty=True, changed=time.time(), failed=False)
+    BACKUP_WAKE.set()
     bump()
 
 
@@ -1663,8 +1698,6 @@ def worker():
                     update_leg(browser, lid)
             inbound_adsb(time.time())
             archive_finished(time.time())
-            if gdrive.configured():
-                threading.Thread(target=run_backup, daemon=True).start() if not BACKUP["running"] else None
             STATE["worker"].update(busy=None, last_cycle=time.time(), error=None)
             if time.time() - last_pub > 60 or due:
                 publish()
@@ -2051,7 +2084,7 @@ class Handler(BaseHTTPRequestHandler):
                         sync_rule_cfg()
                         STATE.setdefault("flags", {})["restored_rules"] = True
                 save_state()
-                bump()
+                mark_dirty()
                 return self._send(200, res)
             except Exception as e:
                 log.warning("Restore: %s", e)
@@ -2070,6 +2103,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": str(e)})
             save_state()
             bump()
+            mark_dirty()
             REFRESH_Q.put(lid)
             WAKE.set()
             return self._send(200, {"ok": True, "id": lid})
@@ -2077,11 +2111,13 @@ class Handler(BaseHTTPRequestHandler):
             body = self._json()
             ok = set_kind(body.get("id") or "", body.get("kind"))
             save_state()
+            mark_dirty()
             bump()
             return self._send(200 if ok else 404, {"ok": ok})
         if path == "/api/flights/remove":
             remove_manual(self._json().get("id") or "")
             save_state()
+            mark_dirty()
             bump()
             return self._send(200, {"ok": True})
         if path == "/api/settings":
@@ -2093,6 +2129,7 @@ class Handler(BaseHTTPRequestHandler):
                 if STATE["app_settings"].get("schedule_days") != old_days:
                     REFRESH_Q.put("schedule")
             save_state()
+            mark_dirty()
             WAKE.set()
             bump()
             return self._send(200, {"ok": True})
@@ -2101,6 +2138,7 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["rules"] = rules_mod.clean(self._json().get("rules"), STATE["rules"])
                 sync_rule_cfg()
             save_state()
+            mark_dirty()
             with LOCK:
                 return self._send(200, {"ok": True, "rules": rules_mod.catalog_for_ui(STATE["rules"])})
         if path == "/api/test-notify":
@@ -2138,6 +2176,7 @@ def main():
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")
     find_ingress()
     threading.Thread(target=worker, daemon=True, name="tracker").start()
+    threading.Thread(target=backup_loop, daemon=True, name="backup").start()
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)

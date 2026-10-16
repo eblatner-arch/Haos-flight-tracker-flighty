@@ -193,6 +193,7 @@ def _folder(token, name):
             _, body = _gd("GET", f"{DRIVE_API}/{fid}?fields=id,trashed", token)
             if not json.loads(body).get("trashed"):
                 return fid
+            log.info("Drive: the backup folder is in the trash; making a new one")
         except HttpError as e:
             if e.status != 404:
                 raise
@@ -207,19 +208,28 @@ def _folder(token, name):
     return fid
 
 
+def _live(token, fid, folder):
+    """True only when the file exists, isn't in the trash, and is still in our folder."""
+    try:
+        _, body = _gd("GET", f"{DRIVE_API}/{fid}?fields=id,trashed,parents", token)
+    except HttpError as e:
+        if e.status == 404:
+            return False
+        raise
+    m = json.loads(body or b"{}")
+    return not m.get("trashed") and folder in (m.get("parents") or [])
+
+
 def _put(token, folder, name, mime, content):
     """Create or replace one file in the folder (content: bytes)."""
     g = state()
     files = g.get("files") or {}
     fid = files.get(name)
+    if fid and not _live(token, fid, folder):
+        fid = None  # trashed, deleted, or moved out of the folder: never write into the trash
     if fid:
-        try:
-            _, body = _gd("PATCH", f"{DRIVE_UP}/{fid}?uploadType=media&fields=id,trashed", token, content, mime)
-            if not json.loads(body or b"{}").get("trashed"):
-                return fid
-        except HttpError as e:
-            if e.status != 404:
-                raise
+        _gd("PATCH", f"{DRIVE_UP}/{fid}?uploadType=media&fields=id", token, content, mime)
+        return fid
     found = _find(token, name, folder)
     if found:
         _gd("PATCH", f"{DRIVE_UP}/{found['id']}?uploadType=media&fields=id", token, content, mime)
@@ -257,6 +267,22 @@ def upload(files):
     except Exception as e:
         _update(last_error=f"Drive: {str(e)[:200]}")
         raise
+
+
+def copy(name, new_name):
+    """Keep a copy of a file already in the folder under another name (before it gets overwritten)."""
+    token = access_token()
+    folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker (Home Assistant)").strip())
+    found = _find(token, name, folder)
+    if not found:
+        return False
+    _gd("POST", f"{DRIVE_API}/{found['id']}/copy?fields=id", token,
+        json.dumps({"name": new_name, "parents": [folder]}).encode(), "application/json")
+    return True
+
+
+def note(**kw):
+    _update(**kw)
 
 
 def download(name):
