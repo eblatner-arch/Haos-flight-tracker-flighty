@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.7.0
+- Your flight's own transponder is only believed when it's really your departure. A flight number can fly an earlier leg into your airport (UA1268 DFW→EWR, then yours EWR→MCO) and that airplane keeps broadcasting the number after landing. adsb.lol's route for the number (DFW-EWR-MCO) shows when there's an earlier leg; then, before pushback, the airplane must be on the ground at your airport and be the same airplane your inbound's transponder shows. The lookup log says why one was ignored
+- Once your inbound has left its gate, the airplane can't change without a new inbound number (which FlightAware catches), so the airplane's day isn't re-read from FlightAware pages and Flightradar24 isn't asked any more; adsb.lol keeps following the inbound for the map
+- Flightradar24 is off by default (it now shows a Cloudflare "verify you are human" page to the reader); if turned on, a captcha is logged as such instead of "this departure isn't listed"
+- Arrival-time alerts only once you're airborne. Before takeoff the departure time carries any real delay, and FlightAware's early arrival estimates jump around
+- The airplane on the map sits on its line: live ADS-B fixes extend the drawn track between FlightAware's track updates (yours and the inbound's)
+- Maps: double-tap and hold, then slide down to zoom in or up to zoom out; a double tap zooms in a step
+- Smoother edge swipe back: the page follows your finger and slides away, and the previous page slides in once it's ready
+- Flighty import leaves out flights that haven't flown yet (and removes any an earlier import brought in)
+- History: a flight without a track has "Copy for track backfill"; Search has "Copy N without a track for backfill". Paste into the Backfill tracks workflow's new flights box to fetch just those
+
 ## 3.6.1
 - Search: From, To, Either airport, Route and Tail are typed boxes with suggestions (a partial code matches what starts with it; routes as EWR-FLL, EWR FLL or EWRFLL; tails with or without the N). Month is Jan–Dec, combined with Year when you pick one
 

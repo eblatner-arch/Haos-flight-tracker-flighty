@@ -498,3 +498,4 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .find-sum b { color: var(--text); }
 .ff input[data-typed] { text-transform: uppercase; }
 .ff input[data-typed]::placeholder { text-transform: none; color: var(--faint); }
+.linkbtn { background: none; border: 0; padding: 0; margin-left: 6px; color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }

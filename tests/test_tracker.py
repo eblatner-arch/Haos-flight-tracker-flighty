@@ -12,6 +12,10 @@ import flightaware as fa  # noqa: E402
 import schedule  # noqa: E402
 import sources  # noqa: E402
 
+# the tests stub fetch_live; route lookups and the all-aircraft call go through it (no network)
+sources.fetch_route = lambda *a, **k: None
+sources.fetch_live_all = lambda cs: (lambda x: [x] if x else [])(sources.fetch_live(cs))
+
 T0 = 1_760_450_000  # an arbitrary "now"
 H = 3600
 
@@ -303,6 +307,7 @@ class Fr24Swap(unittest.TestCase):
         L = {"id": "m", "display": "UA 2785", "ident": "UAL2785", "dep": "EWR", "arr": "MIA", "sched_out": out_s,
              "sched_in": out_s + 3 * H, "aero": {"tail": "N38467", "at": T0}}
         server.STATE["legs"] = {"m": L}
+        server.CFG["fr24_minutes"] = 15
         f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
                        for k in ("out", "off", "on", "in")}, "inbound_fa_id": "UAL2291-1", "tail": None, "aircraft_type": "B739"}
         pages = []
@@ -346,7 +351,7 @@ class InboundAdsb(unittest.TestCase):
         while not server.REFRESH_Q.empty():
             server.REFRESH_Q.get_nowait()
         real = server.sources.fetch_live
-        server.sources.fetch_live = lambda ident: {"lat": 1, "lon": 2, "tail": "N37560"}
+        server.sources.fetch_live = lambda ident, *a, **k: {"lat": 1, "lon": 2, "tail": "N37560"}
         try:
             server.inbound_adsb(T0)
             self.assertEqual(server.REFRESH_Q.get_nowait(), "a")                  # different tail: full check now
@@ -436,7 +441,9 @@ class TailChain(unittest.TestCase):
     def test_chain_then_own_transponder(self):
         import server
         live_tails = {"UAL890": "N777UA"}
-        sources.fetch_live = lambda cs: {"lat": 1, "lon": 2, "tail": live_tails[cs]} if cs in live_tails else None
+        # our own flight shows up on the ground at EWR; the earlier leg in the air
+        sources.fetch_live = lambda cs, *a: ({"lat": 40.69, "lon": -74.17, "ground": True, "tail": live_tails[cs]} if cs == "UAL1234"
+                                             else {"lat": 1, "lon": 2, "tail": live_tails[cs]}) if cs in live_tails else None
 
         class FB:
             client = None
@@ -478,7 +485,7 @@ class TailChain(unittest.TestCase):
 
     def test_new_inbound_forgets_chain_tail(self):
         import server
-        sources.fetch_live = lambda cs: None
+        sources.fetch_live = lambda cs, *a: None
 
         class FB:
             client = None
@@ -608,7 +615,7 @@ class AeroAPI(unittest.TestCase):
             b = boot(fa_id="F-1", out_s=self.out, tail=self.tail, inbound_id=self.inbound)
             return [fa.normalize(list(b["flights"].values())[0])], 1
         aeroapi.query = query
-        sources.fetch_live = lambda cs: None
+        sources.fetch_live = lambda cs, *a: None
         test = self
 
         class FB:
@@ -1118,3 +1125,28 @@ class SameInbound(unittest.TestCase):
         self.assertIn("UAL903 vs AeroAPI UAL147", reason)
         f["tail"] = "N797UA"                                   # page shows the same airplane: no query
         self.assertEqual(server.aero_reason(L, f, T0 + 120), (None, None))
+
+
+class OwnTransponderEarlierLeg(unittest.TestCase):
+    def test_same_number_earlier_leg_ignored(self):
+        import server
+        out_s = T0 + H
+        f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
+                       for k in ("out", "off", "on", "in")}, "inbound_fa_id": "UAL210-1", "tail": None}
+        L = {"id": "o", "display": "UA 1268", "ident": "UAL1268", "dep": "EWR", "arr": "MCO", "sched_out": out_s,
+             "adsb_inbound": {"tail": "N27526", "at": T0, "root": "UAL210-1", "source": "inbound"}}
+        real_all, real_route = sources.fetch_live_all, sources.fetch_route
+        sources.fetch_route = lambda *a, **k: ["DFW", "EWR", "MCO"]
+        try:
+            sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N47298"}]
+            ac, why = server.own_live(L, f, T0)
+            self.assertIsNone(ac)
+            self.assertIn("DFW→EWR", why)
+            sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N27526"}]
+            ac, why = server.own_live(L, f, T0)
+            self.assertEqual(ac["tail"], "N27526")
+            # still in the air on the earlier leg: not at EWR
+            sources.fetch_live_all = lambda cs: [{"lat": 35.0, "lon": -90.0, "ground": False, "alt_ft": 35000, "tail": "N47298"}]
+            self.assertIsNone(server.own_live(L, f, T0)[0])
+        finally:
+            sources.fetch_live_all, sources.fetch_route = real_all, real_route

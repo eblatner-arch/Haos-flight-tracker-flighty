@@ -43,7 +43,7 @@ CATALOG = [
      dict(on=False, hours=2, calendar=True, manual=True, friends=True, ts=False), {}),
     ("baggage", "Arrival", "Baggage claim", "Bag claim carousel assigned.",
      dict(on=False, hours=None, calendar=False, manual=True, friends=True, ts=False), {}),
-    ("arr_change", "Arrival", "Arrival time change", "Arrival estimate moves by at least the step.",
+    ("arr_change", "Arrival", "Arrival time change", "Once airborne, the arrival estimate moves by at least the step (before takeoff the departure time carries any delay).",
      dict(on=False, hours=None, calendar=True, manual=True, friends=True, ts=False),
      {"step": ("Change of at least", 15, "min")}),
     # Status

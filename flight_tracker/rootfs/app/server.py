@@ -58,7 +58,7 @@ DEFAULTS = {
     "poll_near_minutes": 10,
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
-    "fr24_minutes": 15,
+    "fr24_minutes": 0,
     "schedule_days": 60,
     "adsb_inbound_minutes": 3,
     "nas_minutes": 5,
@@ -142,7 +142,7 @@ APP_SETTINGS = {
     "poll_near_minutes": ("int", 2, 60, "Within 3 h", "Minutes between FlightAware page checks.", "FlightAware page checks"),
     "poll_fast_minutes": ("int", 1, 30, "Last 45 min, taxi, landing", "Minutes between page checks around departure, in the last 20 min before landing and taxiing in.", "FlightAware page checks"),
     "poll_air_minutes": ("int", 2, 60, "In the air", "Minutes between page checks after takeoff. Tracking stops at the gate.", "FlightAware page checks"),
-    "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check", "Minutes between Flightradar24 checks for the airline's tail assignment, from the watch window until pushback. Also runs right away when FlightAware shows a different aircraft type or a different airplane ahead of yours. 0 turns it off.", "Tail and position sources"),
+    "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check", "Off (0) by default: Flightradar24 now shows a Cloudflare 'verify you are human' check to the page reader. If you turn it on: minutes between checks for the airline's tail assignment, from the watch window until your inbound leaves its gate (after that the inbound's own transponder is the answer).", "Tail and position sources"),
     "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
     "nas_minutes": ("int", 2, 60, "FAA NAS status", "Minutes between NAS status checks.", "FAA NAS status"),
@@ -155,6 +155,10 @@ def init_app_settings():
     for k in APP_SETTINGS:
         if k not in s:
             s[k] = CFG.get(k, DEFAULTS.get(k))
+    flags = STATE.setdefault("flags", {})
+    if not flags.get("fr24_off"):
+        s["fr24_minutes"] = 0  # Flightradar24 started answering the page reader with a captcha
+        flags["fr24_off"] = True
     CFG.update({k: s[k] for k in APP_SETTINGS})
 
 
@@ -989,6 +993,20 @@ def update_rotation(browser, L, now):
     L["rotation"] = rot
 
 
+def add_fix(fl, live):
+    """Extend a flight's drawn track with a live ADS-B position, so the airplane sits on its line
+    between FlightAware's (less frequent) track updates."""
+    if not fl or not live or live.get("lat") is None:
+        return
+    tr = fl.get("track")
+    if not isinstance(tr, list):
+        return
+    at = int(live.get("at") or time.time())
+    if tr and tr[-1] and len(tr[-1]) > 4 and tr[-1][4] and at <= tr[-1][4] + 15:
+        return
+    tr.append([round(live["lat"], 5), round(live["lon"], 5), live.get("alt_ft"), live.get("gs_kt"), at])
+
+
 def walk_chain(browser, L, now):
     """Read the registration from ADS-B on the first leg of the airplane's day that's transmitting."""
     update_rotation(browser, L, now)
@@ -1103,6 +1121,70 @@ def own_inbound(L, f):
     return None
 
 
+def _near(code, ac, nm):
+    ap = airports.get(code)
+    if ap.get("lat") is None or ac.get("lat") is None:
+        return None
+    return sources.nm_between(ap["lat"], ap["lon"], ac["lat"], ac["lon"]) <= nm
+
+
+def adsb_route(L, near=None):
+    """adsb.lol's route for this flight number (['DFW', 'EWR', 'MCO']), cached for 6 h."""
+    r = L.get("adsb_route") or {}
+    if time.time() - (r.get("at") or 0) < 6 * 3600:
+        return r.get("codes")
+    try:
+        codes = sources.fetch_route(L["ident"], *(near or (0, 0)))
+    except Exception as e:
+        log.info("%s adsb.lol route: %s", L.get("display"), e)
+        codes = r.get("codes")
+    L["adsb_route"] = {"at": time.time(), "codes": codes}
+    return codes
+
+
+def inbound_tail(L, f):
+    """The tail the airplane flying in is broadcasting, if we've seen it."""
+    ai = L.get("adsb_inbound") or {}
+    if ai.get("tail") and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
+        return ai["tail"].upper()
+    ti = L.get("tail_info") or {}
+    return ti["tail"].upper() if ti.get("kind") == "chain" and ti.get("tail") else None
+
+
+def own_live(L, f, now):
+    """Your flight's own transponder, only when it's really your departure. The same flight
+    number can fly an earlier leg into your airport (UA1268 DFW→EWR, then yours EWR→MCO), and that
+    airplane keeps broadcasting the number after it lands. So before pushback a match must be on the
+    ground at your departure airport and, when adsb.lol says the number has an earlier leg into it,
+    be the airplane your inbound is (by its own transponder). -> (aircraft or None, why not)"""
+    ph = fa.phase(f, now)
+    pushed = bool(((f.get("times") or {}).get("out") or {}).get("actual")) or ph != "scheduled"
+    cands = sources.fetch_live_all(L["ident"])
+    if not cands:
+        return None, "not transmitting yet"
+    dep = L.get("dep")
+    route = adsb_route(L, (cands[0]["lat"], cands[0]["lon"]))
+    earlier = None
+    if route and dep in route and route.index(dep) > 0:
+        earlier = f"{route[route.index(dep) - 1]}→{dep}"
+    inb = inbound_tail(L, f)
+    why = None
+    for ac in sorted(cands, key=lambda a: -(a.get("gs_kt") or 0)):
+        at_dep = _near(dep, ac, 6 if not pushed else 12)
+        if at_dep is False or (not pushed and not ac.get("ground") and (ac.get("alt_ft") or 0) > 1500):
+            why = f"{ac.get('tail') or 'an airplane'} with this number isn't at {dep}" + (f" (the earlier {earlier} leg)" if earlier else "")
+            continue
+        if not pushed and earlier:
+            if not inb:
+                why = f"{ac.get('tail')} at {dep} may be the earlier {earlier} leg; waiting for pushback or the inbound's transponder"
+                continue
+            if (ac.get("tail") or "").upper() != inb:
+                why = f"{ac.get('tail')} is the earlier {earlier} leg, not your inbound {inb}"
+                continue
+        return ac, None
+    return None, why
+
+
 def resolve_tail(browser, L, f, now):
     """Which airplane is flying this leg. Trust order: your own flight's transponder; the airplane
     seen on ADS-B flying in (your inbound or an earlier leg of its day); then the newest of
@@ -1117,9 +1199,9 @@ def resolve_tail(browser, L, f, now):
     out_t = fa.best_time(f["times"], "out") or L["sched_out"]
     if L.get("ident") and (ph == "taxi_out" or (ph == "scheduled" and out_t - now < 90 * 60)):
         try:
-            live = sources.fetch_live(L["ident"])
+            live, why = own_live(L, f, now)
             saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", (live or {}).get("tail"),
-                None if (live or {}).get("tail") else "not transmitting yet")
+                None if (live or {}).get("tail") else why or "not transmitting yet")
             if live and live.get("tail"):
                 info = {"tail": live["tail"].upper(), "kind": "own", "at": now,
                         "source": "your flight's transponder"}
@@ -1127,11 +1209,16 @@ def resolve_tail(browser, L, f, now):
             log.info("%s own ADS-B: %s", L.get("display"), e)
     # Free signals first: the airplane flying in on ADS-B, Flightradar24's airline assignment,
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
-    chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") != "own" else None
+    # Once the inbound has left its gate, the airplane can't change without a new inbound number
+    # (FlightAware sees that): its own transponder is the answer, and the airline pages can rest.
+    inb = L.get("inbound") or {}
+    inb_gone = bool(inb.get("times")) and fa.phase(inb, now) in ("taxi_out", "airborne", "landed", "arrived")
     ai = L.get("adsb_inbound") or {}
+    fresh_ai = ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id"))
+    chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") != "own" and not (inb_gone and fresh_ai) else None
     if not chain and ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
         chain = {"tail": ai["tail"], "kind": "chain", "at": ai["at"], "root": ai["root"], "source": ai["source"]}
-    fr = fr24_check(browser, L, f, now) or {}
+    fr = (L.get("fr24") or {}) if inb_gone else (fr24_check(browser, L, f, now) or {})
     mine = own_inbound(L, f) if info.get("kind") != "own" else None
     mi = (mine or {}).get("tail_info") or {}
     a = L.get("aero") or {}
@@ -1354,8 +1441,13 @@ def update_leg(browser, lid):
         # Live positions
         if CFG.get("live_positions", True):
             if ph in ("taxi_out", "airborne", "landed") and L.get("ident"):
+                def mine(ac, ph=ph):
+                    if ph == "airborne":
+                        return not ac.get("ground")
+                    return _near(L.get("dep") if ph == "taxi_out" else (f.get("destination") or {}).get("iata") or L.get("arr"), ac, 12) is not False
                 try:
-                    L["live"] = sources.fetch_live(L["ident"])
+                    L["live"] = sources.fetch_live(L["ident"], mine)
+                    add_fix(L.get("flight"), L["live"])
                 except Exception as e:
                     log.info("%s live position: %s", L.get("display"), e)
             else:
@@ -1363,7 +1455,8 @@ def update_leg(browser, lid):
             inb = L.get("inbound")
             if inb and ph == "scheduled" and fa.phase(inb, now) in ("taxi_out", "airborne") and inb.get("ident"):
                 try:
-                    L["inbound_live"] = sources.fetch_live(inb["ident"])
+                    L["inbound_live"] = sources.fetch_live(inb["ident"], lambda ac: not ac.get("ground") or fa.phase(inb, now) == "taxi_out")
+                    add_fix(inb, L["inbound_live"])
                 except Exception as e:
                     log.info("inbound live position: %s", e)
             else:
@@ -1479,7 +1572,9 @@ def inbound_adsb(now):
                 or now - (L.get("adsb_at") or 0) < every * 60 or not watched(L, now):
             continue
         try:
-            live = sources.fetch_live(inb["ident"])
+            # the inbound flight number can also fly an earlier leg: take the one moving toward you
+            live = sources.fetch_live(inb["ident"], lambda ac: not ac.get("ground") or iph in ("taxi_out", "landed")
+                                      or _near((inb.get("origin") or {}).get("iata"), ac, 12) is not False)
             err = None
         except Exception as e:
             log.info("%s inbound ADS-B: %s", L.get("display"), e)
@@ -1492,6 +1587,7 @@ def inbound_adsb(now):
             cur["adsb_at"] = now
             if live:
                 cur["inbound_live"] = live
+                add_fix(cur.get("inbound"), live)
                 if live.get("tail"):
                     cur["adsb_inbound"] = {"tail": live["tail"].upper(), "at": now, "root": f.get("inbound_fa_id"),
                                            "source": f"inbound {inb.get('display_ident') or inb['ident']} {route} in flight"}

@@ -61,10 +61,10 @@
   }
   function goBack(fallback) {
     const prev = NAV.pop();
-    if (!prev) { ROUTE = fallback || "#/"; render(false); return; }
+    if (!prev) { ROUTE = fallback || "#/"; return render(false); }
     ROUTE = prev.route;
     restoreY = prev.y;
-    render(false);
+    return render(false);
   }
   // change the address of the page you're on (search filters) without a step in Back
   function replaceRoute(r) { ROUTE = r; lastRoute = r; }
@@ -149,17 +149,38 @@
     if (!sw.horiz) { if (sw.horiz === false) { $root.style.transform = ""; sw = null; } return; }
     if (e.cancelable) e.preventDefault();  // keep the page from scrolling sideways while swiping
     sw.dx = Math.max(0, dx);
-    $root.style.transition = "none";
-    $root.style.transform = `translateX(${sw.dx * 0.6}px)`;
-    $root.style.opacity = String(1 - Math.min(0.4, sw.dx / 600));
+    if (sw.raf) return;
+    sw.raf = requestAnimationFrame(() => {  // one paint per frame, following the finger 1:1
+      if (!sw) return;
+      sw.raf = 0;
+      $root.style.transition = "none";
+      $root.style.willChange = "transform";
+      $root.style.transform = `translate3d(${sw.dx}px,0,0)`;
+      $root.style.opacity = String(1 - Math.min(0.35, sw.dx / 900));
+    });
   }, { capture: true, passive: false });
   document.addEventListener("touchend", () => {
     if (!sw) return;
     const go_ = sw.horiz && sw.dx > Math.min(110, window.innerWidth * 0.28), href = sw.back.getAttribute("href");
+    if (sw.raf) cancelAnimationFrame(sw.raf);
     sw = null;
-    $root.style.transition = "transform .18s ease, opacity .18s ease";
-    $root.style.transform = ""; $root.style.opacity = "";
-    if (go_) goBack(href);
+    if (!go_) {
+      $root.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s";
+      $root.style.transform = ""; $root.style.opacity = "";
+      return;
+    }
+    // slide the page off, then show the one underneath sliding in from a little to the left
+    $root.style.transition = "transform .16s ease-out, opacity .16s ease-out";
+    $root.style.transform = `translate3d(${window.innerWidth}px,0,0)`; $root.style.opacity = "0.6";
+    setTimeout(async () => {
+      $root.style.transition = "none";
+      $root.style.transform = "translate3d(-24px,0,0)"; $root.style.opacity = "0";
+      await Promise.race([goBack(href), new Promise((r) => setTimeout(r, 1500))]);
+      requestAnimationFrame(() => {
+        $root.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s";
+        $root.style.transform = ""; $root.style.opacity = ""; $root.style.willChange = "";
+      });
+    }, 150);
   }, { capture: true, passive: true });
   document.addEventListener("touchcancel", () => { sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
@@ -270,8 +291,46 @@
       });
       map.addControl(new Btn());
     }
+    if (interactive) oneFingerZoom(map, el);
     paintMap(entry, leg, true);
     setTimeout(() => map.invalidateSize(), 50);
+  }
+
+  // Double-tap and hold, then slide down to zoom in or up to zoom out (like Apple and Google Maps);
+  // a plain double tap zooms in one step.
+  function oneFingerZoom(map, el) {
+    map.doubleClickZoom.disable();
+    let last = 0, lastPt = null, zt = null;
+    el.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) { zt = null; return; }
+      const t = e.touches[0], now = Date.now();
+      if (now - last < 320 && lastPt && Math.hypot(t.clientX - lastPt.x, t.clientY - lastPt.y) < 40) {
+        zt = { y: t.clientY, z: map.getZoom(), moved: false, pt: map.mouseEventToContainerPoint(t) };
+        map.options.zoomSnap = 0;
+        if (map.dragging) map.dragging.disable();
+        e.preventDefault(); e.stopPropagation();
+        last = 0;
+      } else { last = now; lastPt = { x: t.clientX, y: t.clientY }; }
+    }, { capture: true, passive: false });
+    el.addEventListener("touchmove", (e) => {
+      if (!zt) return;
+      const dy = e.touches[0].clientY - zt.y;
+      if (Math.abs(dy) > 4) zt.moved = true;
+      const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zt.z + dy / 90));
+      map.setZoomAround(zt.pt, z, { animate: false });
+      e.preventDefault(); e.stopPropagation();
+    }, { capture: true, passive: false });
+    const end = (e) => {
+      if (!zt) return;
+      const z = zt.moved ? Math.round(map.getZoom()) : Math.min(map.getMaxZoom(), zt.z + 1);
+      map.options.zoomSnap = 1;
+      map.setZoomAround(zt.pt, z, { animate: true });
+      zt = null;
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+    };
+    el.addEventListener("touchend", end, { capture: true, passive: false });
+    el.addEventListener("touchcancel", end, { capture: true, passive: false });
   }
 
   function paintMap(entry, leg, fit) {
@@ -293,10 +352,14 @@
     }
     const track = (f.track || []).filter((p) => p[0] != null);
     if (track.length > 1) add(L.polyline(track.map((p) => [p[0], p[1]]), { color: route, weight: 3.5, opacity: 0.95 }));
+    // the airplane's live position is fresher than the drawn track: join them so it sits on its line
+    if (leg.live && track.length && ["airborne", "taxi_out", "landed"].includes(leg.phase))
+      add(L.polyline([[track[track.length - 1][0], track[track.length - 1][1]], [leg.live.lat, leg.live.lon]], { color: route, weight: 3.5, opacity: 0.95 }));
     const inb = leg.inbound;
     if (inb) {
       const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
       if (itr.length > 1) add(L.polyline(itr.map((p) => [p[0], p[1]]), { color: violet, weight: 2.5, opacity: 0.9 }));
+      if (leg.inbound_live && itr.length) add(L.polyline([[itr[itr.length - 1][0], itr[itr.length - 1][1]], [leg.inbound_live.lat, leg.inbound_live.lon]], { color: violet, weight: 2.5, opacity: 0.9 }));
       const iw = (inb.waypoints || []).filter((p) => p[0] != null);
       if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
@@ -698,7 +761,7 @@
         changed("api/history/import");
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
-        msg.className = "small"; msg.textContent = d.tracks != null ? `${d.added} tracks added, ${d.kept} flights already had one${d.unknown ? `, ${d.unknown} for flights not in History (import those flights first)` : ""}.${d.partial ? " The file was cut off in the download, so the tracks at its end are missing: download it again and import that copy to get the rest." : ""}` : `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
+        msg.className = "small"; msg.textContent = d.tracks != null ? `${d.added} tracks added, ${d.kept} flights already had one${d.unknown ? `, ${d.unknown} for flights not in History (import those flights first)` : ""}.${d.partial ? " The file was cut off in the download, so the tracks at its end are missing: download it again and import that copy to get the rest." : ""}` : `${d.added} added, ${d.already} already here${d.future ? `, ${d.future} future flights left out` : ""}${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
         setTimeout(() => render(false), 900);
       } catch (e) { msg.className = "small err"; msg.textContent = `Import failed: ${e.message}`; }
     };
@@ -770,6 +833,22 @@
     <div class="card hlist">${st.longest ? `<div class="small muted">Longest · ${nm(st.longest.distance_nm)} nm</div>${histRow(st.longest)}` : ""}
       ${st.worst_delay ? `<div class="small muted" style="margin-top:10px">Latest arrival · ${Math.round(st.worst_delay.arr_delay)} min</div>${histRow(st.worst_delay)}` : ""}</div>`;
     $app.innerHTML = h;
+  }
+
+  // ---------- track backfill tokens (pasted into the flight-track-history workflow) ----------
+  function bfToken(f) {
+    const t = f.times || {}, g = (k, x) => (t[k] || {})[x];
+    const o = g("out", "a") || g("off", "a") || g("out", "s"), i = g("in", "a") || g("on", "a") || g("in", "s");
+    return f.tail && o && i && i > o ? `${f.id},${f.tail},${Math.round(o)},${Math.round(i)}` : null;
+  }
+  async function copyText(txt) {
+    try { await navigator.clipboard.writeText(txt); return true; } catch {}
+    const ta = document.createElement("textarea");
+    ta.value = txt; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, txt.length);
+    let ok = false; try { ok = document.execCommand("copy"); } catch {}
+    ta.remove();
+    return ok;
   }
 
   // ---------- History search ----------
@@ -894,7 +973,9 @@
       const ot = dl.length ? Math.round(100 * dl.filter((v) => v < 15).length / dl.length) : null;
       const avg = dl.length ? dl.reduce((a, b) => a + b, 0) / dl.length : null;
       const dist = res.reduce((a, f) => a + (f.cancelled ? 0 : f.distance_nm || 0), 0);
-      let o = `<div class="find-sum"><b>${res.length}</b> flight${res.length === 1 ? "" : "s"}${ot != null ? ` · ${ot}% on time · avg ${mins(avg)} min` : ""}${dist ? ` · ${nm(dist)} nm` : ""}</div>`;
+      const noTrack = res.filter((f) => !f.has_track && !f.cancelled && bfToken(f));
+      let o = `<div class="find-sum"><b>${res.length}</b> flight${res.length === 1 ? "" : "s"}${ot != null ? ` · ${ot}% on time · avg ${mins(avg)} min` : ""}${dist ? ` · ${nm(dist)} nm` : ""}
+        ${noTrack.length ? `<button class="linkbtn" id="f-bf">Copy ${noTrack.length} without a track for backfill</button>` : ""}</div>`;
       if (!res.length) o += `<div class="card empty small muted">No flights match.</div>`;
       const sorted = (P.get("sort") || "new");
       if (sorted === "new" || sorted === "old") {
@@ -907,6 +988,11 @@
         if (month) o += "</div>";
       } else if (res.length) o += `<div class="card hlist">${res.slice(0, 600).map(histRow).join("")}</div>`;
       document.getElementById("f-out").innerHTML = o;
+      const bf = document.getElementById("f-bf");
+      if (bf) bf.onclick = async () => {
+        const ok = await copyText(noTrack.map(bfToken).join(" "));
+        bf.textContent = ok ? `Copied ${noTrack.length}: paste into Backfill tracks → flights` : "Couldn't copy";
+      };
     };
     const commit = () => {
       for (const k of [...P.keys()]) if (!P.get(k)) P.delete(k);
@@ -1007,9 +1093,12 @@
         ${f.route ? `<div class="k">Filed route</div><div class="mono small">${esc(f.route)}</div>` : ""}
         <div class="k">Source</div><div>${f.source === "flighty" ? "Flighty import" : "Tracked here"}${f.has_track ? " · flown track saved" : ""}</div>
       </div>
-      <div style="margin-top:12px"><button class="btn" id="h-del">Delete from History</button></div></div>`;
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">${!f.has_track && bfToken(f) ? `<button class="btn" id="h-bf">Copy for track backfill</button>` : ""}<button class="btn" id="h-del">Delete from History</button></div>
+      ${!f.has_track && bfToken(f) ? `<p class="small faint" style="margin:8px 0 0">No flown track yet. Copy, then in GitHub run Backfill tracks with this pasted in the flights box, and import its tracks download here.</p>` : ""}</div>`;
     drawMap(document.getElementById("hist-map"), { dep_ap: f.dep_ap || {}, arr_ap: f.arr_ap || {}, flight: { track: f.track || [], waypoints: [], times: {} }, phase: "arrived", inbound: null, chain: [], live: null, display: f.display },
       { key: `hist-${f.id}` });
+    const hb = document.getElementById("h-bf");
+    if (hb) hb.onclick = async () => { hb.textContent = (await copyText(bfToken(f))) ? "Copied" : "Couldn't copy"; };
     document.getElementById("h-del").onclick = async () => {
       if (!confirm("Delete this flight from History?")) return;
       await api("api/history/delete", { method: "POST", body: JSON.stringify({ id: f.id }) });

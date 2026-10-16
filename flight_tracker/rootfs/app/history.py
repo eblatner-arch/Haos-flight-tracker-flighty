@@ -69,7 +69,20 @@ def init(data_dir):
     for r in _DATA["flights"].values():  # 3.2.2 and earlier counted a diversion's distance to the planned airport
         if r.get("diverted_to"):
             r["distance_nm"] = distance_nm(r.get("dep"), r["diverted_to"]) or r.get("distance_nm")
+    gone = [k for k, r in _DATA["flights"].items() if r.get("source") == "flighty" and _is_future(r)]
+    for k in gone:  # planned flights an earlier import brought in
+        del _DATA["flights"][k]
+    if gone:
+        log.info("History: removed %d future flights from the Flighty import", len(gone))
+        save()
     log.info("History: %d flights", len(_DATA["flights"]))
+
+
+def _is_future(r, now=None):
+    t = r.get("times") or {}
+    if any((t.get(k) or {}).get("a") for k in ("out", "off", "on", "in")):
+        return False
+    return ((t.get("out") or {}).get("s") or (t.get("in") or {}).get("s") or 0) > (now or time.time()) - 3600
 
 
 def save():
@@ -307,6 +320,11 @@ def parse_flighty(name, data):
 
 def import_flighty(name, data):
     recs, problems = parse_flighty(name, data)
+    # Flighty also exports flights you've planned: only what has already flown (or was cancelled
+    # and is in the past) belongs in History; the tracker picks up the rest when you fly them.
+    future = _is_future
+    ahead = sum(1 for r in recs if future(r))
+    recs = [r for r in recs if not future(r)]
     added = updated = 0
     for rec in recs:
         existed = get(rec["id"]) is not None
@@ -314,7 +332,7 @@ def import_flighty(name, data):
         updated += existed
         added += not existed
     save()
-    return {"rows": len(recs), "added": added, "already": updated, "problems": problems[:20]}
+    return {"rows": len(recs), "added": added, "already": updated, "future": ahead, "problems": problems[:20]}
 
 
 def import_tracks(blob):

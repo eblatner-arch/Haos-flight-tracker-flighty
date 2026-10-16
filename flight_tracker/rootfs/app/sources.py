@@ -184,22 +184,55 @@ def fetch_metars(icaos):
     return out
 
 
-def fetch_live(callsign):
-    """Live ADS-B position by callsign, or None."""
+def fetch_live_all(callsign):
+    """Every airplane transmitting this callsign right now (an earlier leg with the same flight
+    number can still be on it after landing)."""
     r = requests.get(ADSB_URL.format(callsign.upper()), headers=UA, timeout=15)
     r.raise_for_status()
+    out = []
     for ac in (r.json() or {}).get("ac") or []:
         if ac.get("lat") is None or ac.get("lon") is None:
             continue
         alt = ac.get("alt_baro")
-        return {
+        out.append({
             "lat": ac["lat"], "lon": ac["lon"],
-            "alt_ft": 0 if alt == "ground" else alt,
+            "alt_ft": 0 if alt == "ground" else alt, "ground": alt == "ground",
             "gs_kt": ac.get("gs"), "heading": ac.get("track") or ac.get("true_heading"),
-            "tail": ac.get("r"), "type": ac.get("t"), "squawk": ac.get("squawk"),
+            "tail": ac.get("r"), "type": ac.get("t"), "squawk": ac.get("squawk"), "hex": ac.get("hex"),
             "at": time.time() - float(ac.get("seen_pos") or 0),
-        }
+        })
+    return out
+
+
+def fetch_live(callsign, accept=None):
+    """Live ADS-B position by callsign, or None. accept(ac) -> bool picks among several."""
+    for ac in fetch_live_all(callsign):
+        if accept is None or accept(ac):
+            return ac
     return None
+
+
+ROUTESET_URL = "https://api.adsb.lol/api/0/routeset"
+
+
+def fetch_route(callsign, lat=0, lon=0):
+    """adsb.lol's route for a callsign: ['DFW', 'EWR', 'MCO'] for a flight number that flies two legs."""
+    r = requests.post(ROUTESET_URL, json={"planes": [{"callsign": callsign.upper(), "lat": lat or 0, "lng": lon or 0}]},
+                      headers=UA, timeout=15)
+    r.raise_for_status()
+    for x in r.json() or []:
+        codes = x.get("_airport_codes_iata") or ""
+        if codes and codes.lower() != "unknown":
+            return [c for c in codes.split("-") if c]
+    return None
+
+
+def nm_between(a_lat, a_lon, b_lat, b_lon):
+    import math
+    R = math.pi / 180
+    d = 2 * math.asin(math.sqrt(math.sin((b_lat - a_lat) * R / 2) ** 2 +
+                                math.cos(a_lat * R) * math.cos(b_lat * R) * math.sin((b_lon - a_lon) * R / 2) ** 2))
+    return d * 3440.065
 
 
 # ---------------------------------------------------------------- Flightradar24 schedule pages

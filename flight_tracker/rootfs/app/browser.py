@@ -198,6 +198,13 @@ class Browser:
                 page.screenshot(path=os.path.join(self.shot_dir, f"{shot_name}.png"))
             except Exception:
                 pass
+            if not rows:
+                try:
+                    body = (page.inner_text("body", timeout=2000) or "")[:3000].lower()
+                except Exception:
+                    body = ""
+                if "verify you are human" in body or "security verification" in body or "just a moment" in body:
+                    raise RuntimeError("Flightradar24 asked for a captcha (Cloudflare)")
             return rows
         finally:
             page.close()

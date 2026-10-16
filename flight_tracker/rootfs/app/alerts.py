@@ -280,7 +280,9 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
             nt["bag"] = bag
             add("baggage", f"{ident} bags at {bag}", f"{arr} baggage claim {bag}")
         ain = fa.best_time(f["times"], "in")
-        if ain:
+        if ain and ph != "airborne":
+            nt["arr_est"] = ain  # before takeoff the departure time carries any real delay; just follow along
+        elif ain:
             if nt.get("arr_est") and abs(ain - nt["arr_est"]) / 60 >= (P("arr_change", "step") or 15):
                 add("arr_change", f"{ident} now arrives {hhmm(ain, arr_tz)}",
                     f"{route} arrival {hhmm(nt['arr_est'], arr_tz)} → {hhmm(ain, arr_tz)}")
