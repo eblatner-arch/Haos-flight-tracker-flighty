@@ -344,7 +344,10 @@ def import_tracks(blob):
                 continue
             if pts:
                 _save_track(fid, pts)
+                _DATA["flights"][fid]["has_track"] = True
                 added += 1
+        if added:
+            save()
     return {"tracks": len(names), "added": added, "kept": kept, "unknown": unknown, "partial": partial}
 
 

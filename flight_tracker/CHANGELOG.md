@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.5.6
+- Imported tracks mark the flight "flown track saved" and are saved to History right away
+
 ## 3.5.5
 - Drive pill updates on every page (it stayed amber on Settings after the backup had gone up)
 
