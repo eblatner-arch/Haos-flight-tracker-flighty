@@ -47,11 +47,27 @@
   let usedMaps = new Set();
   let lastRoute = null;
   let ROUTE = location.hash && location.hash.length > 2 ? location.hash : "#/";
-  function go(r) {
+  // Back remembers where you were: each step forward saves the page and its scroll position;
+  // "‹" and the edge swipe return to it (same scroll), not to the top.
+  const NAV = [];
+  let restoreY = null;
+  function go(r, opts) {
     r = r || "#/";
+    opts = opts || {};
+    if (opts.reset) NAV.length = 0;
+    else if (r !== ROUTE) { NAV.push({ route: ROUTE, y: window.scrollY }); if (NAV.length > 50) NAV.shift(); }
     ROUTE = r;
     render(false);
   }
+  function goBack(fallback) {
+    const prev = NAV.pop();
+    if (!prev) { ROUTE = fallback || "#/"; render(false); return; }
+    ROUTE = prev.route;
+    restoreY = prev.y;
+    render(false);
+  }
+  // change the address of the page you're on (search filters) without a step in Back
+  function replaceRoute(r) { ROUTE = r; lastRoute = r; }
 
   const PLANE = '<svg viewBox="0 0 24 24"><path fill="currentColor" stroke="#000" stroke-opacity=".35" stroke-width=".6" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>';
 
@@ -143,14 +159,22 @@
     sw = null;
     $root.style.transition = "transform .18s ease, opacity .18s ease";
     $root.style.transform = ""; $root.style.opacity = "";
-    if (go_) go(href);
+    if (go_) goBack(href);
   }, { capture: true, passive: true });
   document.addEventListener("touchcancel", () => { sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
   async function api(path, opts) {
     const r = await fetch(path, { cache: "no-store", ...opts });
     if (!r.ok) throw new Error(`${r.status}`);
+    if (opts && opts.method === "POST") changed(path);
     return r.json();
+  }
+  // Anything you change here turns the Drive pill amber right away (the server confirms and uploads ~15 s later).
+  function changed(path) {
+    if (/api\/(backup|refresh|test-notify)/.test(path) || typeof setDrive !== "function") return;
+    const el = document.getElementById("drive");
+    if (el && !el.hidden && !el.classList.contains("disconnected")) setDrive({ ...(LAST_DRIVE || {}), state: "waiting" });
+    setTimeout(driveSoon, 600);
   }
 
   // ---------- map ----------
@@ -620,7 +644,7 @@
   const delayCls = (m) => m == null ? "" : m >= 15 ? "late" : m <= -5 ? "early" : "";
   function histTabs(cur, year) {
     const y = year ? `/${year}` : "";
-    return `<div class="tabs">${[["flights", "Flights", `#/history${y}`], ["stats", "Stats", `#/history/stats${y}`], ["alerts", "Notifications", "#/history/alerts"]]
+    return `<div class="tabs">${[["flights", "Flights", `#/history${y}`], ["stats", "Stats", `#/history/stats${y}`], ["find", "Search", `#/history/find${year ? `?year=${year}` : ""}`], ["alerts", "Alerts", "#/history/alerts"]]
       .map(([k, l, href]) => `<a class="tab ${cur === k ? "on" : ""}" href="${href}">${l}</a>`).join("")}</div>`;
   }
   function yearChips(cur, years, base) {
@@ -671,6 +695,7 @@
       msg.className = "small muted"; msg.textContent = `Importing ${file.name}…`;
       try {
         const r = await fetch("api/history/import", { method: "POST", headers: { "X-Filename": file.name }, body: await file.arrayBuffer() });
+        changed("api/history/import");
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
         msg.className = "small"; msg.textContent = d.tracks != null ? `${d.added} tracks added, ${d.kept} flights already had one${d.unknown ? `, ${d.unknown} for flights not in History (import those flights first)` : ""}.${d.partial ? " The file was cut off in the download, so the tracks at its end are missing: download it again and import that copy to get the rest." : ""}` : `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
@@ -701,43 +726,202 @@
     wireImport();
   }
 
-  function bars(rows, fmtv) {
+  function bars(rows, fmtv, link) {
     const mx = Math.max(1, ...rows.map((r) => Math.abs(r[1])));
-    return rows.map(([k, v, sub]) => `<div class="bar-row"><div class="bk">${esc(k)}</div><div class="bt"><span class="${fmtv ? (v >= 1 ? "late" : v <= -1 ? "early" : "") : ""}" style="width:${Math.max(3, 100 * Math.abs(v) / mx)}%"></span></div><div class="bv">${fmtv ? fmtv(v) : v}${sub ? `<small>${sub}</small>` : ""}</div></div>`).join("");
+    return rows.map(([k, v, sub]) => {
+      const tag = link ? "a" : "div", href = link ? ` href="${esc(link(k))}"` : "";
+      return `<${tag} class="bar-row${link ? " link" : ""}"${href}><div class="bk">${esc(k)}</div><div class="bt"><span class="${fmtv ? (v >= 1 ? "late" : v <= -1 ? "early" : "") : ""}" style="width:${Math.max(3, 100 * Math.abs(v) / mx)}%"></span></div><div class="bv">${fmtv ? fmtv(v) : v}${sub ? `<small>${sub}</small>` : ""}</div></${tag}>`;
+    }).join("");
   }
+  // a link to Search with these filters (and the year being viewed)
+  const findLink = (year, f) => "#/history/find?" + new URLSearchParams({ ...(year ? { year } : {}), ...f }).toString();
   async function statsView(year) {
     destroyMaps();
     const d = await api(`api/history${year ? `?year=${year}` : ""}`);
     const st = d.stats;
     let h = histTabs("stats", year) + yearChips(year || "", d.years, "#/history/stats");
     if (!st.flights) { $app.innerHTML = h + `<div class="card empty"><b>No flights yet</b>Import your Flighty history on the Flights tab.</div>`; return; }
-    const tile = (k, v, sub) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+    const F = (f) => findLink(year, f);
+    const tile = (k, v, sub, f) => `<${f ? `a href="${esc(F(f))}"` : "div"} class="tile${f ? " link" : ""}"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</${f ? "a" : "div"}>`;
+    const rt = (k) => F({ route: k.replace("–", "-") });
     h += `<div class="tiles">
-      ${tile("Flights", st.flights, st.diverted ? `${st.diverted} diverted` : "")}
+      ${tile("Flights", st.flights, st.diverted ? `${st.diverted} diverted` : "", st.diverted ? { st: "diverted" } : {})}
       ${tile("Distance", nm(st.distance_nm) + " nm", `${(st.distance_nm / 21639).toFixed(1)}× around the world`)}
       ${tile("In the air", nm(st.air_hours) + " h", `${nm(st.block_hours)} h gate to gate`)}
       ${tile("Airports", st.airports, `${st.routes} routes · ${st.tails} tails`)}
     </div>
     <h2 class="section">Delays</h2>
     <div class="tiles">
-      ${tile("On time", st.on_time_pct == null ? "—" : st.on_time_pct + "%", "at the gate, under 15 min late")}
-      ${tile("Avg arrival", st.avg_arr_delay == null ? "—" : mins(st.avg_arr_delay) + " min", `departure ${mins(st.avg_dep_delay)} min`)}
-      ${tile("Early", st.early_pct == null ? "—" : st.early_pct + "%", "5+ min early")}
-      ${tile("30+ late", st.late_30_pct == null ? "—" : st.late_30_pct + "%", "")}
+      ${tile("On time", st.on_time_pct == null ? "—" : st.on_time_pct + "%", "at the gate, under 15 min late", { st: "ontime" })}
+      ${tile("Avg arrival", st.avg_arr_delay == null ? "—" : mins(st.avg_arr_delay) + " min", `departure ${mins(st.avg_dep_delay)} min`, { sort: "late" })}
+      ${tile("Early", st.early_pct == null ? "—" : st.early_pct + "%", "5+ min early", { st: "early" })}
+      ${tile("30+ late", st.late_30_pct == null ? "—" : st.late_30_pct + "%", "", { st: "late30" })}
     </div>
     <div class="card"><div class="small muted" style="margin-bottom:8px">Average arrival delay by scheduled departure time</div>
-      ${bars(st.by_hour.map(([b, n, avg]) => [b, avg, ` · ${n}`]), (v) => mins(v) + "m")}</div>
+      ${bars(st.by_hour.map(([b, n, avg]) => [b, avg, ` · ${n}`]), (v) => mins(v) + "m", (b) => F({ hr: b, sort: "late" }))}</div>
     ${st.late_routes.length ? `<div class="card"><div class="small muted" style="margin-bottom:8px">Most delayed routes (3+ flights)</div>
-      ${bars(st.late_routes.map(([r, n, avg, ot]) => [r, avg, ` · ${n} · ${Math.round(ot * 100)}% on time`]), (v) => mins(v) + "m")}</div>` : ""}
+      ${bars(st.late_routes.map(([r, n, avg, ot]) => [r, avg, ` · ${n} · ${Math.round(ot * 100)}% on time`]), (v) => mins(v) + "m", (k) => rt(k) + "&sort=late")}</div>` : ""}
     <h2 class="section">Most flown</h2>
-    <div class="card"><div class="small muted" style="margin-bottom:8px">Routes</div>${bars(st.top_routes)}</div>
-    <div class="card"><div class="small muted" style="margin-bottom:8px">Airports</div>${bars(st.top_airports)}</div>
-    <div class="card"><div class="small muted" style="margin-bottom:8px">Aircraft</div>${bars(st.top_aircraft)}</div>
-    <div class="card"><div class="small muted" style="margin-bottom:8px">Tails</div>${bars(st.top_tails)}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Routes</div>${bars(st.top_routes, null, rt)}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Airports</div>${bars(st.top_airports, null, (k) => F({ ap: k }))}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Aircraft</div>${bars(st.top_aircraft, null, (k) => F({ ac: k }))}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Tails</div>${bars(st.top_tails, null, (k) => F({ tail: k }))}</div>
     <h2 class="section">Records</h2>
     <div class="card hlist">${st.longest ? `<div class="small muted">Longest · ${nm(st.longest.distance_nm)} nm</div>${histRow(st.longest)}` : ""}
       ${st.worst_delay ? `<div class="small muted" style="margin-top:10px">Latest arrival · ${Math.round(st.worst_delay.arr_delay)} min</div>${histRow(st.worst_delay)}` : ""}</div>`;
     $app.innerHTML = h;
+  }
+
+  // ---------- History search ----------
+  // Everything is filtered here in the page (a few thousand flights at most). Filters live in the
+  // page address (#/history/find?st=late30&ap=EWR...), so Back returns to the same results.
+  const ST_CHIPS = [["late15", "Late 15+"], ["late30", "Late 30+"], ["late60", "Late 60+"], ["ontime", "On time"], ["early", "Early"],
+                    ["diverted", "Diverted"], ["cancelled", "Cancelled"], ["notrack", "No track"]];
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const HOURS = ["00–03", "03–06", "06–09", "09–12", "12–15", "15–18", "18–21", "21–24"];
+  let FIND_CACHE = null;
+  function fdep(f) { const t = f.times || {}; return (t.out && (t.out.s || t.out.a)) || (t.off && (t.off.s || t.off.a)) || 0; }
+  function localParts(f) {
+    if (f._lp) return f._lp;
+    const ts = fdep(f);
+    let h = 0, dw = 0;
+    try {
+      const p = new Intl.DateTimeFormat("en-US", { timeZone: f.dep_tz || undefined, hour: "numeric", hourCycle: "h23", weekday: "short" }).formatToParts(new Date(ts * 1000));
+      h = parseInt(p.find((x) => x.type === "hour").value, 10) % 24;
+      dw = DOW.indexOf(p.find((x) => x.type === "weekday").value);
+    } catch {}
+    return (f._lp = { h, dw, hr: HOURS[Math.floor(h / 3)] });
+  }
+  function hay(f) {
+    if (f._hay) return f._hay;
+    const lp = localParts(f), mo = fmt(fdep(f), f.dep_tz, { month: "long" });
+    return (f._hay = [f.ident, f.display, (f.display || "").replace(/\s/g, ""), f.flight_no, f.dep, f.arr, f.diverted_to,
+      `${f.dep}-${f.arr}`, `${f.dep}${f.arr}`, f.tail, f.aircraft, f.type, f.dep_gate && `gate ${f.dep_gate}`, f.arr_gate && `gate ${f.arr_gate}`,
+      f.date, mo, DOW[lp.dw], f.diverted_to && "diverted divert", f.cancelled && "cancelled", f.source === "flighty" ? "flighty" : "tracked",
+      f.route].filter(Boolean).join(" ").toLowerCase());
+  }
+  function matchStatus(f, st) {
+    const d = f.arr_delay;
+    switch (st) {
+      case "late15": return d != null && d >= 15;
+      case "late30": return d != null && d >= 30;
+      case "late60": return d != null && d >= 60;
+      case "ontime": return d != null && d < 15 && !f.cancelled;
+      case "early": return d != null && d <= -5;
+      case "diverted": return !!f.diverted_to;
+      case "cancelled": return !!f.cancelled;
+      case "notrack": return !f.has_track && !f.cancelled;
+    }
+    return true;
+  }
+  function applyFind(all, P) {
+    const toks = (P.get("q") || "").toLowerCase().split(/\s+/).filter(Boolean);
+    const sts = (P.get("st") || "").split(",").filter(Boolean);
+    const [rd, ra] = (P.get("route") || "").toUpperCase().split("-");
+    const g = (k) => (P.get(k) || "").trim();
+    const minD = g("min") === "" ? null : parseFloat(g("min")), maxD = g("max") === "" ? null : parseFloat(g("max"));
+    const out = all.filter((f) => {
+      if (g("year") && !(f.date || "").startsWith(g("year"))) return false;
+      if (g("mo") && !(f.date || "").startsWith(g("mo"))) return false;
+      if (rd && (f.dep !== rd || (ra && f.arr !== ra))) return false;
+      if (g("dep") && f.dep !== g("dep").toUpperCase()) return false;
+      if (g("arr") && f.arr !== g("arr").toUpperCase() && f.diverted_to !== g("arr").toUpperCase()) return false;
+      if (g("ap") && ![f.dep, f.arr, f.diverted_to].includes(g("ap").toUpperCase())) return false;
+      if (g("tail") && (f.tail || "").toUpperCase() !== g("tail").toUpperCase()) return false;
+      if (g("ac") && (f.aircraft || f.type || "") !== g("ac")) return false;
+      if (g("hr") && localParts(f).hr !== g("hr")) return false;
+      if (g("dow") && String(localParts(f).dw) !== g("dow")) return false;
+      if (sts.length && !sts.every((s_) => matchStatus(f, s_))) return false;
+      if (minD != null && !(f.arr_delay != null && f.arr_delay >= minD)) return false;
+      if (maxD != null && !(f.arr_delay != null && f.arr_delay <= maxD)) return false;
+      for (const t of toks) {
+        const m = t.match(/^([<>]=?)(-?\d+)m?$/);  // >30 = 30+ min late, <-5 = 5+ early
+        if (m) {
+          const d = f.arr_delay, n = parseFloat(m[2]);
+          if (d == null || !(m[1][0] === ">" ? d >= n : d <= n)) return false;
+        } else if (!hay(f).includes(t)) return false;
+      }
+      return true;
+    });
+    const by = { new: (a, b) => fdep(b) - fdep(a), old: (a, b) => fdep(a) - fdep(b),
+      late: (a, b) => (b.arr_delay ?? -1e9) - (a.arr_delay ?? -1e9), early: (a, b) => (a.arr_delay ?? 1e9) - (b.arr_delay ?? 1e9),
+      long: (a, b) => (b.distance_nm || 0) - (a.distance_nm || 0), block: (a, b) => (b.block_min || 0) - (a.block_min || 0) }[g("sort") || "new"];
+    return out.sort(by);
+  }
+  async function findView(route) {
+    destroyMaps();
+    const P = new URLSearchParams(route.split("?")[1] || "");
+    if (!FIND_CACHE || Date.now() - FIND_CACHE.at > 60000 || !morphing) FIND_CACHE = { at: Date.now(), d: await api("api/history") };
+    const all = FIND_CACHE.d.flights;
+    const uniq = (fn) => [...new Set(all.map(fn).filter(Boolean))].sort();
+    const opt = (k, vals, label, fmtOpt) => `<label class="ff"><span>${label}</span><select data-k="${k}"><option value="">Any</option>${vals.map((v) => `<option value="${esc(v)}" ${P.get(k) === String(v) ? "selected" : ""}>${esc(fmtOpt ? fmtOpt(v) : v)}</option>`).join("")}</select></label>`;
+    const sts = (P.get("st") || "").split(",").filter(Boolean);
+    const nFilters = [...P.keys()].filter((k) => !["q", "st", "sort"].includes(k)).length;
+    let h = histTabs("find", P.get("year") || "") + `
+      <input class="search" id="f-q" type="search" placeholder="Flight, airport, tail, aircraft, month, >30…" value="${esc(P.get("q") || "")}" autocomplete="off" autocapitalize="characters">
+      <div class="chips-row wrap">${ST_CHIPS.map(([k, l]) => `<button class="ychip ${sts.includes(k) ? "on" : ""}" data-st="${k}">${l}</button>`).join("")}</div>
+      ${fold("find-more", `More filters${nFilters ? ` · ${nFilters}` : ""}`, `<div class="card ffgrid">
+        ${opt("year", uniq((f) => (f.date || "").slice(0, 4)).reverse(), "Year")}
+        ${opt("mo", uniq((f) => (f.date || "").slice(0, 7)).reverse(), "Month", (v) => fmt(Date.parse(v + "-15") / 1000, undefined, { month: "short", year: "numeric" }))}
+        ${opt("dep", uniq((f) => f.dep), "From")}
+        ${opt("arr", uniq((f) => f.diverted_to || f.arr), "To")}
+        ${opt("ap", uniq((f) => f.dep).concat(uniq((f) => f.arr)).filter((v, i, a) => a.indexOf(v) === i).sort(), "Either airport")}
+        ${opt("route", uniq((f) => `${f.dep}-${f.arr}`), "Route")}
+        ${opt("ac", uniq((f) => f.aircraft || f.type), "Aircraft")}
+        ${opt("tail", uniq((f) => f.tail), "Tail")}
+        ${opt("hr", HOURS, "Departs (local)")}
+        ${opt("dow", [0, 1, 2, 3, 4, 5, 6], "Day", (v) => DOW[v])}
+        <label class="ff"><span>Late at least</span><input data-k="min" type="number" inputmode="numeric" placeholder="min" value="${esc(P.get("min") || "")}"></label>
+        <label class="ff"><span>Late at most</span><input data-k="max" type="number" inputmode="numeric" placeholder="min (−5 = early)" value="${esc(P.get("max") || "")}"></label>
+        <label class="ff"><span>Sort</span><select data-k="sort">${[["new", "Newest"], ["old", "Oldest"], ["late", "Latest arrival"], ["early", "Earliest arrival"], ["long", "Longest distance"], ["block", "Longest gate to gate"]]
+          .map(([v, l]) => `<option value="${v}" ${(P.get("sort") || "new") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        ${[...P.keys()].length ? `<a class="btn" href="#/history/find" id="f-clear">Clear all</a>` : ""}
+      </div>`, nFilters > 0)}
+      <div id="f-out"></div>`;
+    $app.innerHTML = h;
+    wireFolds();
+    const draw = () => {
+      const res = applyFind(all, P);
+      const dl = res.map((f) => f.arr_delay).filter((v) => v != null);
+      const ot = dl.length ? Math.round(100 * dl.filter((v) => v < 15).length / dl.length) : null;
+      const avg = dl.length ? dl.reduce((a, b) => a + b, 0) / dl.length : null;
+      const dist = res.reduce((a, f) => a + (f.cancelled ? 0 : f.distance_nm || 0), 0);
+      let o = `<div class="find-sum"><b>${res.length}</b> flight${res.length === 1 ? "" : "s"}${ot != null ? ` · ${ot}% on time · avg ${mins(avg)} min` : ""}${dist ? ` · ${nm(dist)} nm` : ""}</div>`;
+      if (!res.length) o += `<div class="card empty small muted">No flights match.</div>`;
+      const sorted = (P.get("sort") || "new");
+      if (sorted === "new" || sorted === "old") {
+        let month = "";
+        for (const f of res.slice(0, 600)) {
+          const mo = fmt(fdep(f), f.dep_tz, { month: "long", year: "numeric" });
+          if (mo !== month) { if (month) o += "</div>"; o += `<h2 class="section">${esc(mo)}</h2><div class="card hlist">`; month = mo; }
+          o += histRow(f);
+        }
+        if (month) o += "</div>";
+      } else if (res.length) o += `<div class="card hlist">${res.slice(0, 600).map(histRow).join("")}</div>`;
+      document.getElementById("f-out").innerHTML = o;
+    };
+    const commit = () => {
+      for (const k of [...P.keys()]) if (!P.get(k)) P.delete(k);
+      replaceRoute("#/history/find" + (P.toString() ? "?" + P.toString() : ""));
+      draw();
+    };
+    draw();
+    let qt = null;
+    document.getElementById("f-q").oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { P.set("q", e.target.value.trim()); commit(); }, 150); };
+    $app.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => {
+      const cur = new Set((P.get("st") || "").split(",").filter(Boolean));
+      cur.has(b.dataset.st) ? cur.delete(b.dataset.st) : cur.add(b.dataset.st);
+      b.classList.toggle("on", cur.has(b.dataset.st));
+      P.set("st", [...cur].join(","));
+      commit();
+    });
+    $app.querySelectorAll(".ffgrid [data-k]").forEach((el) => el.onchange = () => {
+      P.set(el.dataset.k, el.value);
+      commit();
+      const n = [...P.keys()].filter((k) => !["q", "st", "sort"].includes(k)).length;
+      const t = $app.querySelector('[data-fold="find-more"] summary > span');
+      if (t) t.textContent = `More filters${n ? ` · ${n}` : ""}`;
+    });
   }
 
   async function alertsHistoryView() {
@@ -1020,6 +1204,7 @@
           ident: document.getElementById("f-ident").value, dep: document.getElementById("f-dep").value,
           arr: document.getElementById("f-arr").value, date: document.getElementById("f-date").value,
           kind: (document.querySelector('[name="f-kind"]:checked') || {}).value || "manual" }) });
+        changed("api/flights");
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
         msg.textContent = "Added. Looking it up on FlightAware…";
@@ -1083,6 +1268,7 @@
         for (const k in pending) delete pending[k];
         try {
           const r = await fetch("api/rules", { method: "POST", body: JSON.stringify(body) });
+        changed("api/rules");
           if (!r.ok) throw new Error(r.status);
           msg.className = "small muted"; msg.textContent = "Saved";
           setTimeout(() => { if (msg.textContent === "Saved") msg.textContent = ""; }, 1500);
@@ -1239,6 +1425,7 @@
       sMsg.className = "small muted"; sMsg.textContent = "Saving…";
       try {
         const r = await fetch("api/settings", { method: "POST", body: JSON.stringify({ settings: body }) });
+        changed("api/settings");
         if (!r.ok) throw new Error(r.status);
         sMsg.textContent = "Saved"; setTimeout(() => { if (sMsg.textContent === "Saved") sMsg.textContent = ""; }, 1500);
         const fresh = await api("api/settings");
@@ -1261,8 +1448,10 @@
   }
   // Drive backup pill next to Live: green synced, amber changes waiting, blue syncing, red problem.
   const $drive = document.getElementById("drive");
+  let LAST_DRIVE = null;
   function setDrive(b) {
     if (!$drive) return;
+    LAST_DRIVE = b;
     const st = (b && b.state) || "off";
     $drive.hidden = st === "off";
     $drive.className = "live drive " + st;
@@ -1282,7 +1471,8 @@
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
       const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);
       const mf = route.match(/^#\/hist\/(.+)$/);
-      if (mh) await (mh[1] === "stats" ? statsView(mh[2] || "") : mh[1] === "alerts" ? alertsHistoryView() : historyView(mh[2] || ""));
+      if (route.startsWith("#/history/find")) await findView(route);
+      else if (mh) await (mh[1] === "stats" ? statsView(mh[2] || "") : mh[1] === "alerts" ? alertsHistoryView() : historyView(mh[2] || ""));
       else if (mf) await histFlightView(decodeURIComponent(mf[1]));
       else if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
       else if (m) await legView(m[1]);
@@ -1294,7 +1484,8 @@
       setTimeout(sweepMaps, 1500);
       const tab = /^#\/hist/.test(route) ? "history" : /^#\/notify/.test(route) ? "notify" : /^#\/tools/.test(route) ? "tools" : "flights";
       document.querySelectorAll("#tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
-      if (route !== lastRoute) window.scrollTo(0, 0);
+      if (restoreY != null) { const y = restoreY; restoreY = null; window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); }
+      else if (route !== lastRoute) window.scrollTo(0, 0);
       lastRoute = route;
     } catch (e) {
       $app.innerHTML = `<div class="card empty"><b>Can't reach the add-on</b>${esc(e.message)}</div>`;
@@ -1314,7 +1505,9 @@
     const a = e.target.closest && e.target.closest('a[href^="#"]');
     if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
     e.preventDefault();
-    go(a.getAttribute("href") || "#/");
+    const href = a.getAttribute("href") || "#/";
+    if (a.classList.contains("back")) goBack(href);
+    else go(href, { reset: !!a.closest("#tabbar") });
   });
   window.addEventListener("hashchange", () => { if (location.hash && location.hash !== ROUTE) go(location.hash); });
 

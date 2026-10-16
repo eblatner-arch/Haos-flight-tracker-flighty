@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.6.0
+- History → Search: type a flight number, airport, route (EWR-FLL), tail, aircraft, month or day, or `>30` / `<-5` for minutes late/early; tap Late 15+/30+/60+, On time, Early, Diverted, Cancelled, No track; More filters for year, month, from, to, either airport, route, aircraft, tail, departure time, day of week, a delay range, and sort (newest, oldest, latest, earliest, longest). Shows the count, on-time %, average delay and distance of what matches
+- Every stat is a link: tap a route, airport, aircraft, tail, time-of-day bar, On time, Early, 30+ late or diverted and see those flights
+- Back (‹ or the edge swipe) returns to the page you came from at the same scroll position, filters included, instead of the top
+- The Drive pill turns amber the moment you change something (flight added or removed, settings, alert rules, imports), then green once the upload is done
+
 ## 3.5.6
 - Imported tracks mark the flight "flown track saved" and are saved to History right away
 
