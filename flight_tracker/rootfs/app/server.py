@@ -1135,6 +1135,8 @@ def adsb_route(L, near=None):
         return r.get("codes")
     try:
         codes = sources.fetch_route(L["ident"], *(near or (0, 0)))
+        if not codes and near:
+            codes = sources.fetch_route(L["ident"], 0, 0)
     except Exception as e:
         log.info("%s adsb.lol route: %s", L.get("display"), e)
         codes = r.get("codes")
@@ -1143,12 +1145,13 @@ def adsb_route(L, near=None):
 
 
 def inbound_tail(L, f):
-    """The tail the airplane flying in is broadcasting, if we've seen it."""
+    """The tail the airplane flying in is broadcasting, if we've seen it: (tail, from the inbound's
+    own transponder rather than an earlier leg of its day)."""
     ai = L.get("adsb_inbound") or {}
     if ai.get("tail") and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
-        return ai["tail"].upper()
+        return ai["tail"].upper(), True
     ti = L.get("tail_info") or {}
-    return ti["tail"].upper() if ti.get("kind") == "chain" and ti.get("tail") else None
+    return (ti["tail"].upper(), False) if ti.get("kind") == "chain" and ti.get("tail") else (None, False)
 
 
 def own_live(L, f, now):
@@ -1156,33 +1159,40 @@ def own_live(L, f, now):
     number can fly an earlier leg into your airport (UA1268 DFW→EWR, then yours EWR→MCO), and that
     airplane keeps broadcasting the number after it lands. So before pushback a match must be on the
     ground at your departure airport and, when adsb.lol says the number has an earlier leg into it,
-    be the airplane your inbound is (by its own transponder). -> (aircraft or None, why not)"""
+    be the airplane your inbound is (by its own transponder). Without a known earlier leg, an airplane
+    that isn't your inbound (by the inbound's own transponder) isn't taken either: it goes to AeroAPI
+    as a possible swap instead. -> (aircraft or None, why not, tail worth checking)"""
     ph = fa.phase(f, now)
     pushed = bool(((f.get("times") or {}).get("out") or {}).get("actual")) or ph != "scheduled"
     cands = sources.fetch_live_all(L["ident"])
     if not cands:
-        return None, "not transmitting yet"
+        return None, "not transmitting yet", None
     dep = L.get("dep")
     route = adsb_route(L, (cands[0]["lat"], cands[0]["lon"]))
     earlier = None
     if route and dep in route and route.index(dep) > 0:
         earlier = f"{route[route.index(dep) - 1]}→{dep}"
-    inb = inbound_tail(L, f)
-    why = None
+    inb, strong = inbound_tail(L, f)
+    why = odd = None
     for ac in sorted(cands, key=lambda a: -(a.get("gs_kt") or 0)):
         at_dep = _near(dep, ac, 6 if not pushed else 12)
         if at_dep is False or (not pushed and not ac.get("ground") and (ac.get("alt_ft") or 0) > 1500):
             why = f"{ac.get('tail') or 'an airplane'} with this number isn't at {dep}" + (f" (the earlier {earlier} leg)" if earlier else "")
             continue
-        if not pushed and earlier:
-            if not inb:
-                why = f"{ac.get('tail')} at {dep} may be the earlier {earlier} leg; waiting for pushback or the inbound's transponder"
-                continue
-            if (ac.get("tail") or "").upper() != inb:
-                why = f"{ac.get('tail')} is the earlier {earlier} leg, not your inbound {inb}"
-                continue
-        return ac, None
-    return None, why
+        # Before pushback the airplane at the gate with your number must be the one your inbound's own
+        # transponder shows. A different one is an earlier leg with the same number (or a swap that
+        # FlightAware/AeroAPI will report on their own); your transponder takes over once you push.
+        mismatch = inb and (ac.get("tail") or "").upper() != inb
+        if not pushed and earlier and (mismatch or not inb):
+            why = (f"{ac.get('tail')} is the earlier {earlier} leg, not your inbound {inb}" if inb else
+                   f"{ac.get('tail')} at {dep} may be the earlier {earlier} leg; waiting for pushback or the inbound's transponder")
+            continue
+        if not pushed and mismatch and strong:
+            why = f"{ac.get('tail')} has your number but your inbound is {inb}: an earlier leg with the same number, or a swap (asking AeroAPI)"
+            odd = (ac.get("tail") or "").upper() or None
+            continue
+        return ac, None, None
+    return None, why, odd
 
 
 def resolve_tail(browser, L, f, now):
@@ -1196,10 +1206,11 @@ def resolve_tail(browser, L, f, now):
     if info.get("kind") in ("page", "aeroapi", "turn", "fr24", "chain"):
         info = {}  # re-derived every time
     ph = fa.phase(f, now)
+    odd_tail = None
     out_t = fa.best_time(f["times"], "out") or L["sched_out"]
     if L.get("ident") and (ph == "taxi_out" or (ph == "scheduled" and out_t - now < 90 * 60)):
         try:
-            live, why = own_live(L, f, now)
+            live, why, odd_tail = own_live(L, f, now)
             saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", (live or {}).get("tail"),
                 None if (live or {}).get("tail") else why or "not transmitting yet")
             if live and live.get("tail"):
@@ -1224,7 +1235,7 @@ def resolve_tail(browser, L, f, now):
     a = L.get("aero") or {}
     aero_tail = a.get("tail")
     known = {x.upper() for x in ((chain or {}).get("tail"), fr.get("tail"), mi.get("tail")) if x}
-    observed = info.get("tail") if info.get("kind") == "own" else page_tail
+    observed = info.get("tail") if info.get("kind") == "own" else (odd_tail or page_tail)
     if observed and observed.upper() in known:
         observed = None  # already explained for free; no AeroAPI call needed
     if aero_tail and observed and observed.upper() != aero_tail.upper() and aero_on() \

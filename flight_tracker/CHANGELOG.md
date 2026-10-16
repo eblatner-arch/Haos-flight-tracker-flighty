@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.1
+- The earlier-leg guard no longer depends on adsb.lol knowing the route: before pushback, an airplane with your flight number that isn't the one your inbound's own transponder shows is not taken as your tail; it goes to AeroAPI as a possible swap instead (the lookup log says so). The route lookup also retries without a position
+
 ## 3.7.0
 - Your flight's own transponder is only believed when it's really your departure. A flight number can fly an earlier leg into your airport (UA1268 DFW→EWR, then yours EWR→MCO) and that airplane keeps broadcasting the number after landing. adsb.lol's route for the number (DFW-EWR-MCO) shows when there's an earlier leg; then, before pushback, the airplane must be on the ground at your airport and be the same airplane your inbound's transponder shows. The lookup log says why one was ignored
 - Once your inbound has left its gate, the airplane can't change without a new inbound number (which FlightAware catches), so the airplane's day isn't re-read from FlightAware pages and Flightradar24 isn't asked any more; adsb.lol keeps following the inbound for the map

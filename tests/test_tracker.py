@@ -1139,14 +1139,33 @@ class OwnTransponderEarlierLeg(unittest.TestCase):
         sources.fetch_route = lambda *a, **k: ["DFW", "EWR", "MCO"]
         try:
             sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N47298"}]
-            ac, why = server.own_live(L, f, T0)
+            ac, why, odd = server.own_live(L, f, T0)
             self.assertIsNone(ac)
             self.assertIn("DFW→EWR", why)
             sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N27526"}]
-            ac, why = server.own_live(L, f, T0)
+            ac, why, odd = server.own_live(L, f, T0)
             self.assertEqual(ac["tail"], "N27526")
             # still in the air on the earlier leg: not at EWR
             sources.fetch_live_all = lambda cs: [{"lat": 35.0, "lon": -90.0, "ground": False, "alt_ft": 35000, "tail": "N47298"}]
             self.assertIsNone(server.own_live(L, f, T0)[0])
         finally:
             sources.fetch_live_all, sources.fetch_route = real_all, real_route
+
+
+class OwnTransponderNoRoute(unittest.TestCase):
+    def test_inbound_mismatch_without_route(self):
+        import server
+        out_s = T0 + H
+        f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
+                       for k in ("out", "off", "on", "in")}, "inbound_fa_id": "UAL210-1", "tail": None}
+        L = {"id": "o2", "display": "UA 1268", "ident": "UAL1268", "dep": "EWR", "arr": "MCO", "sched_out": out_s,
+             "adsb_inbound": {"tail": "N27526", "at": T0, "root": "UAL210-1", "source": "inbound"}}
+        real_all = sources.fetch_live_all
+        try:
+            sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N47298"}]
+            ac, why, odd = server.own_live(L, f, T0)  # adsb.lol knows no route for the number
+            self.assertIsNone(ac)
+            self.assertIn("N27526", why)
+            self.assertEqual(odd, "N47298")  # handed to AeroAPI as a possible swap
+        finally:
+            sources.fetch_live_all = real_all
