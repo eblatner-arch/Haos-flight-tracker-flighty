@@ -633,7 +633,7 @@
       <div class="hd"><b>${esc(fmt(out, tzA, { day: "numeric" }))}</b><span>${esc(fmt(out, tzA, { weekday: "short" }))}</span></div>
       <div class="hm"><div class="hr"><b>${esc(f.dep)}</b> → <b>${esc(f.diverted_to || f.arr)}</b>${f.diverted_to ? ` <span class="tag warn">DIVERTED</span>` : ""}${f.cancelled ? ' <span class="tag warn">CANCELLED</span>' : ""}</div>
         <div class="small muted">${esc(f.display || f.ident || "")} · ${esc(hm(out, tzA))}–${esc(hm(inn, tzB))}${f.tail ? " · " + esc(f.tail) : ""}</div></div>
-      <div class="hdl ${delayCls(f.arr_delay)}">${f.arr_delay == null ? "" : f.arr_delay >= 15 ? `${Math.round(f.arr_delay)}m late` : f.arr_delay <= -5 ? `${Math.round(-f.arr_delay)}m early` : "on time"}</div>
+      <div class="hdl ${delayCls(f.arr_delay)}">${f.continuation_of ? '<span class="faint">continuation</span>' : f.arr_delay == null ? "" : f.arr_delay >= 15 ? `${dur(f.arr_delay * 60)} late` : f.arr_delay <= -5 ? `${Math.round(-f.arr_delay)}m early` : "on time"}${f.continued_by && f.arr_delay != null ? `<small>into ${esc(f.final_ap || f.arr)}</small>` : ""}</div>
     </a>`;
   }
   function importCard(empty) {
@@ -748,8 +748,9 @@
     let f;
     try { f = await api(`api/history/${encodeURIComponent(id)}`); } catch { go("#/history"); return; }
     const t = f.times || {}, tzA = f.dep_tz, tzB = f.arr_tz;
+    const cont = !!f.continuation_of;  // its "schedule" is the original flight's: show actual times only
     const cell = (lbl, x, tz) => {
-      const a = x && x.a, s_ = x && x.s, dlt = a && s_ ? (a - s_) / 60 : null;
+      const a = x && x.a, s_ = cont ? null : x && x.s, dlt = a && s_ ? (a - s_) / 60 : null;
       return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${delayCls(dlt)}">${hm(a || s_, tz)}</div><div class="s">${a ? "actual" : "scheduled"}${dlt != null && Math.abs(dlt) >= 1 ? ` · sched ${hm(s_, tz)}` : ""}</div></div>`;
     };
     const rs = f.route_stats || {};
@@ -764,7 +765,9 @@
           <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${f.block_min ? dur(f.block_min * 60) : ""}</span></div>
           <div class="ap right"><div class="code">${esc(f.diverted_to || f.arr)}</div><div class="city">${esc((f.arr_ap || {}).city || "")}</div></div>
         </div>
-        ${f.diverted_to ? `<p class="small" style="color:var(--amber)">Planned to ${esc(f.arr)}, diverted to ${esc(f.diverted_to)}.</p>` : ""}
+        ${f.diverted_to ? `<p class="small" style="color:var(--amber)">Planned to ${esc(f.arr)}, diverted to ${esc(f.diverted_to)}.${f.continued_by
+          ? ` Reached ${esc(f.final_ap || f.arr)} at ${esc(hm(f.final_arrival, tzB))}${f.arr_delay != null ? `, ${esc(dur(f.arr_delay * 60))} after the original schedule` : ""} · <a href="#/hist/${encodeURIComponent(f.continued_by)}" style="color:var(--accent)">${esc(f.continued_by_label || "continuation")} ›</a>` : ""}</p>` : ""}
+        ${cont ? `<p class="small muted">Continuation of the diverted <a href="#/hist/${encodeURIComponent(f.continuation_of)}" style="color:var(--accent)">${esc(f.continuation_of_label || "flight")} ›</a>. Its lateness is counted on that flight, against the original schedule.</p>` : ""}
         <div class="grid4" style="margin-top:14px">
           ${cell(`Gate out · ${tzAbbr(t.out && (t.out.a || t.out.s), tzA)}`, t.out, tzA)}
           ${cell(`Gate in · ${tzAbbr(t.in && (t.in.a || t.in.s), tzB)}`, t.in, tzB)}
@@ -775,8 +778,8 @@
           ${f.dep_gate ? `<div class="chip"><div class="k">${esc(f.dep)} gate</div><div class="v">${esc(f.dep_gate)}</div></div>` : ""}
           ${f.arr_gate ? `<div class="chip"><div class="k">${esc(f.diverted_to || f.arr)} gate</div><div class="v">${esc(f.arr_gate)}</div></div>` : ""}
           ${f.aircraft || f.tail ? `<div class="chip"><div class="k">Aircraft</div><div class="v">${esc([f.type || f.aircraft, f.tail].filter(Boolean).join(" · "))}</div></div>` : ""}
-          ${f.diverted_to ? `<div class="chip changed"><div class="k">Arrival</div><div class="v">Diverted</div></div>` : ""}
-          ${f.arr_delay != null ? `<div class="chip ${f.arr_delay >= 15 ? "changed" : ""}"><div class="k">Arrival</div><div class="v">${f.arr_delay >= 1 ? Math.round(f.arr_delay) + " min late" : f.arr_delay <= -1 ? Math.round(-f.arr_delay) + " min early" : "on time"}</div></div>` : ""}
+          ${f.diverted_to ? `<div class="chip changed"><div class="k">Arrival</div><div class="v">Diverted${f.continued_by && f.arr_delay != null ? ` · ${esc(dur(f.arr_delay * 60))} late into ${esc(f.final_ap || f.arr)}` : ""}</div></div>` : ""}
+          ${f.arr_delay != null && !f.diverted_to ? `<div class="chip ${f.arr_delay >= 15 ? "changed" : ""}"><div class="k">Arrival</div><div class="v">${f.arr_delay >= 1 ? Math.round(f.arr_delay) + " min late" : f.arr_delay <= -1 ? Math.round(-f.arr_delay) + " min early" : "on time"}</div></div>` : ""}
         </div>
       </div>
       <div class="card"><div class="kv">
@@ -958,6 +961,7 @@
     destroyMaps();
     const manual = STATE.legs.filter((l) => l.manual);
     const today = new Date().toISOString().slice(0, 10);
+    const earliest = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
     $app.innerHTML = `
       <a class="back" href="#/">‹ Flights</a>
       <div class="card">
@@ -974,7 +978,8 @@
             <label>From<input id="f-dep" placeholder="EWR" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
             <label>To<input id="f-arr" placeholder="SFO" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
           </div>
-          <label>Date (optional)<input id="f-date" type="date" min="${today}"></label>
+          <label>Date (optional)<input id="f-date" type="date" min="${earliest}"></label>
+          <p class="small faint" style="margin:-4px 0 0">Past flights work up to 10 days back (that's as far as AeroAPI and FlightAware's free pages go). They go straight into History.</p>
           <button class="btn primary" type="submit">Add</button>
           <div id="f-msg" class="small"></div>
         </form>
@@ -1236,18 +1241,38 @@
                      : "Not live: checking every 30 s";
     if (v) { $live.classList.remove("flash"); void $live.offsetWidth; $live.classList.add("flash"); }
   }
-  function connect() {
-    if (es || !window.EventSource) return;
+  // The server sends a ping every 15 s. iOS freezes a backgrounded page and can leave the
+  // stream looking open but dead, so: reconnect at once when the page comes back, and whenever
+  // nothing (not even a ping) has arrived for 35 s.
+  let lastSeen = 0, retry = null;
+  function drop() { if (es) { try { es.close(); } catch {} } es = null; }
+  function connect(force) {
+    if (!window.EventSource) return;
+    if (es && !force) return;
+    drop();
+    clearTimeout(retry);
     try {
       es = new EventSource("api/events");
-      es.onopen = () => setLive(true);
-      es.onmessage = (e) => { setLive(true, e.data); liveRefresh(); };
-      es.onerror = () => { setLive(false); try { es.close(); } catch {} es = null; setTimeout(connect, 8000); };
+      es.onopen = () => { lastSeen = Date.now(); setLive(true); };
+      es.onmessage = (e) => { lastSeen = Date.now(); setLive(true, e.data); liveRefresh(); };
+      es.addEventListener("ping", () => { lastSeen = Date.now(); setLive(true); });
+      es.onerror = () => { setLive(false); drop(); retry = setTimeout(() => connect(), 2000); };
     } catch { es = null; }
+  }
+  let lastWake = 0;
+  function wake() {
+    if (document.hidden || Date.now() - lastWake < 1500) return;
+    lastWake = Date.now();
+    if (!es || Date.now() - lastSeen > 20000) { setLive(false); connect(true); }
+    render(true);  // fresh data right away, not after the stream reconnects
   }
   connect();
   // Countdowns tick, and a fallback in case the stream is blocked somewhere.
   setInterval(liveRefresh, 30000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { connect(); liveRefresh(); } });
+  setInterval(() => { if (!document.hidden && es && Date.now() - lastSeen > 35000) { setLive(false); connect(true); } }, 5000);
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("pageshow", (e) => { if (e.persisted) wake(); });
+  window.addEventListener("focus", wake);
+  window.addEventListener("online", () => connect(true));
   render(true);
 })();

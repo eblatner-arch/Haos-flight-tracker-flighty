@@ -248,6 +248,20 @@ class History(unittest.TestCase):
         st = self.h.stats(self.h.flights())
         self.assertEqual((st["flights"], st["diverted"], st["on_time_pct"]), (2, 1, 100))
 
+    def test_diversion_counts_as_one_journey(self):
+        extra = ("2026-07-27,UAL,1611,IAD,EWR,,D8,,C101,false,,2026-07-27T12:46,2026-07-27T21:51,2026-07-27T17:17,"
+                 "2026-07-27T22:21,2026-07-27T18:01,2026-07-27T23:06,2026-07-27T15:50,2026-07-27T23:16,Boeing 737 MAX 9,N17591\n")
+        self.h.import_flighty("x.csv", (self.CSV + extra).encode())
+        lk = self.h.links()
+        div = self.h.summary(self.h.get("2026-07-27_UAL1611_FLL"), lk)
+        cont = self.h.summary(self.h.get("2026-07-27_UAL1611_IAD"), lk)
+        self.assertEqual(round(div["arr_delay"]), 446)              # into EWR against the original 15:50
+        self.assertEqual((cont["arr_delay"], cont["dep_delay"], cont["continuation_of"]), (None, None, div["id"]))
+        self.assertEqual(div["final_ap"], "EWR")
+        self.assertLess(div["distance_nm"], 900)                    # FLL-IAD, not FLL-EWR
+        st = self.h.stats(self.h.flights(), lk)
+        self.assertEqual((st["flights"], st["on_time_pct"]), (3, 50))
+
     def test_finished_calendar_flight_is_archived_friends_are_not(self):
         import server
         server.history = self.h

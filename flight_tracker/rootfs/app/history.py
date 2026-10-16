@@ -65,6 +65,9 @@ def init(data_dir):
         except Exception:
             pass
         _DATA = {"flights": {}}
+    for r in _DATA["flights"].values():  # 3.2.2 and earlier counted a diversion's distance to the planned airport
+        if r.get("diverted_to"):
+            r["distance_nm"] = distance_nm(r.get("dep"), r["diverted_to"]) or r.get("distance_nm")
     log.info("History: %d flights", len(_DATA["flights"]))
 
 
@@ -202,7 +205,8 @@ def from_leg(L, kind):
         "times": times, "dep_terminal": o.get("terminal"), "dep_gate": o.get("gate"),
         "arr_terminal": d.get("terminal"), "arr_gate": d.get("gate"),
         "aircraft": TYPE_NAMES.get(typ) or f.get("aircraft_name"), "type": typ, "tail": f.get("tail"),
-        "distance_nm": f.get("distance_nm") or distance_nm(dep, arr), "route": f.get("route"), "dh": bool(L.get("dh")),
+        "distance_nm": distance_nm(dep, diverted_to) if diverted_to else (f.get("distance_nm") or distance_nm(dep, arr)),
+        "route": f.get("route"), "dh": bool(L.get("dh")),
     }
 
 
@@ -295,7 +299,7 @@ def parse_flighty(name, data):
             "dep_terminal": _str(g("dep_terminal")), "dep_gate": _str(g("dep_gate")),
             "arr_terminal": _str(g("arr_terminal")), "arr_gate": _str(g("arr_gate")),
             "aircraft": aircraft, "type": NAME_TYPES.get(aircraft.lower()), "tail": _str(g("tail")).upper(),
-            "distance_nm": distance_nm(dep, arr),
+            "distance_nm": distance_nm(dep, div or arr),
         })
     return out, problems
 
@@ -318,22 +322,63 @@ def _t(rec, k, x):
     return ((rec.get("times") or {}).get(k) or {}).get(x)
 
 
-def delays(rec):
-    """(departure delay, arrival delay) in minutes, from gate times; None when unknown."""
+def links(recs=None):
+    """Diversions as journeys: a flight that diverted (FLL→EWR, landed at IAD) and the same flight
+    number continuing from the diversion airport to the original destination (IAD→EWR) the same
+    or next day. -> ({diverted id: continuation record}, {continuation id: diverted record})"""
+    recs = flights() if recs is None else recs
+    by = {}
+    for r in recs:
+        by.setdefault(r.get("ident"), []).append(r)
+    cont, of = {}, {}
+    for r in recs:
+        dv = r.get("diverted_to")
+        if not dv:
+            continue
+        landed = _t(r, "in", "a") or _t(r, "on", "a") or _t(r, "out", "s") or 0
+        best = None
+        for c in by.get(r.get("ident"), []):
+            out = _t(c, "out", "a") or _t(c, "out", "s") or 0
+            if c is r or c.get("dep") != dv or c.get("arr") != r.get("arr") or not (landed <= out <= landed + 36 * 3600):
+                continue
+            if best is None or out < (_t(best, "out", "a") or _t(best, "out", "s") or 0):
+                best = c
+        if best:
+            cont[r["id"]], of[best["id"]] = best, r
+    return cont, of
+
+
+def delays(rec, lk=None):
+    """(departure delay, arrival delay) in minutes, from gate times; None when unknown.
+    A diverted flight's arrival delay is when you finally reached the planned destination (the
+    continuation leg) against the original schedule; the continuation leg itself has none, since
+    its 'schedule' is the original flight's."""
+    cont, of = lk or ({}, {})
+    if rec.get("id") in of:
+        return None, None
     dd = (_t(rec, "out", "a") - _t(rec, "out", "s")) / 60 if _t(rec, "out", "a") and _t(rec, "out", "s") else None
     ad = (_t(rec, "in", "a") - _t(rec, "in", "s")) / 60 if _t(rec, "in", "a") and _t(rec, "in", "s") else None
-    if rec.get("diverted_to") or rec.get("cancelled"):
-        ad = None  # arrived somewhere else: no meaningful arrival delay
+    if rec.get("cancelled"):
+        ad = None
+    elif rec.get("diverted_to"):
+        c = cont.get(rec.get("id"))
+        ad = (_t(c, "in", "a") - _t(rec, "in", "s")) / 60 if c and _t(c, "in", "a") and _t(rec, "in", "s") else None
     return dd, ad
 
 
-def summary(rec):
-    dd, ad = delays(rec)
+def summary(rec, lk=None):
+    lk = lk or links()
+    dd, ad = delays(rec, lk)
     blk = (_t(rec, "in", "a") - _t(rec, "out", "a")) / 60 if _t(rec, "in", "a") and _t(rec, "out", "a") else None
     air = (_t(rec, "on", "a") - _t(rec, "off", "a")) / 60 if _t(rec, "on", "a") and _t(rec, "off", "a") else None
     s = {k: rec.get(k) for k in ("id", "date", "display", "ident", "dep", "arr", "diverted_to", "cancelled", "kind",
                                   "source", "aircraft", "type", "tail", "distance_nm", "has_track", "dh",
                                   "dep_gate", "arr_gate", "dep_terminal", "arr_terminal", "route")}
+    c, o = lk[0].get(rec.get("id")), lk[1].get(rec.get("id"))
+    if c:
+        s.update(continued_by=c["id"], final_arrival=_t(c, "in", "a"), final_ap=c.get("arr"))
+    if o:
+        s.update(continuation_of=o["id"], continuation_from=o.get("dep"))
     s.update(times=rec.get("times") or {}, dep_delay=dd, arr_delay=ad, block_min=blk, air_min=air,
              dep_tz=airports.get(rec.get("dep")).get("tz"), arr_tz=airports.get(rec.get("diverted_to") or rec.get("arr")).get("tz"))
     return s
@@ -342,14 +387,18 @@ def summary(rec):
 ON_TIME = 15  # minutes late at the gate still counted on time (the usual A14 measure)
 
 
-def stats(recs):
+def stats(recs, lk=None):
+    lk = lk or links()
     flown = [r for r in recs if not r.get("cancelled")]
+
+    def dl(r):  # journey-aware delays (diversions)
+        return delays(r, lk)
     n = len(flown)
     dist = sum(r.get("distance_nm") or 0 for r in flown)
     air = sum(((_t(r, "on", "a") or 0) - (_t(r, "off", "a") or 0)) / 60 for r in flown if _t(r, "on", "a") and _t(r, "off", "a"))
     blk = sum(((_t(r, "in", "a") or 0) - (_t(r, "out", "a") or 0)) / 60 for r in flown if _t(r, "in", "a") and _t(r, "out", "a"))
-    arrd = [delays(r)[1] for r in flown if delays(r)[1] is not None]
-    depd = [delays(r)[0] for r in flown if delays(r)[0] is not None]
+    arrd = [dl(r)[1] for r in flown if dl(r)[1] is not None]
+    depd = [dl(r)[0] for r in flown if dl(r)[0] is not None]
 
     def top(key, k=8):
         c = {}
@@ -362,7 +411,7 @@ def stats(recs):
     def delay_by(key, minimum=3, k=6):
         g = {}
         for r in flown:
-            d = delays(r)[1]
+            d = dl(r)[1]
             v = key(r)
             if d is not None and v:
                 g.setdefault(v, []).append(d)
@@ -372,12 +421,12 @@ def stats(recs):
 
     hours = {}
     for r in flown:
-        if _t(r, "out", "s") and delays(r)[1] is not None:
+        if _t(r, "out", "s") and dl(r)[1] is not None:
             h = datetime.fromtimestamp(_t(r, "out", "s"), _tz(r.get("dep"))).hour
             b = f"{(h // 3) * 3:02d}–{(h // 3) * 3 + 3:02d}"
-            hours.setdefault(b, []).append(delays(r)[1])
+            hours.setdefault(b, []).append(dl(r)[1])
     longest = max(flown, key=lambda r: r.get("distance_nm") or 0, default=None)
-    worst = max((r for r in flown if delays(r)[1] is not None), key=lambda r: delays(r)[1], default=None)
+    worst = max((r for r in flown if dl(r)[1] is not None), key=lambda r: dl(r)[1], default=None)
     apts = set()
     for r in flown:
         apts.update(x for x in (r.get("dep"), r.get("arr"), r.get("diverted_to")) if x)
@@ -399,6 +448,6 @@ def stats(recs):
         "late_routes": delay_by(lambda r: f"{r.get('dep')}–{r.get('arr')}"),
         "late_airports": delay_by(lambda r: r.get("dep"), minimum=4),
         "by_hour": sorted((b, len(v), round(sum(v) / len(v), 1)) for b, v in hours.items()),
-        "longest": summary(longest) if longest else None, "worst_delay": summary(worst) if worst else None,
+        "longest": summary(longest, lk) if longest else None, "worst_delay": summary(worst, lk) if worst else None,
         "years": sorted({(r.get("date") or "")[:4] for r in recs if r.get("date")}, reverse=True),
     }

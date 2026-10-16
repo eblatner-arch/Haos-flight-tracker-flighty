@@ -1417,6 +1417,41 @@ def update_leg(browser, lid):
     # inbound aircraft) instead of waiting for the next cycle, so the inbound shows up right away.
     if first and watched(L, time.time()) and not finished(L, time.time()):
         update_leg(browser, lid)
+    elif first and L.get("fa_id") and rules_mod.kind_of(L) == "manual" and finished(L, time.time()):
+        past_fill(browser, lid)
+
+
+def past_fill(browser, lid):
+    """A past flight you added: AeroAPI found it; one FlightAware page load adds the flown track,
+    gates and anything else the page has. It then goes to History like any finished flight."""
+    with LOCK:
+        L = STATE["legs"].get(lid)
+        fid = L and L.get("fa_id")
+    if not fid:
+        return
+    try:
+        boot, _ = load(browser, fa.id_url(fid), lid, L, "past flight")
+        cur, _ = fa.flights_from_bootstrap(boot)
+    except Exception as e:
+        log.info("%s past flight page: %s", L.get("display"), e)
+        return
+    if not cur:
+        return
+    _fill_airports(cur)
+    with LOCK:
+        live = STATE["legs"].get(lid)
+        if live is None:
+            return
+        old = live.get("flight") or {}
+        for k in ("tail", "aircraft_type", "aircraft_name"):
+            if not cur.get(k) and old.get(k):
+                cur[k] = old[k]
+        for k in ("out", "off", "on", "in"):  # keep AeroAPI's times where the page has none
+            for x in ("scheduled", "actual"):
+                if not cur["times"][k].get(x) and ((old.get("times") or {}).get(k) or {}).get(x):
+                    cur["times"][k][x] = old["times"][k][x]
+        live["flight"], live["source"], live["updated"] = cur, "FlightAware page data", time.time()
+    bump()
 
 
 def inbound_adsb(now):
@@ -1730,19 +1765,26 @@ def api_history(q):
     year = (q.get("year") or "").strip()
     sel = [r for r in recs if not year or (r.get("date") or "").startswith(year)]
     sel.sort(key=lambda r: (r.get("date") or "", ((r.get("times") or {}).get("out") or {}).get("s") or 0), reverse=True)
-    return {"year": year, "years": history.stats(recs)["years"], "total": len(recs),
-            "stats": history.stats(sel), "flights": [history.summary(r) for r in sel]}
+    lk = history.links(recs)
+    return {"year": year, "years": sorted({(r.get("date") or "")[:4] for r in recs if r.get("date")}, reverse=True),
+            "total": len(recs), "stats": history.stats(sel, lk), "flights": [history.summary(r, lk) for r in sel]}
 
 
 def api_history_flight(fid):
     r = history.get(fid)
     if not r:
         return None
-    out = history.summary(r)
+    all_ = history.flights()
+    lk = history.links(all_)
+    out = history.summary(r, lk)
+    for k in ("continued_by", "continuation_of"):
+        if out.get(k):
+            o = history.get(out[k])
+            out[k + "_label"] = f"{o.get('display')} {o.get('dep')}→{o.get('diverted_to') or o.get('arr')}" if o else ""
     out["track"] = history.track(fid)
     out["dep_ap"], out["arr_ap"] = airports.get(r.get("dep")), airports.get(r.get("diverted_to") or r.get("arr"))
-    same = [x for x in history.flights() if x.get("dep") == r.get("dep") and x.get("arr") == r.get("arr")]
-    st = history.stats(same)
+    same = [x for x in all_ if x.get("dep") == r.get("dep") and x.get("arr") == r.get("arr")]
+    st = history.stats(same, lk)
     out["route_stats"] = {k: st[k] for k in ("flights", "on_time_pct", "avg_arr_delay", "avg_dep_delay")}
     tails = [x for x in history.flights() if r.get("tail") and x.get("tail") == r.get("tail")]
     out["tail_count"] = len(tails)
@@ -1848,16 +1890,17 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         v = CHANGE_V[0]
         try:
-            self.wfile.write(b"retry: 5000\n\n")
+            self.wfile.write(b"retry: 2000\n\n")
             self.wfile.flush()
             while True:
                 with CHANGE:
-                    CHANGE.wait_for(lambda: CHANGE_V[0] != v, timeout=20)
+                    CHANGE.wait_for(lambda: CHANGE_V[0] != v, timeout=15)
                 if CHANGE_V[0] != v:
                     v = CHANGE_V[0]
                     self.wfile.write(f"data: {v}\n\n".encode())
                 else:
-                    self.wfile.write(b": ping\n\n")
+                    # a named event (not a comment) so the page can tell the stream is still alive
+                    self.wfile.write(f"event: ping\ndata: {v}\n\n".encode())
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             return

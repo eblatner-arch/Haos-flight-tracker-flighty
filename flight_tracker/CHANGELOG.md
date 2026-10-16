@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.3.0
+- Diversions are one journey: the diverted flight's lateness is when you finally reached the planned airport (via the continuation leg) against the original schedule, e.g. FLL→EWR diverted to IAD, into EWR 7h 26m late. The continuation leg (IAD→EWR) shows actual times only, links back, and no longer counts as its own 446-min-late flight in stats or route history. A diverted flight's distance is to the airport it actually landed at
+- Add a past flight: the date can be up to 10 days back. AeroAPI finds it, one FlightAware page load adds the track and gates, and it goes straight into History (Mine)
+- The date field no longer runs off the right edge on iPhone
+- Live updates reconnect right away when you come back to the app, instead of waiting for the old connection to time out; a dead connection is also noticed within about 35 s
+
 ## 3.2.2
 - Your calendar is read 60 days ahead instead of 3 weeks (Settings → Watch window → Show schedule ahead, 7–180 days). Showing far-off flights costs nothing: checks still only start at the watch window
 
