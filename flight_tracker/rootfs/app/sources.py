@@ -188,9 +188,10 @@ def fetch_live_all(callsign):
     """Every airplane transmitting this callsign right now (an earlier leg with the same flight
     number can still be on it after landing)."""
     # adsb.lol is sometimes slow to answer: one more try with a longer wait before giving up
-    for i, wait in enumerate((12, 25)):
+    # (when adsb.lol is busy even the TLS handshake is slow, and that counts against the connect time)
+    for i, wait in enumerate((20, 30)):
         try:
-            r = requests.get(ADSB_URL.format(callsign.upper()), headers=UA, timeout=(6, wait))
+            r = requests.get(ADSB_URL.format(callsign.upper()), headers=UA, timeout=(15, wait))
             break
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             if i:

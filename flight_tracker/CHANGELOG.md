@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.9
+- adsb.lol: more time for the connection itself (its TLS handshake is slow when it's busy and was timing out at 6 s)
+
 ## 3.7.8
 - Inbound card: the bar fills once the inbound is at the gate, and it says "At the gate" instead of "Due at"
 - Average arrival in words ("usually 15 min early") on the flight, History flight and Search lines; the Stats tile notes that minus is early
