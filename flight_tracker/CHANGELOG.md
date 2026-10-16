@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.6
+- adsb.lol reads retry once with a longer wait when adsb.lol is slow (read timeouts), and the last tail seen is kept meanwhile
+
 ## 3.7.5
 - The lookup log shows why an adsb.lol read failed ("error: …"), for the inbound and your own flight
 
