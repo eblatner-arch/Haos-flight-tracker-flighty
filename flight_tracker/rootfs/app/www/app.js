@@ -478,12 +478,14 @@
     const minTurn = STATE.settings.min_turn_minutes;
     const turn = leg.turn;
     const cls = turn == null ? "" : turn < 0 ? "bad" : turn < minTurn ? "tight" : "";
-    const pct = turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
+    const landed = !!((i.times || {}).in || {}).actual;
+    // once the airplane is at your gate the wait for it is over: full bar
+    const pct = landed ? 100 : turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
     const from = (i.origin || {}).iata || "";
     return `<a class="card inbound" href="#/aircraft/${leg.id}/0">
       <div class="head"><span class="title">Inbound aircraft ›</span><span class="pill ${slug(i.status)}">${esc(i.status)}</span></div>
       <div class="line">${esc(i.display_ident || "")} ${from ? `from ${esc(from)}` : ""}</div>
-      <div class="small muted">${due ? `Due at ${esc(leg.dep)} ${hm(due, tz)} ${tzAbbr(due, tz)}` : "Arrival time not known yet"}${i.tail ? ` · ${esc(i.tail)}` : ""}${(i.destination || {}).gate ? ` · gate ${esc(i.destination.gate)}` : ""}</div>
+      <div class="small muted">${due ? `${landed ? "At the gate" : "Due at"} ${esc(leg.dep)} ${hm(due, tz)} ${tzAbbr(due, tz)}` : "Arrival time not known yet"}${i.tail ? ` · ${esc(i.tail)}` : ""}${(i.destination || {}).gate ? ` · gate ${esc(i.destination.gate)}` : ""}</div>
       ${turn != null ? `<div class="turnbar ${cls}"><div class="bar"><span style="width:${pct}%"></span></div><div class="num">${dur(turn * 60)} turn</div></div>` : ""}
     </a>`;
   }
@@ -720,6 +722,8 @@
   // ---------- history ----------
   const nm = (x) => x == null ? "—" : Math.round(x).toLocaleString();
   const mins = (m) => m == null ? "—" : `${m > 0 ? "+" : ""}${Math.round(m)}`;
+  // average arrival vs schedule, in words: "usually 15 min early"
+  const avgArr = (m) => m == null ? "" : Math.round(m) === 0 ? "usually right on schedule" : `usually ${Math.abs(Math.round(m))} min ${m < 0 ? "early" : "late"}`;
   const delayCls = (m) => m == null ? "" : m >= 15 ? "late" : m <= -5 ? "early" : "";
   function histTabs(cur, year) {
     const y = year ? `/${year}` : "";
@@ -832,7 +836,7 @@
     <h2 class="section">Delays</h2>
     <div class="tiles">
       ${tile("On time", st.on_time_pct == null ? "—" : st.on_time_pct + "%", "at the gate, under 15 min late", { st: "ontime" })}
-      ${tile("Avg arrival", st.avg_arr_delay == null ? "—" : mins(st.avg_arr_delay) + " min", `departure ${mins(st.avg_dep_delay)} min`, { sort: "late" })}
+      ${tile("Avg arrival", st.avg_arr_delay == null ? "—" : mins(st.avg_arr_delay) + " min", `vs schedule (− is early) · departure ${mins(st.avg_dep_delay)} min`, { sort: "late" })}
       ${tile("Early", st.early_pct == null ? "—" : st.early_pct + "%", "5+ min early", { st: "early" })}
       ${tile("30+ late", st.late_30_pct == null ? "—" : st.late_30_pct + "%", "", { st: "late30" })}
     </div>
@@ -990,7 +994,7 @@
       const avg = dl.length ? dl.reduce((a, b) => a + b, 0) / dl.length : null;
       const dist = res.reduce((a, f) => a + (f.cancelled ? 0 : f.distance_nm || 0), 0);
       const noTrack = res.filter((f) => !f.has_track && !f.cancelled && bfToken(f));
-      let o = `<div class="find-sum"><b>${res.length}</b> flight${res.length === 1 ? "" : "s"}${ot != null ? ` · ${ot}% on time · avg ${mins(avg)} min` : ""}${dist ? ` · ${nm(dist)} nm` : ""}
+      let o = `<div class="find-sum"><b>${res.length}</b> flight${res.length === 1 ? "" : "s"}${ot != null ? ` · ${ot}% on time · ${avgArr(avg)}` : ""}${dist ? ` · ${nm(dist)} nm` : ""}
         ${noTrack.length ? `<button class="linkbtn" id="f-bf">Copy ${noTrack.length} without a track for backfill</button>` : ""}</div>`;
       if (!res.length) o += `<div class="card empty small muted">No flights match.</div>`;
       const sorted = (P.get("sort") || "new");
@@ -1105,7 +1109,7 @@
         <div class="k">In the air</div><div>${f.air_min ? dur(f.air_min * 60) : "—"}</div>
         ${f.aircraft ? `<div class="k">Aircraft</div><div>${esc(f.aircraft)}</div>` : ""}
         ${f.tail ? `<div class="k">This tail</div><div>${f.tail_count} flight${f.tail_count === 1 ? "" : "s"} with you</div>` : ""}
-        <div class="k">This route</div><div>${rs.flights} flight${rs.flights === 1 ? "" : "s"}${rs.on_time_pct != null ? ` · ${rs.on_time_pct}% on time · avg ${mins(rs.avg_arr_delay)} min` : ""}</div>
+        <div class="k">This route</div><div>${rs.flights} flight${rs.flights === 1 ? "" : "s"}${rs.on_time_pct != null ? ` · ${rs.on_time_pct}% on time · ${avgArr(rs.avg_arr_delay)}` : ""}</div>
         ${f.route ? `<div class="k">Filed route</div><div class="mono small">${esc(f.route)}</div>` : ""}
         <div class="k">Source</div><div>${f.source === "flighty" ? "Flighty import" : "Tracked here"}${f.has_track ? " · flown track saved" : ""}</div>
       </div>
@@ -1236,7 +1240,7 @@
         ${countdown(leg)}
       </div>
       ${inboundCard(leg)}
-      ${leg.route_stats ? `<div class="card small muted">You've flown ${esc(leg.dep)}–${esc(leg.arr)} ${leg.route_stats.flights} time${leg.route_stats.flights === 1 ? "" : "s"}${leg.route_stats.on_time_pct != null ? ` · ${leg.route_stats.on_time_pct}% on time · avg ${mins(leg.route_stats.avg_arr_delay)} min` : ""}${leg.tail_count ? ` · ${esc((leg.flight || {}).tail || "")}: ${leg.tail_count} time${leg.tail_count === 1 ? "" : "s"} before` : ""}</div>` : ""}
+      ${leg.route_stats ? `<div class="card small muted">You've flown ${esc(leg.dep)}–${esc(leg.arr)} ${leg.route_stats.flights} time${leg.route_stats.flights === 1 ? "" : "s"}${leg.route_stats.on_time_pct != null ? ` · ${leg.route_stats.on_time_pct}% on time · ${avgArr(leg.route_stats.avg_arr_delay)}` : ""}${leg.tail_count ? ` · ${esc((leg.flight || {}).tail || "")}: ${leg.tail_count} time${leg.tail_count === 1 ? "" : "s"} before` : ""}</div>` : ""}
       ${wx ? `<h2 class="section">Weather</h2><div class="card">${wx}</div>` : ""}
       <h2 class="section">Details</h2>
       <div class="card"><div class="kv">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("")}</div>

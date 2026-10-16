@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.8
+- Inbound card: the bar fills once the inbound is at the gate, and it says "At the gate" instead of "Due at"
+- Average arrival in words ("usually 15 min early") on the flight, History flight and Search lines; the Stats tile notes that minus is early
+
 ## 3.7.7
 - Double-tap-and-slide zoom no longer blanks the map: the tiles on screen are scaled while you slide (the way a pinch works) and it settles on a whole zoom level when you let go
 
