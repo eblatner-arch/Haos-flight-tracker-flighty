@@ -19,6 +19,7 @@ import math
 import os
 import threading
 import time
+import zipfile
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -314,6 +315,37 @@ def import_flighty(name, data):
         added += not existed
     save()
     return {"rows": len(recs), "added": added, "already": updated, "problems": problems[:20]}
+
+
+def import_tracks(blob):
+    """tracks.zip from the flight-track-history backfill (or the GitHub artifact zip around it):
+    tracks/<id>.json for flights here that don't have a track yet."""
+    import io
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    inner = [n for n in z.namelist() if n.lower().endswith(".zip")]
+    if inner and not any(n.startswith("tracks/") for n in z.namelist()):
+        z = zipfile.ZipFile(io.BytesIO(z.read(inner[0])))
+    names = [n for n in z.namelist() if n.startswith("tracks/") and n.endswith(".json")]
+    if not names:
+        raise ValueError("No tracks in that file. Use the tracks.zip from the Backfill tracks run.")
+    added = kept = unknown = 0
+    with LOCK:
+        for n in names:
+            fid = os.path.basename(n)[:-5]
+            if get(fid) is None:
+                unknown += 1
+                continue
+            if track(fid):
+                kept += 1
+                continue
+            try:
+                pts = json.loads(z.read(n))
+            except ValueError:
+                continue
+            if pts:
+                _save_track(fid, pts)
+                added += 1
+    return {"tracks": len(names), "added": added, "kept": kept, "unknown": unknown}
 
 
 # ---------------------------------------------------------------- stats

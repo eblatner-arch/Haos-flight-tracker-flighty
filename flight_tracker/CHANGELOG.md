@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.5.0
+- History → Import also takes the tracks .zip from the flight-track-history Backfill tracks run (the GitHub artifact download works as is). Adds the flown track to each past flight that doesn't have one
+
 ## 3.4.0
 - History → Export & delete: delete just the flights imported from Flighty (to re-import from scratch), delete all of History, or export a CSV in Flighty's columns
 - Google Drive backup (Settings → Backup), same setup as the OOOI Flight Logger: your own Google client (the logger's works), Connect Google with a code at google.com/device. Uploads "Flight Tracker backup.zip" (all of History with flown tracks, plus your alert and tracking settings) and "Flight history.csv" within 10 min of a History change and once a day

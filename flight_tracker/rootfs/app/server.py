@@ -1987,7 +1987,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/history/import":
             try:
                 name = self.headers.get("X-Filename") or "import.xlsx"
-                res = history.import_flighty(name, self._body())
+                body = self._body()
+                res = (history.import_tracks(body) if name.lower().endswith(".zip")
+                       else history.import_flighty(name, body))
             except Exception as e:
                 log.warning("History import: %s", e)
                 return self._send(400, {"error": str(e)[:300]})

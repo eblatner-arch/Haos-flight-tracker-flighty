@@ -640,8 +640,8 @@
     counts = counts || {};
     return `<div class="card">
       <h3 style="margin:0 0 4px">${empty ? "Bring in your past flights" : "Import"}</h3>
-      <p class="small muted" style="margin:0 0 12px">A Flighty export (.xlsx or .csv). Flights already here are kept as they are, so importing again is safe. To re-import from scratch, delete the imported flights first.</p>
-      <label class="btn primary filebtn">Choose file<input type="file" id="h-file" accept=".xlsx,.csv,.xlsm" hidden></label>
+      <p class="small muted" style="margin:0 0 12px">A Flighty export (.xlsx or .csv). Flights already here are kept as they are, so importing again is safe. To re-import from scratch, delete the imported flights first. A tracks .zip from the Backfill tracks run adds the flown tracks to flights that don't have one.</p>
+      <label class="btn primary filebtn">Choose file<input type="file" id="h-file" accept=".xlsx,.csv,.xlsm,.zip" hidden></label>
       <div id="h-msg" class="small" style="margin-top:8px"></div></div>
       ${empty ? "" : fold("hist-manage", "Export & delete", `<div class="card">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -673,7 +673,7 @@
         const r = await fetch("api/history/import", { method: "POST", headers: { "X-Filename": file.name }, body: await file.arrayBuffer() });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
-        msg.className = "small"; msg.textContent = `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
+        msg.className = "small"; msg.textContent = d.tracks != null ? `${d.added} tracks added, ${d.kept} flights already had one${d.unknown ? `, ${d.unknown} for flights not in History` : ""}.` : `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
         setTimeout(() => render(false), 900);
       } catch (e) { msg.className = "small err"; msg.textContent = `Import failed: ${e.message}`; }
     };
