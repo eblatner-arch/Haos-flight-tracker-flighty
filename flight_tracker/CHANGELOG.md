@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.2.1
+- No changes (test update for diagnosing Home Assistant updates)
+
 ## 3.2.0
 - ADS-B on your inbound: while it's taxiing or flying (or due to be), its transponder is read every 3 min (Settings → Tracking → Tail and position sources; 0 turns it off). A different tail than the one we have triggers a full check right away, and the airplane actually flying your inbound now wins over Flightradar24 and AeroAPI
 - Lookup log shows what each tail source said on every check, even when nothing changed: Flightradar24 (tail, "no tail listed yet" or "not listed") and adsb.lol (your inbound, earlier legs, your own flight near departure). adsb.lol and Flightradar24 have their own tags
