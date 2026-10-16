@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.3
+- adsb.lol routes are crowd-sourced and can be stale: one is only used when it contains your exact leg (dep→arr)
+
 ## 3.7.2
 - adsb.lol route lookup sends the headers its docs page sends (a plain request gets an empty "201"), so the earlier-leg check (e.g. DFW-EWR-MCO) actually gets routes
 

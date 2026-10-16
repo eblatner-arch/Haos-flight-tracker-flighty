@@ -1169,3 +1169,20 @@ class OwnTransponderNoRoute(unittest.TestCase):
             self.assertEqual(odd, "N47298")  # handed to AeroAPI as a possible swap
         finally:
             sources.fetch_live_all = real_all
+
+
+class StaleRoute(unittest.TestCase):
+    def test_route_without_this_leg_is_ignored(self):
+        import server
+        out_s = T0 + H
+        f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
+                       for k in ("out", "off", "on", "in")}, "inbound_fa_id": "X-1", "tail": None}
+        L = {"id": "s", "display": "UA 2328", "ident": "UAL2328", "dep": "EWR", "arr": "LAX", "sched_out": out_s}
+        real_all, real_route = sources.fetch_live_all, sources.fetch_route
+        sources.fetch_route = lambda *a, **k: ["RSW", "EWR", "SFO"]   # stale: our leg is EWR→LAX
+        sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N1"}]
+        try:
+            ac, why, odd = server.own_live(L, f, T0)
+            self.assertEqual(ac["tail"], "N1")  # no inbound transponder to compare and no trusted route: taken
+        finally:
+            sources.fetch_live_all, sources.fetch_route = real_all, real_route

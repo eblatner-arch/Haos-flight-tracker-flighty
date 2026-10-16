@@ -1170,7 +1170,10 @@ def own_live(L, f, now):
     dep = L.get("dep")
     route = adsb_route(L, (cands[0]["lat"], cands[0]["lon"]))
     earlier = None
-    if route and dep in route and route.index(dep) > 0:
+    # adsb.lol's routes are crowd-sourced and can be stale (UAL2328 listed as RSW-EWR-SFO when it
+    # isn't): only believe one that contains this exact leg, dep→arr
+    arr = (f.get("destination") or {}).get("iata") or L.get("arr")
+    if route and dep in route and 0 < route.index(dep) < len(route) - 1 and route[route.index(dep) + 1] == arr:
         earlier = f"{route[route.index(dep) - 1]}→{dep}"
     inb, strong = inbound_tail(L, f)
     why = odd = None
