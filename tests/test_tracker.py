@@ -544,7 +544,7 @@ class Followed(unittest.TestCase):
         self.assertNotIn("held", alerts.nas_text(g, None))   # no "not held" notes
         self.assertFalse(any(p.get("nas") and "delay" in p["text"].lower()
                              for p in alerts.problems({"dep": "EWR", "arr": "MCO", "flight": None}, {}, items)))
-        self.assertIn("already airborne", alerts.nas_text([n for n in alerts.nas_for(
+        self.assertNotIn("airborne", alerts.nas_text([n for n in alerts.nas_for(
             {"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0], None))
         imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["who"], i["hit"]) for i in imp], [("you", False)])   # ZBW isn't in scope: still shown
