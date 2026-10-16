@@ -1105,7 +1105,7 @@
     const when = b.last_backup ? `last backup ${ago(b.last_backup)}` : "no backup yet";
     return `<div class="card">
       ${!b.configured ? `<p class="small muted" style="margin:0 0 10px">Google Drive backup needs your own Google OAuth client: add <span class="mono">google_client_id</span> and <span class="mono">google_client_secret</span> in the add-on's Configuration tab and restart it. The client from the OOOI Flight Logger works (TVs and Limited Input devices type, Drive API on).</p>`
-        : b.connected ? `<p class="small" style="margin:0 0 10px">Backing up to <b>${esc(b.folder)}</b>${b.email ? ` in ${esc(b.email)}'s Drive` : ""} · ${when}. It runs within 10 minutes of a History change and once a day.${b.last_error ? `<br><span class="err">${esc(b.last_error)}</span>` : ""}</p>`
+        : b.connected ? `<p class="small" style="margin:0 0 10px">Backing up to <b>${esc(b.folder)}</b>${b.email ? ` in ${esc(b.email)}'s Drive` : ""} · ${when}. It uploads about 15 s after any change (flights, History, settings) and once a day.${b.last_error ? `<br><span class="err">${esc(b.last_error)}</span>` : ""}</p>`
         : `<p class="small muted" style="margin:0 0 10px">Not connected.${b.last_error ? ` <span class="err">${esc(b.last_error)}</span>` : ""}</p>`}
       <div id="bk-code" class="small" style="margin-bottom:8px">${b.pending && !b.pending.error ? `Open <a href="${esc(b.pending.verification_url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(b.pending.verification_url)}</a> and enter <b class="mono" style="font-size:18px">${esc(b.pending.user_code)}</b>` : b.pending && b.pending.error ? `<span class="err">${esc(b.pending.error)}</span>` : ""}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.5.3
+- Backup card text matches the new timing
+
 ## 3.5.2
 - Drive backup goes up about 15 s after any change: a flight added, removed or finished, History imported or deleted, alert rules or settings changed (a burst of edits is one upload). Failed uploads retry after 2 min; the daily backup still runs
 - Deleting a lot of History keeps the previous Drive backup as "Flight Tracker backup before delete <date> (<n> flights).zip", so a mistaken delete can be restored
