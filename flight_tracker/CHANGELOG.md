@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.2
+- adsb.lol route lookup sends the headers its docs page sends (a plain request gets an empty "201"), so the earlier-leg check (e.g. DFW-EWR-MCO) actually gets routes
+
 ## 3.7.1
 - The earlier-leg guard no longer depends on adsb.lol knowing the route: before pushback, an airplane with your flight number that isn't the one your inbound's own transponder shows is not taken as your tail; it goes to AeroAPI as a possible swap instead (the lookup log says so). The route lookup also retries without a position
 

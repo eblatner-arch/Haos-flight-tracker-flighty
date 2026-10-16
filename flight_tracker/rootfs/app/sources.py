@@ -213,12 +213,17 @@ def fetch_live(callsign, accept=None):
 
 
 ROUTESET_URL = "https://api.adsb.lol/api/0/routeset"
+ROUTE_HEADERS = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 "
+                               "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+                 "Origin": "https://api.adsb.lol", "Referer": "https://api.adsb.lol/docs", "Accept": "*/*"}
 
 
 def fetch_route(callsign, lat=0, lon=0):
     """adsb.lol's route for a callsign: ['DFW', 'EWR', 'MCO'] for a flight number that flies two legs."""
+    # adsb.lol answers this one only for requests that look like its own docs page (a bare client
+    # gets "201" with an empty body), so send what that page sends
     r = requests.post(ROUTESET_URL, json={"planes": [{"callsign": callsign.upper(), "lat": lat or 0, "lng": lon or 0}]},
-                      headers=UA, timeout=15)
+                      headers=ROUTE_HEADERS, timeout=15)
     r.raise_for_status()
     for x in r.json() or []:
         codes = x.get("_airport_codes_iata") or ""
