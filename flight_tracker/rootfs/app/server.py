@@ -57,6 +57,7 @@ DEFAULTS = {
     "poll_near_minutes": 10,
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
+    "fr24_minutes": 15,
     "nas_minutes": 5,
     "live_positions": True,
     "gemini_api_key": "",
@@ -137,6 +138,7 @@ APP_SETTINGS = {
     "poll_near_minutes": ("int", 2, 60, "Check every (within 3 h)", "Minutes between page checks."),
     "poll_fast_minutes": ("int", 1, 30, "Check every (last 45 min, taxi out, landing, taxi in)", "Minutes between page checks."),
     "poll_air_minutes": ("int", 2, 60, "Check every (in the air)", "Minutes between page checks after takeoff, until 20 min before landing. Tracking stops at the gate."),
+    "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check every", "Minutes between Flightradar24 checks for the airline's tail assignment, from the watch window until pushback. Also runs right away when FlightAware shows a different aircraft type or a different airplane ahead of yours. 0 turns it off."),
     "nas_minutes": ("int", 2, 60, "FAA NAS status every", "Minutes between NAS status checks."),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne."),
 }
@@ -1009,6 +1011,72 @@ def walk_chain(browser, L, now):
     return found
 
 
+def fr24_ident(L):
+    m = IDENT_RE.match((L.get("display") or "").replace(" ", "")) or IDENT_RE.match(L.get("ident") or "")
+    if not m:
+        return None
+    code = m.group(1)
+    code = {v: k for k, v in schedule.IATA_TO_ICAO.items()}.get(code, code)
+    return f"{code}{m.group(2)}".lower()
+
+
+def fr24_check(browser, L, f, now):
+    """The airline's tail assignment from Flightradar24's schedule page for this flight number.
+    Free, so it runs every fr24_minutes from the watch window until pushback, and right away when
+    something hints the airplane changed: a different aircraft type on FlightAware, a different
+    inbound, or a different airplane flying into the inbound."""
+    every = float(CFG.get("fr24_minutes") or 0)
+    if not every or rules_mod.kind_of(L) == "friends" or fa.phase(f, now) != "scheduled":
+        return L.get("fr24")
+    ident = fr24_ident(L)
+    if not ident:
+        return L.get("fr24")
+    rot = L.get("rotation") or []
+    seen = {"type": (f.get("aircraft_type") or "").upper() or None, "inb": f.get("inbound_fa_id"),
+            "root": (rot[0] or {}).get("inbound_fa_id") if rot else None}
+    prev = L.get("fr24_seen") or {}
+    why = None
+    if prev:
+        if seen["type"] and prev.get("type") and seen["type"] != prev["type"]:
+            why = f"aircraft type {prev['type']} → {seen['type']} on FlightAware"
+        elif seen["root"] and prev.get("root") and not fa.same_flight(seen["root"], prev["root"]):
+            why = "a different airplane is flying into your inbound"
+        elif seen["inb"] and prev.get("inb") and not fa.same_flight(seen["inb"], prev["inb"]):
+            why = "a different inbound"
+    L["fr24_seen"] = {k: v or prev.get(k) for k, v in seen.items()}
+    last = (L.get("fr24") or {}).get("at") or 0
+    if not why and now - last < every * 60:
+        return L.get("fr24")
+    url = sources.FR24_URL.format(ident)
+    t0 = time.time()
+    rec = {"at": t0, "leg": L.get("display"), "leg_id": L["id"], "what": f"Flightradar24 tail{' (' + why + ')' if why else ''}",
+           "url": url, "shot": f"{L['id']}-fr24"}
+    res = {"at": now, "why": why}
+    try:
+        rows = browser.fr24_rows(url, rec["shot"])
+        items = sources.parse_fr24_rows(rows)
+        tz = alerting.tz_for(L.get("dep"), (f or {}).get("origin"))
+        out_s = (f.get("times") or {}).get("out", {}).get("scheduled") or L["sched_out"]
+        hit = sources.pick_fr24(items, L.get("dep"), L.get("arr"), out_s, tz)
+        res.update(ok=True, rows=len(items), tail=(hit or {}).get("reg"), type=(hit or {}).get("type"), matched=bool(hit))
+        rec.update(page_data=bool(items), flights=len(items), has_shot=True, ms=int((time.time() - t0) * 1000),
+                   found=(f"{hit['dep']}→{hit['arr']} {hit.get('type') or ''} {hit.get('reg') or 'no tail yet'}" if hit
+                          else "this departure isn't listed"))
+    except Exception as e:
+        res.update(ok=False, error=str(e).splitlines()[0][:200])
+        rec.update(error=res["error"], ms=int((time.time() - t0) * 1000))
+        log.info("%s FR24: %s", L.get("display"), res["error"])
+    with LOCK:
+        STATE["debug"] = (STATE["debug"] + [rec])[-60:]
+    old = L.get("fr24") or {}
+    if res.get("ok") and not res.get("tail") and old.get("tail"):
+        res["tail"], res["tail_at"] = old["tail"], old.get("tail_at")  # page no longer shows it; keep the last
+    elif res.get("tail"):
+        res["tail_at"] = old.get("tail_at") if old.get("tail") == res["tail"] else now
+    L["fr24"] = res
+    return res
+
+
 def own_inbound(L, f):
     """If the flight bringing this airplane is one of your own tracked flights (a turn, e.g.
     EWR-MIA-EWR), that leg. Its tail is the best answer for this one too."""
@@ -1026,13 +1094,14 @@ def own_inbound(L, f):
 
 
 def resolve_tail(browser, L, f, now):
-    """Which airplane is flying this leg. Trust order: our own transponder, then an earlier
-    leg of the same airplane seen in flight, then whatever FlightAware's page says."""
+    """Which airplane is flying this leg. Trust order: your own flight's transponder; then the
+    newest of Flightradar24's airline assignment, your own earlier leg (turns) and AeroAPI; the
+    airplane seen on ADS-B flying in when Flightradar24 has no tail yet; FlightAware's page last."""
     info = dict(L.get("tail_info") or {})
     page_tail = f.get("tail") if not f.get("tail_source") else None
     if info.get("kind") == "chain" and not fa.same_flight(info.get("root"), f.get("inbound_fa_id")):
         info = {}  # a different inbound is a different airplane
-    if info.get("kind") in ("page", "aeroapi", "turn"):
+    if info.get("kind") in ("page", "aeroapi", "turn", "fr24", "chain"):
         info = {}  # re-derived every time
     ph = fa.phase(f, now)
     out_t = fa.best_time(f["times"], "out") or L["sched_out"]
@@ -1044,29 +1113,42 @@ def resolve_tail(browser, L, f, now):
                         "source": "your flight's transponder"}
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
-    aero_tail = (L.get("aero") or {}).get("tail")
-    observed = info.get("tail") if info.get("kind") == "own" else page_tail
+    # Free signals first: the airplane flying in on ADS-B, Flightradar24's airline assignment,
+    # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
+    chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") != "own" else None
+    fr = fr24_check(browser, L, f, now) or {}
     mine = own_inbound(L, f) if info.get("kind") != "own" else None
     mi = (mine or {}).get("tail_info") or {}
-    aero_at = (L.get("aero") or {}).get("at") or 0
-    if mi.get("tail") and observed and mi["tail"].upper() == observed.upper():
-        observed = None  # your earlier leg already explains the change; no AeroAPI call needed
+    a = L.get("aero") or {}
+    aero_tail = a.get("tail")
+    known = {x.upper() for x in ((chain or {}).get("tail"), fr.get("tail"), mi.get("tail")) if x}
+    observed = info.get("tail") if info.get("kind") == "own" else page_tail
+    if observed and observed.upper() in known:
+        observed = None  # already explained for free; no AeroAPI call needed
     if aero_tail and observed and observed.upper() != aero_tail.upper() and aero_on() \
-            and (L.get("aero") or {}).get("rechecked_tail") != observed and ph == "scheduled":
+            and a.get("rechecked_tail") != observed and ph == "scheduled":
         aero_call(L, now, f"{observed} seen, AeroAPI had {aero_tail}", observed_tail=observed)
-        aero_tail = (L.get("aero") or {}).get("tail")
-    if mine and mi.get("tail") and mi.get("kind") in ("own", "aeroapi", "turn") and (mi.get("at") or 0) >= aero_at:
-        # Your own earlier leg flies this airplane in; whatever it learned (a swap found by its own
-        # AeroAPI check or transponder) applies here too, without another AeroAPI call.
-        info = {"tail": mi["tail"].upper(), "kind": "turn", "at": mi.get("at") or now,
-                "source": f"your {mine.get('display') or 'earlier flight'} ({mi.get('source')})"}
-    elif info.get("kind") != "own" and aero_tail:
-        info = {"tail": aero_tail.upper(), "kind": "aeroapi", "at": (L.get("aero") or {}).get("at") or now,
-                "source": "AeroAPI (airline assignment)"}
-    elif info.get("kind") not in ("own", "chain") and ph == "scheduled":
-        found = walk_chain(browser, L, now)
-        if found:
-            info = found
+        a = L.get("aero") or {}
+        aero_tail = a.get("tail")
+    if info.get("kind") != "own":
+        # Flightradar24's airline assignment (when it lists a tail) and AeroAPI: the newest wins.
+        # Without a tail on Flightradar24, the airplane seen flying in on ADS-B beats an older
+        # AeroAPI answer: that's how a swap without a new inbound number shows up.
+        if chain and not fr.get("tail"):
+            info = chain
+        else:
+            cands = []
+            if fr.get("tail"):
+                cands.append((fr.get("tail_at") or fr["at"], {"tail": fr["tail"].upper(), "kind": "fr24", "at": fr.get("tail_at") or fr["at"],
+                                                              "source": "Flightradar24 (airline assignment)"}))
+            if mine and mi.get("tail") and mi.get("kind") in ("own", "aeroapi", "turn", "fr24", "chain"):
+                cands.append((mi.get("at") or 0, {"tail": mi["tail"].upper(), "kind": "turn", "at": mi.get("at") or now,
+                                                  "source": f"your {mine.get('display') or 'earlier flight'} ({mi.get('source')})"}))
+            if aero_tail:
+                cands.append((a.get("at") or 0, {"tail": aero_tail.upper(), "kind": "aeroapi", "at": a.get("at") or now,
+                                                 "source": "AeroAPI (airline assignment)"}))
+            if cands:
+                info = max(cands, key=lambda c: c[0])[1]  # the newest word on it wins
     if not info.get("tail") and f.get("tail"):
         info = {"tail": f["tail"], "kind": "page", "at": now, "source": "FlightAware"}
     if info.get("tail"):

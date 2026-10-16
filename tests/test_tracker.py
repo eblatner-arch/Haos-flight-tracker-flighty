@@ -265,6 +265,40 @@ class History(unittest.TestCase):
         self.assertTrue(server.STATE["legs"]["c1"]["history_id"])
 
 
+class Fr24Swap(unittest.TestCase):
+    def test_same_inbound_number_new_tail(self):
+        import server
+        out_s = T0 + 10 * H
+        L = {"id": "m", "display": "UA 2785", "ident": "UAL2785", "dep": "EWR", "arr": "MIA", "sched_out": out_s,
+             "sched_in": out_s + 3 * H, "aero": {"tail": "N38467", "at": T0}}
+        server.STATE["legs"] = {"m": L}
+        f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
+                       for k in ("out", "off", "on", "in")}, "inbound_fa_id": "UAL2291-1", "tail": None, "aircraft_type": "B739"}
+        pages = []
+
+        class B:
+            def fr24_rows(self, url, shot):
+                pages.append(url)
+                return [{"text": "16 Oct 2026 Newark (EWR) Miami (MIA) B39M (N37560)", "cells": ["B39M (N37560)"],
+                         "ts": [str(int(out_s))], "regs": ["N37560"]}]
+        calls = []
+        real = server.aero_call
+        server.aero_call = lambda *x, **k: calls.append(x)
+        try:
+            server.resolve_tail(B(), L, f, T0 + 60)
+            self.assertEqual((f["tail"], L["tail_info"]["kind"]), ("N37560", "fr24"))
+            self.assertEqual(pages, ["https://www.flightradar24.com/data/flights/ua2785"])
+            server.resolve_tail(B(), L, f, T0 + 120)              # inside the interval: no new page
+            self.assertEqual(len(pages), 1)
+            f["aircraft_type"] = "B39M"                            # FlightAware shows a different type: check now
+            server.resolve_tail(B(), L, f, T0 + 180)
+            self.assertEqual(len(pages), 2)
+            self.assertIn("aircraft type", L["fr24"]["why"])
+        finally:
+            server.aero_call = real
+        self.assertEqual(calls, [])
+
+
 class Startup(unittest.TestCase):
     def test_init_rules_with_old_saved_rules(self):
         """Rules saved by older versions (with settings since removed) must still load."""

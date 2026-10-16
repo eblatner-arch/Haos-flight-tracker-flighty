@@ -1,6 +1,7 @@
 """Free public feeds: FAA NAS status, aviationweather.gov METARs, adsb.lol live positions."""
 
 import logging
+import re
 import time
 import xml.etree.ElementTree as ET
 
@@ -199,3 +200,59 @@ def fetch_live(callsign):
             "at": time.time() - float(ac.get("seen_pos") or 0),
         }
     return None
+
+
+# ---------------------------------------------------------------- Flightradar24 schedule pages
+
+FR24_URL = "https://www.flightradar24.com/data/flights/{}"
+_REG = re.compile(r"\b(N[0-9][0-9A-Z]{1,4}|[A-Z]{1,2}-[A-Z0-9]{3,5}|C-[A-Z]{4})\b")
+_DATE = re.compile(r"\b(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})\b")
+_MON = {m: i for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
+
+
+def parse_fr24_rows(rows):
+    """[{date, dep, arr, type, reg, ts}] from the rows of a FR24 flight-history page."""
+    out = []
+    for r in rows or []:
+        text = r.get("text") or " ".join(r.get("cells") or [])
+        codes = re.findall(r"\(([A-Z0-9]{3})\)", text)
+        if len(codes) < 2:
+            continue
+        m = _DATE.search(text)
+        date = f"{m.group(3)}-{_MON.get(m.group(2), 0):02d}-{int(m.group(1)):02d}" if m else ""
+        regs = [x for x in (r.get("regs") or []) if _REG.fullmatch(x.strip().upper() or "-")]
+        reg = regs[0].upper() if regs else None
+        typ = None
+        cells = r.get("cells") or []
+        for c in cells:  # the aircraft cell: "B39M (N77579)" or "7M9"
+            mt = re.match(r"^([A-Z0-9]{3,4})\b(?:\s*\(([^)]+)\))?", c.strip())
+            if mt and not re.fullmatch(r"\d{1,2}:\d{2}", c.strip()) and c.strip() not in codes:
+                if mt.group(2) and _REG.fullmatch(mt.group(2).strip().upper()):
+                    typ, reg = mt.group(1), reg or mt.group(2).strip().upper()
+                    break
+                if re.search(r"[A-Z]", mt.group(1)) and len(c.strip()) <= 12 and not _DATE.search(c):
+                    typ = typ or mt.group(1)
+        ts = []
+        for x in (r.get("ts") or []) + [r.get("rowts")]:
+            try:
+                v = int(float(x))
+                if v > 1e9:
+                    ts.append(v)
+            except (TypeError, ValueError):
+                pass
+        out.append({"date": date, "dep": codes[0], "arr": codes[1], "type": typ, "reg": reg, "ts": min(ts) if ts else None})
+    return out
+
+
+def pick_fr24(items, dep, arr, sched_out, dep_tz=None):
+    """The row for this departure: same route, and closest scheduled time (or the same date)."""
+    from datetime import datetime, timezone
+    cands = [x for x in items if x["dep"] == (dep or "").upper() and x["arr"] == (arr or "").upper()]
+    timed = [x for x in cands if x["ts"] and abs(x["ts"] - sched_out) < 4 * 3600]
+    if timed:
+        return min(timed, key=lambda x: abs(x["ts"] - sched_out))
+    dates = {datetime.fromtimestamp(sched_out, timezone.utc).strftime("%Y-%m-%d")}
+    if dep_tz:
+        dates.add(datetime.fromtimestamp(sched_out, dep_tz).strftime("%Y-%m-%d"))
+    same = [x for x in cands if x["date"] in dates and not x["ts"]]
+    return same[0] if len(same) == 1 else None

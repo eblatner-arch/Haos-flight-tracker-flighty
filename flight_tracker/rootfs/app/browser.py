@@ -170,6 +170,38 @@ class Browser:
                     raise
                 time.sleep(3)
 
+    FR24_JS = """() => Array.from(document.querySelectorAll("tr")).map(tr => ({
+      text: tr.innerText || "",
+      cells: Array.from(tr.cells || []).map(td => (td.innerText || "").trim()),
+      ts: Array.from(tr.querySelectorAll("[data-timestamp]")).map(e => e.getAttribute("data-timestamp")),
+      rowts: tr.getAttribute("data-timestamp"),
+      regs: Array.from(tr.querySelectorAll('a[href*="/data/aircraft/"]')).map(a => (a.innerText || "").trim())
+    })).filter(r => /\\([A-Z0-9]{3}\\)/.test(r.text))"""
+
+    def fr24_rows(self, url, shot_name):
+        """Rows of a Flightradar24 flight-history page (/data/flights/ua1502): [{text, cells, ts, regs}]."""
+        self._ensure()
+        page = self._ctx.new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            try:
+                page.get_by_role("button", name=re.compile("accept|agree|got it|consent", re.I)).first.click(timeout=2500)
+            except Exception:
+                pass
+            rows = []
+            for _ in range(8):
+                rows = page.evaluate(self.FR24_JS) or []
+                if rows:
+                    break
+                page.wait_for_timeout(1000)
+            try:
+                page.screenshot(path=os.path.join(self.shot_dir, f"{shot_name}.png"))
+            except Exception:
+                pass
+            return rows
+        finally:
+            page.close()
+
     def read_screenshot(self, path, ident, dep, when):
         """Ask Gemini to read a saved screenshot. Returns a flight dict or None."""
         if not self.client or not path or not os.path.exists(path):

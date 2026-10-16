@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.0
+- Tail swaps without a new inbound flight number: Flightradar24's schedule page for your flight number (it lists the airline's tail assignment for upcoming flights) is checked every 15 min from the watch window until pushback (Settings → Tracking; 0 turns it off). Calendar and Manual flights only
+- It also runs right away when FlightAware shows a different aircraft type (e.g. 739 → B39M), a different inbound, or a different airplane flying into your inbound
+- The airplane flying in on ADS-B is now used even when AeroAPI already gave a tail, so a swap on the same inbound number shows as soon as that airplane is in the air
+- Which tail wins: your own transponder; then the newest of Flightradar24, your own earlier leg on a turn, and AeroAPI; then the inbound seen on ADS-B (when Flightradar24 has no tail yet). AeroAPI is only re-asked when none of the free sources explain a change
+- Flightradar24 checks appear in Settings → page checks with a screenshot
+
 ## 3.0.0
 - **History tab** (bottom bar): every Calendar and Manual flight is saved when it finishes, with gate and runway times, delays, gates, aircraft, tail and the flown track. Friends' flights aren't saved
 - **Stats**: flights, distance, hours, airports, on-time rate, average delays, delay by time of day, most delayed routes, most-flown routes/airports/aircraft/tails, records. By year or all time
