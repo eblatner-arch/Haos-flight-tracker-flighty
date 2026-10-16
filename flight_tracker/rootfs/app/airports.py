@@ -32,6 +32,9 @@ def get(code):
     """Return {iata, icao, name, city, lat, lon, tz} for an IATA or ICAO code, or {}."""
     code = (code or "").strip().upper()
     a = _IATA.get(code) if len(code) == 3 else _ICAO.get(code)
+    if not a and len(code) == 3:
+        # renamed or re-coded airports (PBI is now DJT in some apps; airportsdata files it as KDJT)
+        a = _ICAO.get("K" + code)
     if not a:
         return {}
     return {"iata": a.get("iata") or "", "icao": a.get("icao") or "", "name": a.get("name") or "",

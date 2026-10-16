@@ -192,12 +192,77 @@ class AppSettings(unittest.TestCase):
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         got = json.load(urllib.request.urlopen(base + "/api/settings"))
         self.assertIn("watch_hours", [x["key"] for x in got["settings"]])
-        req = urllib.request.Request(base + "/api/settings", data=json.dumps({"settings": {"watch_hours": 20, "track_deadheads": False}}).encode(), method="POST")
+        req = urllib.request.Request(base + "/api/settings", data=json.dumps({"settings": {"watch_hours": 20, "live_positions": False}}).encode(), method="POST")
         self.assertTrue(json.load(urllib.request.urlopen(req))["ok"])
-        self.assertEqual((server.CFG["watch_hours"], server.CFG["track_deadheads"]), (20, False))
-        self.assertEqual(server.REFRESH_Q.get_nowait(), "schedule")                 # deadhead change re-reads the schedule
+        self.assertEqual((server.CFG["watch_hours"], server.CFG["live_positions"]), (20, False))
         srv.shutdown()
-        server.CFG["watch_hours"], server.CFG["track_deadheads"] = 18, True
+        server.CFG["watch_hours"], server.CFG["live_positions"] = 18, True
+
+
+class TurnTail(unittest.TestCase):
+    def test_turn_takes_tail_from_your_first_leg(self):
+        import server
+        a = {"id": "out", "display": "UA 2785", "fa_id": "UAL2785-1760000000-airline-1", "sched_out": T0, "sched_in": T0 + 3 * H,
+             "tail_info": {"tail": "N37560", "kind": "aeroapi", "at": T0 + 100, "source": "AeroAPI (airline assignment)"}}
+        b = {"id": "back", "display": "UA 1102", "ident": "UAL1102", "sched_out": T0 + 20 * H, "sched_in": T0 + 23 * H,
+             "aero": {"tail": "N38467", "at": T0}}
+        server.STATE["legs"] = {"out": a, "back": b}
+        f = {"times": {k: {"scheduled": None, "estimated": None, "actual": None} for k in ("out", "off", "on", "in")},
+             "inbound_fa_id": "UAL2785-1760000000-airline-1", "tail": None}
+        calls = []
+        real = server.aero_call
+        server.aero_call = lambda *x, **k: calls.append(x)
+        try:
+            server.resolve_tail(None, b, f, T0 + 200)
+        finally:
+            server.aero_call = real
+        self.assertEqual(f["tail"], "N37560")
+        self.assertIn("UA 2785", f["tail_source"])
+        self.assertEqual(calls, [])
+
+
+class History(unittest.TestCase):
+    CSV = ("Date,Airline,Flight,From,To,Dep Terminal,Dep Gate,Arr Terminal,Arr Gate,Canceled,Diverted To,"
+           "Gate Departure (Scheduled),Gate Departure (Actual),Take off (Scheduled),Take off (Actual),"
+           "Landing (Scheduled),Landing (Actual),Gate Arrival (Scheduled),Gate Arrival (Actual),Aircraft Type Name,Tail Number\n"
+           "2026-10-10,UAL,2283,EWR,CUR,C,C136,,6,false,,2026-10-10T08:56,2026-10-10T08:48,2026-10-10T09:06,2026-10-10T09:12,"
+           "2026-10-10T13:30,2026-10-10T13:16,2026-10-10T13:40,2026-10-10T13:20,Boeing 737-900ER,N67815\n"
+           "2026-07-27,UAL,1611,FLL,EWR,,C1,,D8,false,IAD,2026-07-27T12:46,2026-07-27T12:40,2026-07-27T12:56,2026-07-27T12:52,"
+           "2026-07-27T15:40,2026-07-27T15:51,2026-07-27T15:50,2026-07-27T16:12,Boeing 737 MAX 9,N17591\n")
+
+    def setUp(self):
+        import tempfile
+        import history
+        self.h = history
+        history.init(tempfile.mkdtemp())
+
+    def test_import_is_idempotent_and_local_times(self):
+        r = self.h.import_flighty("x.csv", self.CSV.encode())
+        self.assertEqual((r["added"], r["already"]), (2, 0))
+        self.assertEqual(self.h.import_flighty("x.csv", self.CSV.encode())["added"], 0)
+        a = self.h.summary(self.h.get("2026-10-10_UAL2283_EWR"))
+        self.assertEqual((a["dep_delay"], a["arr_delay"], a["type"]), (-8.0, -20.0, "B739"))
+        self.assertEqual(a["block_min"], 272.0)                     # EDT out, Curaçao (AST) in
+        d = self.h.summary(self.h.get("2026-07-27_UAL1611_FLL"))
+        self.assertEqual((d["diverted_to"], d["arr_delay"]), ("IAD", None))
+        st = self.h.stats(self.h.flights())
+        self.assertEqual((st["flights"], st["diverted"], st["on_time_pct"]), (2, 1, 100))
+
+    def test_finished_calendar_flight_is_archived_friends_are_not(self):
+        import server
+        server.history = self.h
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, off_a=T0 + 600))
+        f["times"]["out"]["actual"] = T0 + 120
+        f["times"]["in"]["actual"] = T0 + 6 * H
+        mine = {"id": "c1", "ident": "UAL1234", "display": "UA 1234", "airline": "UAL", "flight_no": "1234",
+                "dep": "EWR", "arr": "SFO", "sched_out": T0, "sched_in": T0 + 6 * H, "flight": f, "updated": T0 + 6 * H}
+        friend = dict(mine, id="x-1", extra=True, kind="friend", ident="UAL99")
+        server.STATE["legs"] = {"c1": mine, "x-1": friend}
+        server.archive_finished(T0 + 6.1 * H)
+        ids = [r["id"] for r in self.h.flights()]
+        self.assertEqual(len(ids), 1)
+        self.assertIn("UAL1234", ids[0])
+        self.assertTrue(server.STATE["legs"]["c1"]["history_id"])
 
 
 class Startup(unittest.TestCase):
@@ -205,14 +270,19 @@ class Startup(unittest.TestCase):
         """Rules saved by older versions (with settings since removed) must still load."""
         import server
         old = server.rules_mod.seed_from_config(server.CFG)
+        for r in old.values():                                # 2.x saved My legs / Deadheads / Followed
+            r["mine"], r["dh"], r["followed"] = r.pop("calendar"), r.pop("manual"), r.pop("friends")
         old["inbound_late"]["params"]["max_sched_turn"] = 60   # 2.10.0 and earlier had this
         old["nas_gs"]["followed"] = None                      # and NAS had no Followed switch
+        old["pushback"]["dh"] = False                         # a Deadheads choice becomes the Manual choice
         old["nas_delay"]["on"] = True
         server.STATE["rules"], server.STATE["flags"] = old, {}
         server.init_rules()
         R = server.STATE["rules"]
         self.assertNotIn("max_sched_turn", R["inbound_late"]["params"])
-        self.assertTrue(R["nas_gs"]["followed"])
+        self.assertTrue(R["nas_gs"]["friends"])
+        self.assertFalse(R["pushback"]["manual"])
+        self.assertNotIn("dh", R["pushback"])
         self.assertFalse(R["nas_delay"]["on"])
         server.init_rules()                                   # restarting again keeps working
 
@@ -221,17 +291,19 @@ if __name__ == "__main__":
 
 
 class Lifecycle(unittest.TestCase):
-    def test_stops_at_takeoff_and_by_date(self):
+    def test_tracks_until_the_gate(self):
         os.environ.setdefault("FT_DATA", "/nonexistent")
         import server
         L = {"id": "a", "sched_out": T0 + H, "sched_in": T0 + 4 * H, "dep": "EWR", "arr": "SFO"}
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + H))
         self.assertTrue(server.watched(L, T0))
         L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + H, off_a=T0 + 1.2 * H))
-        self.assertTrue(server.finished(L, T0 + 1.3 * H))
-        self.assertFalse(server.watched(L, T0 + 1.3 * H))
-        X = dict(L, extra=True)
-        self.assertFalse(server.watched(X, T0 + 1.3 * H))
+        self.assertFalse(server.finished(L, T0 + 1.3 * H))           # airborne: still tracked
+        self.assertTrue(server.watched(L, T0 + 1.3 * H))
+        self.assertEqual(server.poll_seconds(L, T0 + 1.3 * H), server.CFG["poll_air_minutes"] * 60)
+        L["flight"]["times"]["in"]["actual"] = T0 + 4 * H
+        self.assertTrue(server.finished(L, T0 + 4.1 * H))             # at the gate: done
+        self.assertFalse(server.watched(dict(L, extra=True), T0 + 4.1 * H))
 
     def test_pick_by_date(self):
         b1 = boot(fa_id="A", out_s=T0)            # 2025-10-14 local NY
@@ -734,7 +806,7 @@ class Rules(unittest.TestCase):
         L = self.leg(extra=True)
         L["notified"]["cancelled"] = False
         L["flight"]["cancelled"] = True
-        self.R["cancelled"]["followed"] = False
+        self.R["cancelled"]["friends"] = False
         self.assertNotIn("cancelled", self.keys(L))
         L2 = self.leg(dh=True)
         L2["flight"]["cancelled"] = True
@@ -764,9 +836,9 @@ class Rules(unittest.TestCase):
 
     def test_clean_and_merge(self):
         r = self.rules.clean({"delay": {"on": False, "hours": "3", "params": {"threshold": "25"}},
-                              "nas_gs": {"followed": True}, "bogus": {}}, self.R)
+                              "nas_gs": {"friends": True}, "bogus": {}}, self.R)
         self.assertEqual((r["delay"]["on"], r["delay"]["hours"], r["delay"]["params"]["threshold"]), (False, 3.0, 25))
-        self.assertTrue(r["nas_gs"]["followed"])
+        self.assertTrue(r["nas_gs"]["friends"])
         m = self.rules.merge(r, {"gate_alert_hours": 2})
         self.assertEqual(m["delay"]["params"]["threshold"], 25)
         seeded = self.rules.seed_from_config({"notify_watch_start": False, "inbound_alert_minutes": 45,

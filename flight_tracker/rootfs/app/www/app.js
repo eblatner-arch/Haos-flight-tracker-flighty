@@ -322,6 +322,8 @@
   }
 
   const notFound = (leg) => leg.extra && !leg.flight;
+  // Calendar flights come from the crew schedule; app-added ones are yours (Manual) or a friend's.
+  const kindTag = (leg) => !leg.extra ? "" : leg.kind === "manual" ? '<span class="tag">MANUAL</span>' : '<span class="tag friend">FRIEND</span>';
   function timeBlock(label, t, sched, tz, right) {
     if (sched === "nf") return `<div class="t ${right ? "right" : ""}"><div class="lbl">${label}</div><div><span class="big">—</span></div><div class="sub">Not found</div></div>`;
     const shown = t ? (t.actual || t.estimated || t.scheduled) : null;
@@ -474,7 +476,7 @@
       <div class="map" id="hero-map"></div>
       <div class="hero-body">
         <div class="hero-top">
-          <div class="flightno">${esc(leg.display || leg.ident || "Flight")}${leg.dh ? '<span class="tag">DH</span>' : ""}${leg.extra ? '<span class="tag">FOLLOWING</span>' : ""}</div>
+          <div class="flightno">${esc(leg.display || leg.ident || "Flight")}${leg.dh ? '<span class="tag">DH</span>' : ""}${kindTag(leg)}</div>
           ${statusPill(leg)}
         </div>
         <div class="route">
@@ -511,7 +513,7 @@
     if (leg.note && !f) foot.push(`<span class="faint">${esc(leg.note)}</span>`);
     if (!leg.finished && leg.phase === "scheduled" && out > now && out - now < 86400) foot.push(`<b>in ${dur(out - now)}</b>`);
     if (leg.problems.length) foot.push(`<span class="warnmark">${esc(leg.problems[0].text)}</span>`);
-    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + (leg.extra ? '<span class="tag">FOLLOWING</span>' : "")
+    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + kindTag(leg)
       + ((leg.source || "").includes("Gemini") ? '<span class="tag gem">GEMINI</span>' : "");
     return `<a class="fcard s-${slug(leg.status)} ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
       <div class="fc-top"><span class="fc-no">${esc(leg.display || leg.ident || "")}</span>${tags}<span class="fc-date">${esc(dayLabel(out, tzA))}</span>${statusPill(leg)}</div>
@@ -600,6 +602,190 @@
     </div>`).join("")}</div>`;
   }
 
+  // ---------- history ----------
+  const nm = (x) => x == null ? "—" : Math.round(x).toLocaleString();
+  const mins = (m) => m == null ? "—" : `${m > 0 ? "+" : ""}${Math.round(m)}`;
+  const delayCls = (m) => m == null ? "" : m >= 15 ? "late" : m <= -5 ? "early" : "";
+  function histTabs(cur, year) {
+    const y = year ? `/${year}` : "";
+    return `<div class="tabs">${[["flights", "Flights", `#/history${y}`], ["stats", "Stats", `#/history/stats${y}`], ["alerts", "Notifications", "#/history/alerts"]]
+      .map(([k, l, href]) => `<a class="tab ${cur === k ? "on" : ""}" href="${href}">${l}</a>`).join("")}</div>`;
+  }
+  function yearChips(cur, years, base) {
+    return `<div class="chips-row">${["", ...years].map((y) => `<a class="ychip ${y === cur ? "on" : ""}" href="${base}${y ? "/" + y : ""}">${y || "All"}</a>`).join("")}</div>`;
+  }
+  function histRow(f) {
+    const t = f.times || {}, tzA = f.dep_tz, tzB = f.arr_tz;
+    const out = (t.out && (t.out.a || t.out.s)), inn = (t.in && (t.in.a || t.in.s));
+    return `<a class="hrow" href="#/hist/${encodeURIComponent(f.id)}">
+      <div class="hd"><b>${esc(fmt(out, tzA, { day: "numeric" }))}</b><span>${esc(fmt(out, tzA, { weekday: "short" }))}</span></div>
+      <div class="hm"><div class="hr"><b>${esc(f.dep)}</b> → <b>${esc(f.diverted_to || f.arr)}</b>${f.diverted_to ? ` <span class="tag warn">DIVERTED</span>` : ""}${f.cancelled ? ' <span class="tag warn">CANCELLED</span>' : ""}</div>
+        <div class="small muted">${esc(f.display || f.ident || "")} · ${esc(hm(out, tzA))}–${esc(hm(inn, tzB))}${f.tail ? " · " + esc(f.tail) : ""}</div></div>
+      <div class="hdl ${delayCls(f.arr_delay)}">${f.arr_delay == null ? "" : f.arr_delay >= 15 ? `${Math.round(f.arr_delay)}m late` : f.arr_delay <= -5 ? `${Math.round(-f.arr_delay)}m early` : "on time"}</div>
+    </a>`;
+  }
+  function importCard(empty) {
+    return `<div class="card">
+      <h3 style="margin:0 0 4px">${empty ? "Bring in your past flights" : "Import"}</h3>
+      <p class="small muted" style="margin:0 0 12px">A Flighty export (.xlsx or .csv). Flights already here are kept as they are, so importing again is safe.</p>
+      <label class="btn primary filebtn">Choose file<input type="file" id="h-file" accept=".xlsx,.csv,.xlsm" hidden></label>
+      <div id="h-msg" class="small" style="margin-top:8px"></div></div>`;
+  }
+  function wireImport() {
+    const inp = document.getElementById("h-file");
+    if (!inp) return;
+    inp.onchange = async () => {
+      const file = inp.files[0], msg = document.getElementById("h-msg");
+      if (!file) return;
+      msg.className = "small muted"; msg.textContent = `Importing ${file.name}…`;
+      try {
+        const r = await fetch("api/history/import", { method: "POST", headers: { "X-Filename": file.name }, body: await file.arrayBuffer() });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || r.status);
+        msg.className = "small"; msg.textContent = `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
+        setTimeout(() => render(false), 900);
+      } catch (e) { msg.className = "small err"; msg.textContent = `Import failed: ${e.message}`; }
+    };
+  }
+
+  async function historyView(year) {
+    destroyMaps();
+    const d = await api(`api/history${year ? `?year=${year}` : ""}`);
+    let h = histTabs("flights", year) + yearChips(year || "", d.years, "#/history");
+    if (!d.flights.length) h += `<div class="card empty"><b>No flights yet</b>Your Calendar and Manual flights are saved here when they finish.</div>` + importCard(true);
+    else {
+      const st = d.stats;
+      h += `<div class="tiles">${[["Flights", st.flights], ["Distance", nm(st.distance_nm) + " nm"], ["In the air", nm(st.air_hours) + " h"], ["On time", st.on_time_pct == null ? "—" : st.on_time_pct + "%"]]
+        .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>`;
+      let month = "";
+      for (const f of d.flights) {
+        const out = f.times.out && (f.times.out.a || f.times.out.s);
+        const mo = fmt(out, f.dep_tz, { month: "long", year: "numeric" });
+        if (mo !== month) { if (month) h += "</div>"; h += `<h2 class="section">${esc(mo)}</h2><div class="card hlist">`; month = mo; }
+        h += histRow(f);
+      }
+      h += "</div>" + importCard(false);
+    }
+    $app.innerHTML = h;
+    wireImport();
+  }
+
+  function bars(rows, fmtv) {
+    const mx = Math.max(1, ...rows.map((r) => Math.abs(r[1])));
+    return rows.map(([k, v, sub]) => `<div class="bar-row"><div class="bk">${esc(k)}</div><div class="bt"><span class="${fmtv ? (v >= 1 ? "late" : v <= -1 ? "early" : "") : ""}" style="width:${Math.max(3, 100 * Math.abs(v) / mx)}%"></span></div><div class="bv">${fmtv ? fmtv(v) : v}${sub ? `<small>${sub}</small>` : ""}</div></div>`).join("");
+  }
+  async function statsView(year) {
+    destroyMaps();
+    const d = await api(`api/history${year ? `?year=${year}` : ""}`);
+    const st = d.stats;
+    let h = histTabs("stats", year) + yearChips(year || "", d.years, "#/history/stats");
+    if (!st.flights) { $app.innerHTML = h + `<div class="card empty"><b>No flights yet</b>Import your Flighty history on the Flights tab.</div>`; return; }
+    const tile = (k, v, sub) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+    h += `<div class="tiles">
+      ${tile("Flights", st.flights, st.diverted ? `${st.diverted} diverted` : "")}
+      ${tile("Distance", nm(st.distance_nm) + " nm", `${(st.distance_nm / 21639).toFixed(1)}× around the world`)}
+      ${tile("In the air", nm(st.air_hours) + " h", `${nm(st.block_hours)} h gate to gate`)}
+      ${tile("Airports", st.airports, `${st.routes} routes · ${st.tails} tails`)}
+    </div>
+    <h2 class="section">Delays</h2>
+    <div class="tiles">
+      ${tile("On time", st.on_time_pct == null ? "—" : st.on_time_pct + "%", "at the gate, under 15 min late")}
+      ${tile("Avg arrival", st.avg_arr_delay == null ? "—" : mins(st.avg_arr_delay) + " min", `departure ${mins(st.avg_dep_delay)} min`)}
+      ${tile("Early", st.early_pct == null ? "—" : st.early_pct + "%", "5+ min early")}
+      ${tile("30+ late", st.late_30_pct == null ? "—" : st.late_30_pct + "%", "")}
+    </div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Average arrival delay by scheduled departure time</div>
+      ${bars(st.by_hour.map(([b, n, avg]) => [b, avg, ` · ${n}`]), (v) => mins(v) + "m")}</div>
+    ${st.late_routes.length ? `<div class="card"><div class="small muted" style="margin-bottom:8px">Most delayed routes (3+ flights)</div>
+      ${bars(st.late_routes.map(([r, n, avg, ot]) => [r, avg, ` · ${n} · ${Math.round(ot * 100)}% on time`]), (v) => mins(v) + "m")}</div>` : ""}
+    <h2 class="section">Most flown</h2>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Routes</div>${bars(st.top_routes)}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Airports</div>${bars(st.top_airports)}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Aircraft</div>${bars(st.top_aircraft)}</div>
+    <div class="card"><div class="small muted" style="margin-bottom:8px">Tails</div>${bars(st.top_tails)}</div>
+    <h2 class="section">Records</h2>
+    <div class="card hlist">${st.longest ? `<div class="small muted">Longest · ${nm(st.longest.distance_nm)} nm</div>${histRow(st.longest)}` : ""}
+      ${st.worst_delay ? `<div class="small muted" style="margin-top:10px">Latest arrival · ${Math.round(st.worst_delay.arr_delay)} min</div>${histRow(st.worst_delay)}` : ""}</div>`;
+    $app.innerHTML = h;
+  }
+
+  async function alertsHistoryView() {
+    destroyMaps();
+    const d = await api("api/alerts");
+    let h = histTabs("alerts") + `<input class="search" id="a-q" placeholder="Search notifications" autocomplete="off">`;
+    h += `<div id="a-list"></div>`;
+    $app.innerHTML = h;
+    const draw = (q) => {
+      q = (q || "").toLowerCase();
+      const list = d.alerts.filter((a) => !q || `${a.title} ${a.message} ${a.display || ""} ${a.route || ""}`.toLowerCase().includes(q));
+      let out = "", day = "";
+      for (const a of list.slice(0, 400)) {
+        const dd = fmt(a.at, undefined, { weekday: "short", day: "numeric", month: "short" });
+        if (dd !== day) { if (day) out += "</div>"; out += `<h2 class="section">${esc(relDay(a.at) || dd)}</h2><div class="card">`; day = dd; }
+        out += `<div class="alert"><span class="dot ${a.level}"></span><div><div class="ttl">${esc(a.title)}</div><div class="msg">${esc(a.message)}</div></div>
+          <div class="at">${fmt(a.at, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</div></div>`;
+      }
+      document.getElementById("a-list").innerHTML = list.length ? out + "</div>" : `<div class="card empty small muted">Nothing${q ? " matches" : " yet"}.</div>`;
+    };
+    draw("");
+    document.getElementById("a-q").oninput = (e) => draw(e.target.value);
+  }
+
+  async function histFlightView(id) {
+    destroyMaps();
+    let f;
+    try { f = await api(`api/history/${encodeURIComponent(id)}`); } catch { go("#/history"); return; }
+    const t = f.times || {}, tzA = f.dep_tz, tzB = f.arr_tz;
+    const cell = (lbl, x, tz) => {
+      const a = x && x.a, s_ = x && x.s, dlt = a && s_ ? (a - s_) / 60 : null;
+      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${delayCls(dlt)}">${hm(a || s_, tz)}</div><div class="s">${a ? "actual" : "scheduled"}${dlt != null && Math.abs(dlt) >= 1 ? ` · sched ${hm(s_, tz)}` : ""}</div></div>`;
+    };
+    const rs = f.route_stats || {};
+    $app.innerHTML = `
+      <a class="back" href="#/history">‹ History</a>
+      <div class="detail-map" id="hist-map"></div>
+      <div class="card">
+        <div class="hero-top"><div class="flightno">${esc(f.display || f.ident || "")}${f.diverted_to ? '<span class="tag warn">DIVERTED</span>' : ""}</div>
+          <span class="small muted">${esc(fmt((t.out && (t.out.a || t.out.s)), tzA, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))}</span></div>
+        <div class="route">
+          <div class="ap"><div class="code">${esc(f.dep)}</div><div class="city">${esc((f.dep_ap || {}).city || "")}</div></div>
+          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${f.block_min ? dur(f.block_min * 60) : ""}</span></div>
+          <div class="ap right"><div class="code">${esc(f.diverted_to || f.arr)}</div><div class="city">${esc((f.arr_ap || {}).city || "")}</div></div>
+        </div>
+        ${f.diverted_to ? `<p class="small" style="color:var(--amber)">Planned to ${esc(f.arr)}, diverted to ${esc(f.diverted_to)}.</p>` : ""}
+        <div class="grid4" style="margin-top:14px">
+          ${cell(`Gate out · ${tzAbbr(t.out && (t.out.a || t.out.s), tzA)}`, t.out, tzA)}
+          ${cell(`Gate in · ${tzAbbr(t.in && (t.in.a || t.in.s), tzB)}`, t.in, tzB)}
+          ${cell("Takeoff", t.off, tzA)}
+          ${cell("Landing", t.on, tzB)}
+        </div>
+        <div class="chips">
+          ${f.dep_gate ? `<div class="chip"><div class="k">${esc(f.dep)} gate</div><div class="v">${esc(f.dep_gate)}</div></div>` : ""}
+          ${f.arr_gate ? `<div class="chip"><div class="k">${esc(f.diverted_to || f.arr)} gate</div><div class="v">${esc(f.arr_gate)}</div></div>` : ""}
+          ${f.aircraft || f.tail ? `<div class="chip"><div class="k">Aircraft</div><div class="v">${esc([f.type || f.aircraft, f.tail].filter(Boolean).join(" · "))}</div></div>` : ""}
+          ${f.diverted_to ? `<div class="chip changed"><div class="k">Arrival</div><div class="v">Diverted</div></div>` : ""}
+          ${f.arr_delay != null ? `<div class="chip ${f.arr_delay >= 15 ? "changed" : ""}"><div class="k">Arrival</div><div class="v">${f.arr_delay >= 1 ? Math.round(f.arr_delay) + " min late" : f.arr_delay <= -1 ? Math.round(-f.arr_delay) + " min early" : "on time"}</div></div>` : ""}
+        </div>
+      </div>
+      <div class="card"><div class="kv">
+        <div class="k">Distance</div><div>${nm(f.distance_nm)} nm</div>
+        <div class="k">In the air</div><div>${f.air_min ? dur(f.air_min * 60) : "—"}</div>
+        ${f.aircraft ? `<div class="k">Aircraft</div><div>${esc(f.aircraft)}</div>` : ""}
+        ${f.tail ? `<div class="k">This tail</div><div>${f.tail_count} flight${f.tail_count === 1 ? "" : "s"} with you</div>` : ""}
+        <div class="k">This route</div><div>${rs.flights} flight${rs.flights === 1 ? "" : "s"}${rs.on_time_pct != null ? ` · ${rs.on_time_pct}% on time · avg ${mins(rs.avg_arr_delay)} min` : ""}</div>
+        ${f.route ? `<div class="k">Filed route</div><div class="mono small">${esc(f.route)}</div>` : ""}
+        <div class="k">Source</div><div>${f.source === "flighty" ? "Flighty import" : "Tracked here"}${f.has_track ? " · flown track saved" : ""}</div>
+      </div>
+      <div style="margin-top:12px"><button class="btn" id="h-del">Delete from History</button></div></div>`;
+    drawMap(document.getElementById("hist-map"), { dep_ap: f.dep_ap || {}, arr_ap: f.arr_ap || {}, flight: { track: f.track || [], waypoints: [], times: {} }, phase: "arrived", inbound: null, chain: [], live: null, display: f.display },
+      { key: `hist-${f.id}` });
+    document.getElementById("h-del").onclick = async () => {
+      if (!confirm("Delete this flight from History?")) return;
+      await api("api/history/delete", { method: "POST", body: JSON.stringify({ id: f.id }) });
+      go("#/history");
+    };
+  }
+
   // ---------- views ----------
   function homeView() {
     const sortKey = (l) => (l.flight && best(l.flight.times, "out")) || l.sched_out;
@@ -618,7 +804,7 @@
       if (next.note) h += `<div class="small muted" style="margin:-4px 4px 10px">${esc(next.note)}</div>`;
       if (next.error) h += `<div class="err" style="margin:-4px 4px 10px">${esc(next.error)}</div>`;
     } else {
-      h += `<div class="card empty"><b>No upcoming flights</b>Nothing in the next three weeks${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to follow a flight.</div>`;
+      h += `<div class="card empty"><b>No upcoming flights</b>Nothing in the next three weeks${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to add a flight.</div>`;
     }
     const rest = live.slice(1);
     h += `<h2 class="section"><span>Upcoming</span><a class="small" style="color:var(--accent)" href="#/add">+ Add flight</a></h2>`;
@@ -637,9 +823,13 @@
       h += `<h2 class="section"><span>NAS · ${esc([...myAirports].join(" · "))}</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>`;
       h += minor.length ? nasCard(minor) : `<div class="card small muted">${major ? "Shown at the top." : "No ground stops, delay programs or closures at your airports."}${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
     }
-    const done = all.filter((l) => l.finished).sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 6);
-    if (done.length) h += `<h2 class="section">Recent</h2>` + done.map(row).join("");
-    if (STATE.alerts.length) h += `<h2 class="section">Recent alerts</h2>` + alertsCard(STATE.alerts);
+    // Short feeds here; everything older lives in History.
+    const nowS = Date.now() / 1000;
+    const done = all.filter((l) => l.finished && nowS - (best(l.flight && l.flight.times, "in") || l.sched_in) < 18 * 3600)
+      .sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 3);
+    if (done.length) h += `<h2 class="section"><span>Recent</span><a class="small" style="color:var(--accent)" href="#/history">History ›</a></h2>` + done.map(row).join("");
+    const fresh = STATE.alerts.filter((a) => nowS - a.at < 12 * 3600).slice(0, 5);
+    if (fresh.length) h += `<h2 class="section"><span>Latest alerts</span><a class="small" style="color:var(--accent)" href="#/history/alerts">All ›</a></h2>` + alertsCard(fresh);
     h += `<p class="small faint" style="margin:22px 4px">v${esc(STATE.version)} · alerts go to ${esc(STATE.notify_target)} · watching ${STATE.settings.watch_hours} h before departure${STATE.schedule && STATE.schedule.checked ? ` · schedule read ${ago(STATE.schedule.checked)}` : ""}</p>`;
     destroyMaps();
     $app.innerHTML = h;
@@ -681,7 +871,7 @@
       ["Data from", leg.source || ""],
       ["Updated", leg.updated ? ago(leg.updated) : "not yet"],
       ["Next check", leg.finished ? "none — tracking stops at takeoff" : leg.watching && leg.next_check ? hm(leg.next_check) : leg.watching ? "soon" : `starts ${STATE.settings.watch_hours} h before departure`],
-      ["Followed for", leg.extra ? (leg.date || "the next departure") : ""],
+      ["Added as", leg.extra ? `${leg.kind === "manual" ? "yours (kept in History)" : "a friend's flight"} · ${leg.date || "next departure"}` : ""],
       ["Calendar", leg.summary],
     ].filter(([, v]) => v);
     destroyMaps();
@@ -710,13 +900,14 @@
         ${countdown(leg)}
       </div>
       ${inboundCard(leg)}
+      ${leg.route_stats ? `<div class="card small muted">You've flown ${esc(leg.dep)}–${esc(leg.arr)} ${leg.route_stats.flights} time${leg.route_stats.flights === 1 ? "" : "s"}${leg.route_stats.on_time_pct != null ? ` · ${leg.route_stats.on_time_pct}% on time · avg ${mins(leg.route_stats.avg_arr_delay)} min` : ""}${leg.tail_count ? ` · ${esc((leg.flight || {}).tail || "")}: ${leg.tail_count} time${leg.tail_count === 1 ? "" : "s"} before` : ""}</div>` : ""}
       ${wx ? `<h2 class="section">Weather</h2><div class="card">${wx}</div>` : ""}
       <h2 class="section">Details</h2>
       <div class="card"><div class="kv">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("")}</div>
         ${leg.note ? `<p class="small muted">${esc(leg.note)}</p>` : ""}${leg.error ? `<p class="err">${esc(leg.error)}</p>` : ""}
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
           ${leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
-          ${leg.manual ? '<button class="btn" id="leg-remove">Stop following</button>' : ""}
+          ${leg.manual ? `<button class="btn" id="leg-kind">${leg.kind === "manual" ? "Make it a friend's flight" : "It's my flight"}</button><button class="btn" id="leg-remove">Remove</button>` : ""}
           ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div></div>
       ${nasMinor([leg]).length ? `<h2 class="section">Other NAS items</h2>${nasCard(nasMinor([leg]))}` : ""}
@@ -737,6 +928,11 @@
       await api(`api/refresh/${leg.id}`, { method: "POST" });
       setTimeout(() => render(true), 25000);
     };
+    const kb = document.getElementById("leg-kind");
+    if (kb) kb.onclick = async () => {
+      await api("api/flights/kind", { method: "POST", body: JSON.stringify({ id: leg.id, kind: leg.kind === "manual" ? "friend" : "manual" }) });
+      render(true);
+    };
     const xb = document.getElementById("leg-remove");
     if (xb) xb.onclick = async () => {
       await api("api/flights/remove", { method: "POST", body: JSON.stringify({ id: leg.id }) });
@@ -752,24 +948,32 @@
     $app.innerHTML = `
       <a class="back" href="#/">‹ Flights</a>
       <div class="card">
-        <h3 style="margin:0 0 4px">Follow a flight</h3>
+        <h3 style="margin:0 0 4px">Add a flight</h3>
         <p class="small muted" style="margin:0 0 14px">Flight number with its airline code, and the airports, so a flight number that flies several legs picks the right one. Leave the date blank for the next departure.</p>
         <form id="addform" class="form">
+          <div class="seg" role="radiogroup">
+            <label><input type="radio" name="f-kind" value="manual" checked><span>Mine</span></label>
+            <label><input type="radio" name="f-kind" value="friend"><span>A friend's</span></label>
+          </div>
+          <p class="small faint" style="margin:-4px 0 4px" id="f-kind-help">Tracked like your calendar flights and kept in History.</p>
           <label>Flight number<input id="f-ident" placeholder="UA1234" autocapitalize="characters" autocomplete="off" required></label>
           <div class="form-2">
             <label>From<input id="f-dep" placeholder="EWR" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
             <label>To<input id="f-arr" placeholder="SFO" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
           </div>
           <label>Date (optional)<input id="f-date" type="date" min="${today}"></label>
-          <button class="btn primary" type="submit">Follow</button>
+          <button class="btn primary" type="submit">Add</button>
           <div id="f-msg" class="small"></div>
         </form>
       </div>
-      ${manual.length ? `<h2 class="section">Following from the app</h2>` + manual.map((l) => `<div class="row">
-          <div class="when">${esc(l.display || l.ident)}<small>${l.date ? esc(new Date(l.date + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "next"}</small></div>
+      ${manual.length ? `<h2 class="section">Added in the app</h2>` + manual.map((l) => `<div class="row">
+          <div class="when">${esc(l.display || l.ident)} ${kindTag(l)}<small>${l.date ? esc(new Date(l.date + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "next"}</small></div>
           <div class="what"><div class="r">${esc(l.dep)} → ${esc(l.arr)}</div><div class="s">${esc(l.flight ? l.status : (l.note || "Looking up…"))}</div></div>
           <button class="btn" data-remove="${esc(l.id)}">Remove</button></div>`).join("") : ""}
-      <p class="small faint" style="margin:16px 4px">Followed flights get pushes for gate changes, delays, pushback and takeoff, then tracking stops. App-added flights clear themselves a day and a half after departure.</p>`;
+      <p class="small faint" style="margin:16px 4px">Which pushes each kind gets is set on the bell page (Calendar, Manual, Friends). Your own flights are saved to History when they finish; friends' flights aren't. App-added flights leave this list a day and a half after departure.</p>`;
+    $app.querySelectorAll('[name="f-kind"]').forEach((r) => r.onchange = () => {
+      document.getElementById("f-kind-help").textContent = r.value === "manual" && r.checked ? "Tracked like your calendar flights and kept in History." : "Live tracking and pushes only; not saved to History.";
+    });
     document.getElementById("addform").onsubmit = async (e) => {
       e.preventDefault();
       const msg = document.getElementById("f-msg");
@@ -777,7 +981,8 @@
       try {
         const r = await fetch("api/flights", { method: "POST", body: JSON.stringify({
           ident: document.getElementById("f-ident").value, dep: document.getElementById("f-dep").value,
-          arr: document.getElementById("f-arr").value, date: document.getElementById("f-date").value }) });
+          arr: document.getElementById("f-arr").value, date: document.getElementById("f-date").value,
+          kind: (document.querySelector('[name="f-kind"]:checked') || {}).value || "manual" }) });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
         msg.textContent = "Added. Looking it up on FlightAware…";
@@ -801,7 +1006,7 @@
       if (!g) groups.push(g = { name: r.group, rows: [] });
       g.rows.push(r);
     }
-    const kinds = [["mine", "My legs"], ["dh", "Deadheads"], ["followed", "Followed"]];
+    const kinds = [["calendar", "Calendar"], ["manual", "Manual"], ["friends", "Friends"]];
     const rowHtml = (r) => {
       const v = r.rule;
       return `<div class="nrow ${v.on ? "" : "off"}" data-key="${esc(r.key)}">
@@ -828,7 +1033,7 @@
         <div id="n-msg" class="small" style="margin-top:8px"></div>
       </div>
       ${groups.map((g) => `<h2 class="section">${esc(g.name)}</h2><div class="card nlist">${g.rows.map(rowHtml).join("")}</div>`).join("")}
-      <p class="small faint" style="margin:16px 4px">Gates assigned while a rule's window is closed are pushed once when it opens, with the gate at that moment. Ground stops push whatever their scope and say whether they include your departure or your inbound. Weather only applies to flights you're working or deadheading.</p>`;
+      <p class="small faint" style="margin:16px 4px">Gates assigned while a rule's window is closed are pushed once when it opens, with the gate at that moment. Ground stops push whatever their scope and say whether they include your departure or your inbound. Weather only applies to Calendar and Manual flights.</p>`;
     const msg = document.getElementById("n-msg");
     let timer = null;
     const pending = {};
@@ -958,7 +1163,11 @@
       morphing = route === lastRoute && $root.childElementCount > 0;
       const m = route.match(/^#\/leg\/([\w-]+)/);
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
-      if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
+      const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);
+      const mf = route.match(/^#\/hist\/(.+)$/);
+      if (mh) await (mh[1] === "stats" ? statsView(mh[2] || "") : mh[1] === "alerts" ? alertsHistoryView() : historyView(mh[2] || ""));
+      else if (mf) await histFlightView(decodeURIComponent(mf[1]));
+      else if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
       else if (m) await legView(m[1]);
       else if (route.startsWith("#/add")) addView();
       else if (route.startsWith("#/tools")) await toolsView();
@@ -966,6 +1175,8 @@
       else homeView();
       // hero map is drawn after its own fetch; give it a moment before clearing unused maps
       setTimeout(sweepMaps, 1500);
+      const tab = /^#\/hist/.test(route) ? "history" : /^#\/notify/.test(route) ? "notify" : /^#\/tools/.test(route) ? "tools" : "flights";
+      document.querySelectorAll("#tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
       if (route !== lastRoute) window.scrollTo(0, 0);
       lastRoute = route;
     } catch (e) {
@@ -993,7 +1204,7 @@
   // ---------- live updates ----------
   // The add-on pushes an event whenever anything changes; the page re-renders in place
   // (maps keep their zoom and pan). Views with forms aren't redrawn under your fingers.
-  const LIVE_VIEW = () => !/^#\/(add|notify|tools)/.test(ROUTE);
+  const LIVE_VIEW = () => !/^#\/(add|notify|tools|hist)/.test(ROUTE);
   let pending = null;
   function liveRefresh() {
     if (pending || document.hidden || !LIVE_VIEW()) return;

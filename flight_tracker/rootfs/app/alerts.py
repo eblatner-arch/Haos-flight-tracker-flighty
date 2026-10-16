@@ -390,18 +390,28 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
                 f"Your aircraft is in at {dep}" + (f" gate {(inb.get('destination') or {}).get('gate')}"
                                                     if (inb.get("destination") or {}).get("gate") else ""))
 
-    # Pushback / takeoff (tracking stops after takeoff)
+    # Pushback, takeoff, landing, gate arrival (tracking stops at the gate)
     order = ["scheduled", "taxi_out", "airborne", "landed", "arrived"]
     if ph in order:
         for key, at_phase, ev, words in (("out", "taxi_out", "pushback", "pushed back"),
-                                         ("off", "airborne", "takeoff", "departed")):
+                                         ("off", "airborne", "takeoff", "departed"),
+                                         ("on", "landed", "landed", "landed"),
+                                         ("in", "arrived", "arrived", "at the gate")):
             if order.index(ph) >= order.index(at_phase) and not nt.get(f"p_{key}"):
                 nt[f"p_{key}"] = True
-                if order.index(ph) == order.index(at_phase) or key == "off":
+                # only the step we're at now (a page check that skips a step doesn't push stale news),
+                # except takeoff and gate arrival, which always push once
+                if order.index(ph) == order.index(at_phase) or key in ("off", "in"):
                     tt = f["times"][key]["actual"]
-                    msg = f"{route} at {hhmm(tt, dep_tz)}"
+                    tz_ = dep_tz if key in ("out", "off") else arr_tz
+                    msg = f"{route} at {hhmm(tt, tz_)}"
                     if key == "off":
                         msg += f", arriving {hhmm(fa.best_time(f['times'], 'in'), arr_tz)}"
+                    if key == "in":
+                        g = (f.get("destination") or {}).get("gate")
+                        d = fa.arrival_delay_minutes(f)
+                        msg += (f", gate {g}" if g else "") + (f" · {mins(d)} late" if d and d >= 5 else
+                                                               f" · {mins(-d)} early" if d and d <= -5 else " · on time")
                     add(ev, f"{ident} {words}", msg)
 
     # NAS programs at either end

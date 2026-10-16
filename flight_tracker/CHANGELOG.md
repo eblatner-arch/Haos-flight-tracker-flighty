@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.0.0
+- **History tab** (bottom bar): every Calendar and Manual flight is saved when it finishes, with gate and runway times, delays, gates, aircraft, tail and the flown track. Friends' flights aren't saved
+- **Stats**: flights, distance, hours, airports, on-time rate, average delays, delay by time of day, most delayed routes, most-flown routes/airports/aircraft/tails, records. By year or all time
+- **Flighty import**: History → Import, pick the .xlsx or .csv export. Times are read in each airport's local time; importing again is safe
+- **Notification history**: History → Notifications, searchable and grouped by day. The Flights screen only shows the last 12 hours of alerts and the last 18 hours of finished flights
+- **Calendar / Manual / Friends** replace My legs / Deadheads / Followed. Flights added with + are yours (Manual, tracked and kept) or a friend's; switch on the flight page. Notification switches carry over: My legs → Calendar, Deadheads → Manual, Followed → Friends. Deadheads in the calendar are always tracked
+- **Tracking continues after takeoff** until the arrival gate, every 10 min in the air (Settings → Tracking) and every few minutes near landing. New Landed and At-the-gate alerts
+- **Turns**: when your own earlier flight brings the airplane (EWR–MIA–EWR), a tail change found on that leg now carries to the return leg without another AeroAPI call
+- Live flight page shows how often you've flown the route and that tail
+- Bottom tab bar: Flights, History, Alerts, Settings
+- Airports renamed in some apps (DJT for West Palm Beach) are recognised
+
 ## 2.12.2
 - Pushes carry a custom icon (white airplane on the app's indigo): shows on Android now, and on iPhone once the Home Assistant iOS app ships custom notification icons (planned for 2026.8). Older apps ignore it
 

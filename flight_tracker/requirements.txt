@@ -5,3 +5,4 @@ google-genai
 icalendar>=5.0
 recurring-ical-events>=2.0
 airportsdata
+openpyxl

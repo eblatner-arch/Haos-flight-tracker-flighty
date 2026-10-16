@@ -17,6 +17,7 @@ import aeroapi
 import airports
 import alerts as alerting
 import flightaware as fa
+import history
 import rules as rules_mod
 import schedule
 import sources
@@ -55,6 +56,7 @@ DEFAULTS = {
     "poll_far_minutes": 30,
     "poll_near_minutes": 10,
     "poll_fast_minutes": 3,
+    "poll_air_minutes": 10,
     "nas_minutes": 5,
     "live_positions": True,
     "gemini_api_key": "",
@@ -131,10 +133,10 @@ def load_state():
 # key: (kind, min, max, label, help)
 APP_SETTINGS = {
     "watch_hours": ("int", 1, 48, "Start watching", "Hours before departure. Nothing runs for a flight before this; then the first look is AeroAPI, then page checks."),
-    "track_deadheads": ("bool", None, None, "Track deadheads", "Also watch flights marked DH in your schedule."),
     "poll_far_minutes": ("int", 5, 120, "Check every (more than 3 h out)", "Minutes between page checks."),
     "poll_near_minutes": ("int", 2, 60, "Check every (within 3 h)", "Minutes between page checks."),
-    "poll_fast_minutes": ("int", 1, 30, "Check every (last 45 min, taxi, airborne)", "Minutes between page checks."),
+    "poll_fast_minutes": ("int", 1, 30, "Check every (last 45 min, taxi out, landing, taxi in)", "Minutes between page checks."),
+    "poll_air_minutes": ("int", 2, 60, "Check every (in the air)", "Minutes between page checks after takeoff, until 20 min before landing. Tracking stops at the gate."),
     "nas_minutes": ("int", 2, 60, "FAA NAS status every", "Minutes between NAS status checks."),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne."),
 }
@@ -186,6 +188,9 @@ def sync_rule_cfg():
         CFG["inbound_alert_minutes"] = mx
 
 
+ALERT_KEEP = 3000  # notification history (the Flights screen only shows the last few hours)
+
+
 def push_event(event, title, message, level="info", leg=None, tag=None, out_time=None):
     """A push that isn't tied to one flight's evaluation (schedule, system)."""
     now = time.time()
@@ -197,7 +202,7 @@ def push_event(event, title, message, level="info", leg=None, tag=None, out_time
     with LOCK:
         STATE["alerts"] = (STATE["alerts"] + [{**a, "leg": (leg or {}).get("id"), "display": (leg or {}).get("display"),
                                                "route": f"{(leg or {}).get('dep', '')}→{(leg or {}).get('arr', '')}"
-                                               if leg else ""}])[-200:]
+                                               if leg else ""}])[-ALERT_KEEP:]
     notify(a)
 
 
@@ -395,8 +400,6 @@ def reload_schedule(force=False):
                   for lid, x in cur.items() if not x.get("extra")}
         seen = set()
         for L in legs:
-            if L["dh"] and not CFG.get("track_deadheads", True):
-                continue
             seen.add(L["id"])
             L["display"] = display_ident(L["airline"], L["flight_no"])
             old = cur.get(L["id"])
@@ -475,22 +478,28 @@ def _x(x):
             "date": (x.get("date") or "").strip()}
 
 
+def _kind(x):
+    """Flights added in the app are yours (manual: tracked and kept in History) or a friend's."""
+    return "manual" if (x or {}).get("kind") == "manual" else "friend"
+
+
 def sync_extras():
     """Followed flights: track_flights from the config plus flights added in the app."""
     wanted = {}
     for raw in CFG.get("track_flights") or []:
         x = _x(raw)
         if x["ident"]:
-            wanted[extra_id(**x)] = (x, False)
+            wanted[extra_id(**x)] = (dict(x, kind="friend"), False)
     now = time.time()
     with LOCK:
         for raw in STATE["manual"]:
             x = _x(raw)
-            wanted[extra_id(**x)] = (x, True)
+            wanted[extra_id(**x)] = (dict(x, kind=_kind(raw)), True)
         for lid in [k for k, L in STATE["legs"].items() if L.get("extra") and k not in wanted]:
             del STATE["legs"][lid]
         for lid, (x, manual) in wanted.items():
             if lid in STATE["legs"]:
+                STATE["legs"][lid]["kind"] = x.get("kind") or "friend"
                 continue
             m = IDENT_RE.match(x["ident"])
             airline = schedule.IATA_TO_ICAO.get(m.group(1), m.group(1)) if m else ""
@@ -502,7 +511,7 @@ def sync_extras():
                 except Exception:
                     pass
             STATE["legs"][lid] = {
-                "id": lid, "extra": True, "manual": manual, "date": x["date"],
+                "id": lid, "extra": True, "manual": manual, "date": x["date"], "kind": x.get("kind") or "friend",
                 "ident": (airline + m.group(2)) if m else x["ident"],
                 "display": display_ident(airline, m.group(2)) if m else x["ident"], "airline": airline,
                 "flight_no": m.group(2) if m else "", "dep": x["dep"], "arr": x["arr"], "dh": False,
@@ -510,7 +519,7 @@ def sync_extras():
                 "notified": {"watch": True}, "alerts": [], "next_check": 0}
 
 
-def add_manual(ident, dep, arr, date):
+def add_manual(ident, dep, arr, date, kind="manual"):
     x = _x({"ident": ident, "dep": dep, "arr": arr, "date": date})
     ident, dep, arr, date = x["ident"], x["dep"], x["arr"], x["date"]
     if not IDENT_RE.match(ident):
@@ -527,9 +536,21 @@ def add_manual(ident, dep, arr, date):
     with LOCK:
         lid = extra_id(ident, dep, arr, date)
         if not any(extra_id(**_x(m)) == lid for m in STATE["manual"]):
-            STATE["manual"].append({"ident": ident, "dep": dep, "arr": arr, "date": date, "added": time.time()})
+            STATE["manual"].append({"ident": ident, "dep": dep, "arr": arr, "date": date, "added": time.time(),
+                                    "kind": _kind({"kind": kind})})
     sync_extras()
     return lid
+
+
+def set_kind(lid, kind):
+    with LOCK:
+        for x in STATE["manual"]:
+            if extra_id(**_x(x)) == lid:
+                x["kind"] = _kind({"kind": kind})
+                if lid in STATE["legs"]:
+                    STATE["legs"][lid]["kind"] = x["kind"]
+                return True
+    return False
 
 
 def remove_manual(lid):
@@ -595,13 +616,18 @@ def expire_manual(now):
 # --------------------------------------------------------------------------
 
 def finished(L, now):
-    """Tracking stops once the flight is off the ground (or long cancelled / long past)."""
+    """Tracking stops at the arrival gate (or once long cancelled / long past)."""
     f = L.get("flight")
     ph = fa.phase(f, now)
-    if ph in ("airborne", "landed", "arrived", "diverted"):
+    due_in = max(L["sched_in"], (fa.best_time(f["times"], "in") if f else 0) or 0)
+    if ph == "arrived":
         return True
     if ph == "cancelled":
         return now > L["sched_out"] + 2 * HOUR
+    if ph == "diverted":
+        return bool(f["times"]["in"]["actual"]) or now > due_in + 4 * HOUR
+    if ph in ("airborne", "landed"):
+        return now > due_in + 6 * HOUR  # lost track of it; don't check forever
     if L.get("extra"):
         return False
     return now > max(L["sched_in"], (fa.best_time(f["times"], "in") if f else 0) or 0) + 2 * HOUR
@@ -623,6 +649,10 @@ def poll_seconds(L, now):
     sched = ((f or {}).get("times", {}).get("out", {}).get("scheduled") if f else None) or L["sched_out"]
     est = fa.best_time(f["times"], "out") if f else None
     out_t = min(t for t in (sched, est) if t)
+    on_t = fa.best_time(f["times"], "on") if f else None
+    if ph in ("airborne", "landed", "diverted"):
+        near = ph == "landed" or (on_t and on_t - now <= 20 * 60)
+        return max(60, float(CFG["poll_fast_minutes"] if near else CFG.get("poll_air_minutes", 10)) * 60)
     if ph == "taxi_out":
         m = CFG["poll_fast_minutes"]
     elif out_t - now <= 45 * 60:
@@ -979,6 +1009,22 @@ def walk_chain(browser, L, now):
     return found
 
 
+def own_inbound(L, f):
+    """If the flight bringing this airplane is one of your own tracked flights (a turn, e.g.
+    EWR-MIA-EWR), that leg. Its tail is the best answer for this one too."""
+    ib = f.get("inbound_fa_id") or (L.get("aero") or {}).get("inbound_id")
+    if not ib:
+        return None
+    with LOCK:
+        for other in STATE["legs"].values():
+            if other is L or other.get("id") == L.get("id"):
+                continue
+            ofa = other.get("fa_id") or (other.get("flight") or {}).get("fa_id")
+            if ofa and fa.same_flight(ofa, ib):
+                return other
+    return None
+
+
 def resolve_tail(browser, L, f, now):
     """Which airplane is flying this leg. Trust order: our own transponder, then an earlier
     leg of the same airplane seen in flight, then whatever FlightAware's page says."""
@@ -986,7 +1032,7 @@ def resolve_tail(browser, L, f, now):
     page_tail = f.get("tail") if not f.get("tail_source") else None
     if info.get("kind") == "chain" and not fa.same_flight(info.get("root"), f.get("inbound_fa_id")):
         info = {}  # a different inbound is a different airplane
-    if info.get("kind") in ("page", "aeroapi"):
+    if info.get("kind") in ("page", "aeroapi", "turn"):
         info = {}  # re-derived every time
     ph = fa.phase(f, now)
     out_t = fa.best_time(f["times"], "out") or L["sched_out"]
@@ -1000,11 +1046,21 @@ def resolve_tail(browser, L, f, now):
             log.info("%s own ADS-B: %s", L.get("display"), e)
     aero_tail = (L.get("aero") or {}).get("tail")
     observed = info.get("tail") if info.get("kind") == "own" else page_tail
+    mine = own_inbound(L, f) if info.get("kind") != "own" else None
+    mi = (mine or {}).get("tail_info") or {}
+    aero_at = (L.get("aero") or {}).get("at") or 0
+    if mi.get("tail") and observed and mi["tail"].upper() == observed.upper():
+        observed = None  # your earlier leg already explains the change; no AeroAPI call needed
     if aero_tail and observed and observed.upper() != aero_tail.upper() and aero_on() \
             and (L.get("aero") or {}).get("rechecked_tail") != observed and ph == "scheduled":
         aero_call(L, now, f"{observed} seen, AeroAPI had {aero_tail}", observed_tail=observed)
         aero_tail = (L.get("aero") or {}).get("tail")
-    if info.get("kind") != "own" and aero_tail:
+    if mine and mi.get("tail") and mi.get("kind") in ("own", "aeroapi", "turn") and (mi.get("at") or 0) >= aero_at:
+        # Your own earlier leg flies this airplane in; whatever it learned (a swap found by its own
+        # AeroAPI check or transponder) applies here too, without another AeroAPI call.
+        info = {"tail": mi["tail"].upper(), "kind": "turn", "at": mi.get("at") or now,
+                "source": f"your {mine.get('display') or 'earlier flight'} ({mi.get('source')})"}
+    elif info.get("kind") != "own" and aero_tail:
         info = {"tail": aero_tail.upper(), "kind": "aeroapi", "at": (L.get("aero") or {}).get("at") or now,
                 "source": "AeroAPI (airline assignment)"}
     elif info.get("kind") not in ("own", "chain") and ph == "scheduled":
@@ -1241,7 +1297,7 @@ def update_leg(browser, lid):
         STATE["legs"][lid] = L
         for a in new_alerts:
             STATE["alerts"].append({**a, "leg": lid, "display": L.get("display"), "route": f"{L['dep']}→{L['arr']}"})
-        STATE["alerts"] = STATE["alerts"][-200:]
+        STATE["alerts"] = STATE["alerts"][-ALERT_KEEP:]
     bump()
     for a in new_alerts:
         notify(a)
@@ -1251,6 +1307,39 @@ def update_leg(browser, lid):
     # inbound aircraft) instead of waiting for the next cycle, so the inbound shows up right away.
     if first and watched(L, time.time()) and not finished(L, time.time()):
         update_leg(browser, lid)
+
+
+def archive_finished(now):
+    """Calendar and Manual flights go into History once they're done (friends' flights don't).
+    Re-archived whenever a later check fills in more (e.g. the gate-arrival time)."""
+    changed = False
+    with LOCK:
+        legs = list(STATE["legs"].values())
+    for L in legs:
+        kind = rules_mod.kind_of(L)
+        f = L.get("flight")
+        if kind == "friends" or not f:
+            continue
+        ph = fa.phase(f, now)
+        if ph not in ("arrived", "cancelled", "diverted") and not finished(L, now):
+            continue
+        if (L.get("archived_at") or 0) >= (L.get("updated") or 0):
+            continue
+        try:
+            rec = history.from_leg(L, kind)
+            if not rec["date"]:
+                continue
+            history.upsert(rec, pts=f.get("track"))
+            with LOCK:
+                live = STATE["legs"].get(L["id"])
+                if live is not None:
+                    live["archived_at"], live["history_id"] = now, rec["id"]
+            changed = True
+        except Exception as e:
+            log.warning("History: couldn't save %s: %s", L.get("display"), e)
+    if changed:
+        history.save()
+        bump()
 
 
 def refresh_nas(now):
@@ -1327,6 +1416,7 @@ def worker():
                 if when <= time.time():
                     STATE["worker"]["busy"] = lid
                     update_leg(browser, lid)
+            archive_finished(time.time())
             STATE["worker"].update(busy=None, last_cycle=time.time(), error=None)
             if time.time() - last_pub > 60 or due:
                 publish()
@@ -1347,7 +1437,7 @@ def worker():
 
 def leg_summary(L, now, nas, full=False):
     f = L.get("flight")
-    out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra",
+    out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra", "kind",
                                   "sched_out", "sched_in", "summary", "source", "note", "error", "updated",
                                   "next_check", "shot", "fa_id", "date", "manual", "tail_info", "chain")}
     if full:
@@ -1471,11 +1561,44 @@ def api_debug():
         }
 
 
+def api_history(q):
+    recs = history.flights()
+    year = (q.get("year") or "").strip()
+    sel = [r for r in recs if not year or (r.get("date") or "").startswith(year)]
+    sel.sort(key=lambda r: (r.get("date") or "", ((r.get("times") or {}).get("out") or {}).get("s") or 0), reverse=True)
+    return {"year": year, "years": history.stats(recs)["years"], "total": len(recs),
+            "stats": history.stats(sel), "flights": [history.summary(r) for r in sel]}
+
+
+def api_history_flight(fid):
+    r = history.get(fid)
+    if not r:
+        return None
+    out = history.summary(r)
+    out["track"] = history.track(fid)
+    out["dep_ap"], out["arr_ap"] = airports.get(r.get("dep")), airports.get(r.get("diverted_to") or r.get("arr"))
+    same = [x for x in history.flights() if x.get("dep") == r.get("dep") and x.get("arr") == r.get("arr")]
+    st = history.stats(same)
+    out["route_stats"] = {k: st[k] for k in ("flights", "on_time_pct", "avg_arr_delay", "avg_dep_delay")}
+    tails = [x for x in history.flights() if r.get("tail") and x.get("tail") == r.get("tail")]
+    out["tail_count"] = len(tails)
+    return out
+
+
 def api_leg(lid):
     now = time.time()
     with LOCK:
         L = STATE["legs"].get(lid)
-        return leg_summary(L, now, list(STATE["nas"]), full=True) if L else None
+        out = leg_summary(L, now, list(STATE["nas"]), full=True) if L else None
+    if out:
+        same = [x for x in history.flights() if x.get("dep") == L.get("dep") and x.get("arr") == L.get("arr")]
+        if same:
+            st = history.stats(same)
+            out["route_stats"] = {k: st[k] for k in ("flights", "on_time_pct", "avg_arr_delay")}
+        tail = ((L.get("flight") or {}).get("tail") or "").upper()
+        if tail:
+            out["tail_count"] = sum(1 for x in history.flights() if (x.get("tail") or "").upper() == tail)
+    return out
 
 
 STATIC = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -1517,6 +1640,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"settings": [{"key": k, "kind": v[0], "min": v[1], "max": v[2], "label": v[3],
                                                       "help": v[4], "value": STATE["app_settings"].get(k)}
                                                      for k, v in APP_SETTINGS.items()]})
+        if path == "/api/history":
+            return self._send(200, api_history(self._query()))
+        m = re.match(r"^/api/history/([\w-]+)$", path)
+        if m:
+            d = api_history_flight(m.group(1))
+            return self._send(200 if d else 404, d or {"error": "not found"})
+        if path == "/api/alerts":
+            with LOCK:
+                return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
@@ -1566,12 +1698,37 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
 
+    def _query(self):
+        from urllib.parse import parse_qs, urlsplit
+        return {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
+
+    def _body(self, limit=20 * 1024 * 1024):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > limit:
+            raise ValueError("File too big")
+        return self.rfile.read(n) if n else b""
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        if path == "/api/history/import":
+            try:
+                name = self.headers.get("X-Filename") or "import.xlsx"
+                res = history.import_flighty(name, self._body())
+            except Exception as e:
+                log.warning("History import: %s", e)
+                return self._send(400, {"error": str(e)[:300]})
+            log.info("History import %s: %s", name, res)
+            bump()
+            return self._send(200, res)
+        if path == "/api/history/delete":
+            ok = history.delete((self._json() or {}).get("id") or "")
+            bump()
+            return self._send(200 if ok else 404, {"ok": ok})
         if path == "/api/flights":
             body = self._json()
             try:
-                lid = add_manual(body.get("ident"), body.get("dep"), body.get("arr"), body.get("date"))
+                lid = add_manual(body.get("ident"), body.get("dep"), body.get("arr"), body.get("date"),
+                                 body.get("kind") or "manual")
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
             save_state()
@@ -1579,6 +1736,12 @@ class Handler(BaseHTTPRequestHandler):
             REFRESH_Q.put(lid)
             WAKE.set()
             return self._send(200, {"ok": True, "id": lid})
+        if path == "/api/flights/kind":
+            body = self._json()
+            ok = set_kind(body.get("id") or "", body.get("kind"))
+            save_state()
+            bump()
+            return self._send(200 if ok else 404, {"ok": ok})
         if path == "/api/flights/remove":
             remove_manual(self._json().get("id") or "")
             save_state()
@@ -1587,11 +1750,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/settings":
             body = self._json().get("settings") or {}
             with LOCK:
-                before = dict(STATE["app_settings"])
                 STATE["app_settings"] = clean_app_settings(body)
                 CFG.update(STATE["app_settings"])
-                if before.get("track_deadheads") != STATE["app_settings"].get("track_deadheads"):
-                    REFRESH_Q.put("schedule")  # re-read the schedule with the new deadhead setting
             save_state()
             WAKE.set()
             bump()
@@ -1630,6 +1790,7 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
     load_state()
+    history.init(DATA_DIR)
     init_app_settings()
     init_rules()
     if not CFG["airline_icao"]:

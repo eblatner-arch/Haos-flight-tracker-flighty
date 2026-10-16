@@ -56,7 +56,7 @@ button { font: inherit; color: inherit; }
 .icon-btn.spin svg { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+main { max-width: 760px; margin: 0 auto; padding: 14px 16px calc(84px + env(safe-area-inset-bottom)); }
 .loading { padding: 60px 0; text-align: center; color: var(--muted); }
 
 h2.section {
@@ -408,3 +408,47 @@ a.card.inbound { display: block; }
 .apt-label.faint { opacity: .75; font-size: 11px; }
 .set-num { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .set-num .hrs { flex: none; }
+.tag.friend { background: color-mix(in srgb, var(--violet) 22%, transparent); color: var(--violet); }
+.seg { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg label { flex: 1; margin: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; text-align: center; padding: 9px 0; font-weight: 700; cursor: pointer; color: var(--muted); }
+.seg input:checked + span { background: var(--accent); color: #fff; }
+
+/* bottom tabs */
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; justify-content: space-around;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.tabbar a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; color: var(--faint); font-size: 11px; font-weight: 700; }
+.tabbar svg { width: 22px; height: 22px; fill: currentColor; }
+.tabbar a.on { color: var(--accent); }
+
+/* history */
+.tabs { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+.tab { flex: 1; text-align: center; padding: 8px 0; border-radius: 9px; font-weight: 700; color: var(--muted); font-size: 14px; }
+.tab.on { background: var(--card-2); color: var(--text); }
+.chips-row { display: flex; gap: 6px; margin: 0 0 12px; overflow-x: auto; }
+.ychip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.ychip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+@media (min-width: 640px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 700; }
+.tile .v { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin-top: 2px; }
+.tile .s { font-size: 12px; color: var(--muted); }
+.hlist { padding: 4px 14px; }
+.hrow { display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.hlist .hrow:first-child, .hlist .small + .hrow { border-top: 0; }
+.hd { text-align: center; line-height: 1.1; } .hd b { display: block; font-size: 18px; } .hd span { font-size: 11px; color: var(--faint); text-transform: uppercase; }
+.hr { font-size: 16px; }
+.hdl { font-size: 12.5px; font-weight: 700; color: var(--muted); text-align: right; white-space: nowrap; }
+.hdl.late { color: var(--amber); } .hdl.early { color: var(--green); }
+.tag.warn { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }
+.bar-row { display: grid; grid-template-columns: 88px 1fr auto; gap: 10px; align-items: center; margin: 5px 0; font-size: 13.5px; }
+.bk { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt { height: 8px; background: var(--card-2); border-radius: 4px; overflow: hidden; }
+.bt span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.bv { font-weight: 700; white-space: nowrap; } .bv small { color: var(--faint); font-weight: 500; }
+.search { width: 100%; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; margin-bottom: 4px; }
+.filebtn { display: inline-block; cursor: pointer; }
+.bt span.late { background: var(--amber); } .bt span.early { background: var(--green); }

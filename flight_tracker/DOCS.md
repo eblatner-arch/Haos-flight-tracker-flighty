@@ -167,6 +167,7 @@ FlightAware pages, plus one for the inbound aircraft.
 ## Where settings live
 
 - **Add-on Configuration tab (Home Assistant):** schedule file, airline code, notify service, notification link, AeroAPI key and budget, Gemini key and model, browser viewer, and the advanced flight pattern and time zone.
-- **In the app, wrench → Tracking:** watch window, deadheads, check intervals, NAS interval, live ADS-B positions.
+- **In the app, Settings → Tracking:** watch window, check intervals (including in the air), NAS interval, live ADS-B positions.
 - **In the app, bell:** every notification, its window, urgency and thresholds (gate and swap windows, delay thresholds, short turn, inbound settings).
-- **In the app, +:** flights you follow.
+- **In the app, +:** flights you add: yours (Manual, kept in History) or a friend's.
+- **In the app, History:** your flights, stats, notification history and the Flighty import.
