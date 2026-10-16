@@ -1186,3 +1186,34 @@ class StaleRoute(unittest.TestCase):
             self.assertEqual(ac["tail"], "N1")  # no inbound transponder to compare and no trusted route: taken
         finally:
             sources.fetch_live_all, sources.fetch_route = real_all, real_route
+
+
+class SameNumberFromFlightAware(unittest.TestCase):
+    def test_flightaware_history_confirms_or_overrides_route(self):
+        import server
+        out_s = T0 + H
+        L = {"id": "fa", "ident": "UAL1268", "dep": "EWR", "arr": "MCO", "sched_out": out_s}
+        dfw = {"origin": {"iata": "DFW"}, "destination": {"iata": "EWR"},
+               "times": {k: {"scheduled": None, "estimated": None, "actual": None} for k in ("out", "off", "on", "in")}}
+        dfw["times"]["in"]["scheduled"] = out_s - 80 * 60
+        mine = {"origin": {"iata": "EWR"}, "destination": {"iata": "MCO"},
+                "times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None} for k in ("out", "off", "on", "in")}}
+        server.note_same_number(L, [dfw, mine])
+        self.assertEqual(L["same_number_earlier"]["leg"]["from"], "DFW")
+        server.note_same_number(L, [])  # nothing new: keep what we had
+        self.assertEqual(L["same_number_earlier"]["leg"]["from"], "DFW")
+        L2 = {"id": "fa2", "ident": "UAL1268", "dep": "EWR", "arr": "MCO", "sched_out": out_s}
+        dfw["times"]["in"]["scheduled"] = out_s - 30 * 3600  # yesterday's: not today's earlier leg
+        server.note_same_number(L2, [dfw, mine])
+        self.assertIsNone(L2["same_number_earlier"]["leg"])
+        # route says DFW-EWR-MCO, FlightAware shows no earlier leg today: route ignored
+        f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
+                       for k in ("out", "off", "on", "in")}, "inbound_fa_id": "X-1", "tail": None}
+        real_all, real_route = sources.fetch_live_all, sources.fetch_route
+        sources.fetch_route = lambda *a, **k: ["DFW", "EWR", "MCO"]
+        sources.fetch_live_all = lambda cs: [{"lat": 40.69, "lon": -74.17, "ground": True, "tail": "N1"}]
+        try:
+            ac, why, odd = server.own_live(L2, f, T0)
+            self.assertEqual(ac["tail"], "N1")
+        finally:
+            sources.fetch_live_all, sources.fetch_route = real_all, real_route

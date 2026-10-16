@@ -715,7 +715,8 @@ def fetch_flight(browser, L):
     shot = None
     if L.get("fa_id"):
         boot, shot = load(browser, fa.id_url(L["fa_id"]), lid, L, "flight (pinned)")
-        cur, _ = fa.flights_from_bootstrap(boot)
+        cur, act = fa.flights_from_bootstrap(boot)
+        note_same_number(L, act)
         if cur:
             return cur, "FlightAware page data", shot, None
         if boot is not None:
@@ -723,6 +724,7 @@ def fetch_flight(browser, L):
     if not L.get("fa_id"):
         boot, shot = load(browser, fa.ident_url(ident), lid, L, "flight lookup")
         cur, activity = fa.flights_from_bootstrap(boot)
+        note_same_number(L, activity)
         if L.get("extra") and boot is not None:
             inst = fa.pick_followed(cur, activity, L.get("dep"), L.get("arr"), L.get("date"), time.time())
             if inst is None:
@@ -1121,6 +1123,26 @@ def own_inbound(L, f):
     return None
 
 
+def note_same_number(L, activity):
+    """From the flight-number history FlightAware already sends with your flight's page (no extra
+    lookup): does this flight number fly an earlier leg into your departure airport today?"""
+    if not activity or L.get("extra"):
+        return
+    dep, so = (L.get("dep") or "").upper(), L.get("sched_out") or 0
+    # only trust "no earlier leg" when the history actually covers today (your own departure is in it)
+    if not any(abs((fa.best_time(a["times"], "out") or 0) - so) < 3 * 3600 for a in activity):
+        return
+    hit = None
+    for a in activity:
+        d = a.get("destination") or {}
+        code = (d.get("iata") or (d.get("icao") or "")[-3:] or "").upper()
+        t_in = fa.best_time(a["times"], "in") or fa.best_time(a["times"], "on")
+        if code == dep and t_in and so - 12 * 3600 <= t_in <= so:
+            o = a.get("origin") or {}
+            hit = {"from": o.get("iata") or (o.get("icao") or "")[-3:], "in": t_in}
+    L["same_number_earlier"] = {"checked": time.time(), "leg": hit}
+
+
 def _near(code, ac, nm):
     ap = airports.get(code)
     if ap.get("lat") is None or ac.get("lat") is None:
@@ -1175,6 +1197,12 @@ def own_live(L, f, now):
     arr = (f.get("destination") or {}).get("iata") or L.get("arr")
     if route and dep in route and 0 < route.index(dep) < len(route) - 1 and route[route.index(dep) + 1] == arr:
         earlier = f"{route[route.index(dep) - 1]}→{dep}"
+    # FlightAware's flight-number history (already loaded with your flight) settles it when it has
+    # today's legs: an earlier leg it doesn't show is a stale route; one it shows counts even
+    # without a route
+    sn = L.get("same_number_earlier") or {}
+    if sn.get("checked"):
+        earlier = f"{sn['leg']['from']}→{dep}" if sn.get("leg") else None
     inb, strong = inbound_tail(L, f)
     why = odd = None
     for ac in sorted(cands, key=lambda a: -(a.get("gs_kt") or 0)):
