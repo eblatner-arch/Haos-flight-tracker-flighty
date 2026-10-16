@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.5
+- The lookup log shows why an adsb.lol read failed ("error: …"), for the inbound and your own flight
+
 ## 3.7.4
 - The earlier-leg check is confirmed against the flight-number history FlightAware already sends with your flight's page (no extra lookups, no AeroAPI): an earlier leg into your airport that FlightAware doesn't show today means adsb.lol's route is stale and it's ignored; one FlightAware shows counts even when adsb.lol has no route
 

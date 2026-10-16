@@ -1249,6 +1249,8 @@ def resolve_tail(browser, L, f, now):
                         "source": "your flight's transponder"}
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
+            saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", None,
+                f"error: {(str(e).splitlines() or [type(e).__name__])[0][:120] or type(e).__name__}")
     # Free signals first: the airplane flying in on ADS-B, Flightradar24's airline assignment,
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
     # Once the inbound has left its gate, the airplane can't change without a new inbound number
@@ -1620,7 +1622,7 @@ def inbound_adsb(now):
             err = None
         except Exception as e:
             log.info("%s inbound ADS-B: %s", L.get("display"), e)
-            live, err = None, str(e)[:120]
+            live, err = None, (str(e).splitlines() or [type(e).__name__])[0][:120] or type(e).__name__
         route = f"{(inb.get('origin') or {}).get('iata') or '?'}→{(inb.get('destination') or {}).get('iata') or '?'}"
         with LOCK:
             cur = STATE["legs"].get(L["id"])
@@ -1638,7 +1640,7 @@ def inbound_adsb(now):
             log_lookup(cur, snapshot(cur), now, ["adsb.lol"],
                        seen=[{"src": f"adsb.lol · inbound {inb.get('display_ident') or inb['ident']} {route}",
                               "tail": (seen or "").upper() or None,
-                              "note": None if seen else ("error" if err else "not seen on ADS-B")}])
+                              "note": None if seen else (f"error: {err}" if err else "not seen on ADS-B")}])
             if seen and have and seen.upper() != have:
                 log.info("%s: inbound %s is %s on ADS-B, we had %s; checking now", L.get("display"), inb["ident"], seen, have)
                 REFRESH_Q.put(L["id"])
