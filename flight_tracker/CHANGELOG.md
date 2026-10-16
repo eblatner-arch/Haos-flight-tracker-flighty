@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.8.0
+- Faster loading on slow connections:
+  - The app draws right away from what it showed last time, then updates when the add-on answers (no blank page while a weak signal catches up)
+  - app.js, the styles and icons are kept on the phone until an update changes them (they were downloaded again on every open); the page itself and the flight data answer "not changed" in a few bytes when nothing moved
+  - Fonts no longer hold up the first draw
+  - On the direct port, everything goes compressed (through the Home Assistant sidebar, Home Assistant already compresses)
+- If anything looks wrong after updating, the previous release is kept on the `restore-3.7.9` branch
+
 ## 3.7.9
 - adsb.lol: more time for the connection itself (its TLS handshake is slow when it's busy and was timing out at 6 s)
 

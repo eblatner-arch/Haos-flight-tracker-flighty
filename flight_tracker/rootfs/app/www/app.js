@@ -185,7 +185,8 @@
   document.addEventListener("touchcancel", () => { sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
   async function api(path, opts) {
-    const r = await fetch(path, { cache: "no-store", ...opts });
+    // GETs revalidate (the add-on answers "not changed" with a tiny 304); changes always go through
+    const r = await fetch(path, { cache: opts && opts.method && opts.method !== "GET" ? "no-store" : "no-cache", ...opts });
     if (!r.ok) throw new Error(`${r.status}`);
     if (opts && opts.method === "POST") changed(path);
     return r.json();
@@ -1557,8 +1558,20 @@
   }
 
   // ---------- loop ----------
+  // The last state is kept on the phone, so the app draws at once on open (even on a weak signal)
+  // and then refreshes when the add-on answers.
+  const SNAP_KEY = "ft-state-v1";
+  function loadSnapshot() {
+    try { const s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); return s && s.legs ? s : null; } catch { return null; }
+  }
+  let snapT = null;
+  function saveSnapshot(st) {
+    clearTimeout(snapT);
+    snapT = setTimeout(() => { try { localStorage.setItem(SNAP_KEY, JSON.stringify(st)); } catch {} }, 500);
+  }
   async function load() {
     STATE = await api("api/state");
+    saveSnapshot(STATE);
     $updated.textContent = STATE.worker && STATE.worker.busy ? "updating…" : "";
     setDrive(STATE.backup);
   }
@@ -1687,5 +1700,11 @@
   window.addEventListener("pageshow", (e) => { if (e.persisted) wake(); });
   window.addEventListener("focus", wake);
   window.addEventListener("online", () => connect(true));
-  render(true);
+  // Draw the last known state right away, then fetch the current one.
+  const snap = loadSnapshot();
+  if (snap) {
+    STATE = snap;
+    $updated.textContent = "updating…";
+    render(false).then(() => render(true));
+  } else render(true);
 })();

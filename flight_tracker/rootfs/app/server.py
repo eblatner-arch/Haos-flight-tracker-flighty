@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Flight Tracker add-on: schedule watcher, tracker worker, alerts, sensors and the web app."""
 
+import gzip
+import hashlib
 import json
 import logging
 import os
@@ -2049,28 +2051,102 @@ STATIC = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=
           ".webmanifest": "application/manifest+json"}
 
 
+# ---------------------------------------------------------------- fast loading
+# Web files are read once and kept in memory (re-read when they change on disk), each with an ETag
+# from its content. index.html links app.js, style.css and the icons with ?v=<that tag>, so the
+# phone keeps those for a year and only re-checks index.html (a 304 when nothing changed).
+_FILES = {}
+_COMPRESSIBLE = ("text/", "application/json", "application/manifest+json", "image/svg+xml")
+_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
+
+
+def static_file(full):
+    st = os.stat(full)
+    hit = _FILES.get(full)
+    if hit and hit["mtime"] == st.st_mtime and hit["size"] == st.st_size:
+        return hit
+    with open(full, "rb") as fh:
+        body = fh.read()
+    hit = {"mtime": st.st_mtime, "size": st.st_size, "body": body, "gz": None,
+           "ctype": STATIC.get(os.path.splitext(full)[1], "application/octet-stream"),
+           "etag": '"' + hashlib.sha1(body).hexdigest()[:16] + '"'}
+    _FILES[full] = hit
+    return hit
+
+
+def versioned_index():
+    page = static_file(os.path.join(WWW, "index.html"))
+    if page.get("versioned") and all(static_file(os.path.join(WWW, n))["etag"] == t for n, t in page["deps"].items()):
+        return page["versioned"]
+    deps = {}
+
+    def add(m):
+        full = os.path.join(WWW, m.group(1))
+        if not os.path.isfile(full):
+            return m.group(1)
+        f = static_file(full)
+        deps[m.group(1)] = f["etag"]
+        return f'{m.group(1)}?v={f["etag"].strip(chr(34))[:10]}'
+    body = _ASSET_REF.sub(add, page["body"].decode("utf-8")).encode("utf-8")
+    page["versioned"] = {"body": body, "ctype": STATIC[".html"], "gz": None,
+                         "etag": '"' + hashlib.sha1(body).hexdigest()[:16] + '"'}
+    page["deps"] = deps
+    return page["versioned"]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def _send(self, code, body, ctype="application/json", cache="no-store"):
+    def _send(self, code, body, ctype="application/json", cache="no-store", etag=None, entry=None):
+        """Send a response: 304 when the phone already has this exact version, gzip on the direct
+        port (through Home Assistant's sidebar, its proxy compresses the connection to the phone)."""
         if isinstance(body, (dict, list)) or body is None:
             body = json.dumps(body).encode()
         elif isinstance(body, str):
             body = body.encode()
+        if etag and code == 200 and etag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache)
+            self.end_headers()
+            return
+        gz = None
+        direct = not self.headers.get("X-Ingress-Path")
+        if direct and len(body) > 1024 and ctype.startswith(_COMPRESSIBLE) and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            if entry is not None:
+                if entry.get("gz") is None:
+                    entry["gz"] = gzip.compress(body, 6)
+                gz = entry["gz"]
+            else:
+                gz = gzip.compress(body, 6)
+        out = gz or body
         self.send_response(code)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(len(out)))
         self.send_header("Cache-Control", cache)
+        if etag:
+            self.send_header("ETag", etag)
+        if direct:
+            self.send_header("Vary", "Accept-Encoding")
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(out)
+
+    def _send_json_tagged(self, obj):
+        """JSON the page polls often: an ETag so an unchanged answer is a tiny 304."""
+        body = json.dumps(obj).encode()
+        self._send(200, body, "application/json", "no-cache", '"' + hashlib.sha1(body).hexdigest()[:16] + '"')
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             path = "/index.html"
         if path == "/api/state":
-            return self._send(200, api_state())
+            d = api_state()
+            d.pop("now", None)  # the page has its own clock; leaving it out lets an unchanged state be a 304
+            return self._send_json_tagged(d)
         if path == "/api/events":
             return self._events()
         if path == "/api/debug":
@@ -2084,7 +2160,7 @@ class Handler(BaseHTTPRequestHandler):
                                                       "help": v[4], "group": v[5], "value": STATE["app_settings"].get(k)}
                                                      for k, v in APP_SETTINGS.items()]})
         if path == "/api/history":
-            return self._send(200, api_history(self._query()))
+            return self._send_json_tagged(api_history(self._query()))
         m = re.match(r"^/api/history/([\w-]+)$", path)
         if m:
             d = api_history_flight(m.group(1))
@@ -2117,7 +2193,10 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
-            return self._send(200 if d else 404, d or {"error": "not found"})
+            if d:
+                d.pop("now", None)
+                return self._send_json_tagged(d)
+            return self._send(404, {"error": "not found"})
         m = re.match(r"^/api/shot/([\w-]+)\.png$", path)
         if m:
             p = os.path.join(SHOT_DIR, m.group(1) + ".png")
@@ -2126,11 +2205,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "image/png")
             return self._send(404, {"error": "no screenshot"})
         name = os.path.basename(path)
+        if name == "index.html":
+            pg = versioned_index()
+            return self._send(200, pg["body"], pg["ctype"], "no-cache", pg["etag"], pg)
         p = os.path.join(WWW, name)
         ext = os.path.splitext(name)[1]
         if ext in STATIC and os.path.isfile(p):
-            with open(p, "rb") as f:
-                return self._send(200, f.read(), STATIC[ext], "no-cache")
+            f = static_file(p)
+            # a ?v= link names this exact content, so the phone can keep it; otherwise it re-checks
+            keep = "v=" in (self.path.split("?", 1)[1] if "?" in self.path else "")
+            return self._send(200, f["body"], f["ctype"], "public, max-age=31536000, immutable" if keep else "no-cache",
+                              f["etag"], f)
         return self._send(404, {"error": "not found"})
 
     def _json(self):
