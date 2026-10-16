@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.8.2
+- NAS cards and pushes no longer add "already airborne — not held" or "doesn't hold … leaving" lines
+
 ## 3.8.1
 - NAS pushes only while they can still hold your flight:
   - Ground stops and ground delay programs at your arrival airport, and departure delays at your departure airport: only until you take off. Once you're airborne, none of them push

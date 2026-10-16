@@ -165,14 +165,12 @@ def nas_text(n, tz):
         bits.append(f"extension probability {n['prob'].lower()}")
     if n.get("scope"):
         bits.append("departures from " + " ".join(n["scope"]))
-    if n.get("here") == "dep" and n["kind"] in ("gs", "gdp"):
-        bits.append(f"doesn't hold departures from {n['airport']}")
     for i in n.get("impact") or []:
         where = f"{i['from']}" + (f" ({i['center']})" if i.get("center") else "")
         whose = "your departure" if i["who"] == "you" else "your inbound"
         if i.get("airborne"):
-            bits.append(f"{whose} from {where} is already airborne, so it isn't held")
-        elif i["hit"] is True:
+            continue
+        if i["hit"] is True:
             bits.append(f"includes {whose} from {where}")
         elif i["hit"] is False:
             bits.append(f"doesn't include {whose} from {where} yet")

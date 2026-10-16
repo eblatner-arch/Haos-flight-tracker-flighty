@@ -662,14 +662,11 @@
       if (!i.airborne) { if (i.center) hits.add(i.center); hits.add(i.from); }
       const who = i.who === "you" ? `${esc(u.leg.display || u.leg.ident || "Your flight")} from ${esc(i.from)}` : `${esc(u.leg.display || "Your flight")}'s inbound from ${esc(i.from)}`;
       const where = i.center ? ` (${esc(i.center)})` : "";
-      lines.push(i.airborne ? `<div class="na-hit air">${who} is already airborne — not held</div>`
-        : i.hit === true ? `<div class="na-hit yes">Includes ${who}${where}</div>`
+      if (i.airborne) continue;  // already flying: nothing to say
+      lines.push(i.hit === true ? `<div class="na-hit yes">Includes ${who}${where}</div>`
         : i.hit === false ? `<div class="na-hit no">Doesn't include ${who}${where} — yet</div>`
         : `<div class="na-hit">Can't tell if it includes ${who}</div>`);
     }
-    // A ground stop / delay program holds flights *to* the airport; leaving it isn't held.
-    for (const u of g.uses) if (["gs", "gdp"].includes(n.kind) && u.leg.dep === n.airport)
-      lines.push(`<div class="na-hit air">Doesn't hold ${esc(u.leg.display || u.leg.ident || "your flight")} leaving ${esc(n.airport)}${(u.impact || []).length ? "" : " — only flights headed here"}</div>`);
     if (!lines.length) lines.push(...g.uses.map((u) => `<div class="na-hit">${esc(u.leg.display || u.leg.ident || "")} ${esc(u.leg.dep)}→${esc(u.leg.arr)}</div>`));
     const when = n.end ? `${n.start && n.start > Date.now() / 1000 ? hm(n.start, tz) + "–" : "until "}${hm(n.end, tz)} ${tzAbbr(n.end, tz)}` : "";
     const sub = [n.reason && n.reason[0].toUpperCase() + n.reason.slice(1), n.detail, n.prob && `extension probability ${n.prob.toLowerCase()}`].filter(Boolean).join(" · ");

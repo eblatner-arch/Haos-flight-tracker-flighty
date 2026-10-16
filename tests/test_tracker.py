@@ -541,7 +541,7 @@ class Followed(unittest.TestCase):
         imp = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["hit"], i["airborne"]) for i in imp], [(False, True)])   # already flying: not held
         g = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO"}, items) if n["kind"] == "gs"][0]
-        self.assertIn("doesn't hold departures from EWR", alerts.nas_text(g, None))   # leaving a GS airport is fine
+        self.assertNotIn("held", alerts.nas_text(g, None))   # no "not held" notes
         self.assertFalse(any(p.get("nas") and "delay" in p["text"].lower()
                              for p in alerts.problems({"dep": "EWR", "arr": "MCO", "flight": None}, {}, items)))
         self.assertIn("already airborne", alerts.nas_text([n for n in alerts.nas_for(
