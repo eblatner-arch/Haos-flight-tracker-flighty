@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.2.0
+- ADS-B on your inbound: while it's taxiing or flying (or due to be), its transponder is read every 3 min (Settings → Tracking → Tail and position sources; 0 turns it off). A different tail than the one we have triggers a full check right away, and the airplane actually flying your inbound now wins over Flightradar24 and AeroAPI
+- Lookup log shows what each tail source said on every check, even when nothing changed: Flightradar24 (tail, "no tail listed yet" or "not listed") and adsb.lol (your inbound, earlier legs, your own flight near departure). adsb.lol and Flightradar24 have their own tags
+- Settings and Notifications are grouped into collapsible sections (they remember open/closed); the Notifications groups show how many alerts are on
+
 ## 3.1.0
 - Tail swaps without a new inbound flight number: Flightradar24's schedule page for your flight number (it lists the airline's tail assignment for upcoming flights) is checked every 15 min from the watch window until pushback (Settings → Tracking; 0 turns it off). Calendar and Manual flights only
 - It also runs right away when FlightAware shows a different aircraft type (e.g. 739 → B39M), a different inbound, or a different airplane flying into your inbound

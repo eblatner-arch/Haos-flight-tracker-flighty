@@ -58,6 +58,7 @@ DEFAULTS = {
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
     "fr24_minutes": 15,
+    "adsb_inbound_minutes": 3,
     "nas_minutes": 5,
     "live_positions": True,
     "gemini_api_key": "",
@@ -133,14 +134,15 @@ def load_state():
 # Settings that live in the app (Settings page) rather than the add-on configuration.
 # key: (kind, min, max, label, help)
 APP_SETTINGS = {
-    "watch_hours": ("int", 1, 48, "Start watching", "Hours before departure. Nothing runs for a flight before this; then the first look is AeroAPI, then page checks."),
-    "poll_far_minutes": ("int", 5, 120, "Check every (more than 3 h out)", "Minutes between page checks."),
-    "poll_near_minutes": ("int", 2, 60, "Check every (within 3 h)", "Minutes between page checks."),
-    "poll_fast_minutes": ("int", 1, 30, "Check every (last 45 min, taxi out, landing, taxi in)", "Minutes between page checks."),
-    "poll_air_minutes": ("int", 2, 60, "Check every (in the air)", "Minutes between page checks after takeoff, until 20 min before landing. Tracking stops at the gate."),
-    "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check every", "Minutes between Flightradar24 checks for the airline's tail assignment, from the watch window until pushback. Also runs right away when FlightAware shows a different aircraft type or a different airplane ahead of yours. 0 turns it off."),
-    "nas_minutes": ("int", 2, 60, "FAA NAS status every", "Minutes between NAS status checks."),
-    "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne."),
+    "watch_hours": ("int", 1, 48, "Start watching", "Hours before departure. Nothing runs for a flight before this; then the first look is AeroAPI, then page checks.", "Watch window"),
+    "poll_far_minutes": ("int", 5, 120, "More than 3 h out", "Minutes between FlightAware page checks.", "FlightAware page checks"),
+    "poll_near_minutes": ("int", 2, 60, "Within 3 h", "Minutes between FlightAware page checks.", "FlightAware page checks"),
+    "poll_fast_minutes": ("int", 1, 30, "Last 45 min, taxi, landing", "Minutes between page checks around departure, in the last 20 min before landing and taxiing in.", "FlightAware page checks"),
+    "poll_air_minutes": ("int", 2, 60, "In the air", "Minutes between page checks after takeoff. Tracking stops at the gate.", "FlightAware page checks"),
+    "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check", "Minutes between Flightradar24 checks for the airline's tail assignment, from the watch window until pushback. Also runs right away when FlightAware shows a different aircraft type or a different airplane ahead of yours. 0 turns it off.", "Tail and position sources"),
+    "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
+    "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
+    "nas_minutes": ("int", 2, 60, "FAA NAS status", "Minutes between NAS status checks.", "FAA NAS status"),
 }
 
 
@@ -1003,6 +1005,8 @@ def walk_chain(browser, L, now):
             except Exception as e:
                 log.info("%s chain ADS-B: %s", L.get("display"), e)
                 live = None
+            saw(L, f"adsb.lol · {'inbound ' if i == 0 else ''}{name} {route}", (live or {}).get("tail"),
+                None if (live or {}).get("tail") else "not seen on ADS-B")
             if live and live.get("tail"):
                 found = {"tail": live["tail"].upper(), "kind": "chain", "at": now,
                          "root": (L.get("flight") or {}).get("inbound_fa_id"),
@@ -1074,6 +1078,9 @@ def fr24_check(browser, L, f, now):
     elif res.get("tail"):
         res["tail_at"] = old.get("tail_at") if old.get("tail") == res["tail"] else now
     L["fr24"] = res
+    saw(L, "Flightradar24" + (f" ({why})" if why else ""), res.get("tail") if res.get("ok") and res.get("matched") else None,
+        None if res.get("ok") and res.get("matched") and res.get("tail") else
+        "error" if not res.get("ok") else "no tail listed yet" if res.get("matched") else "this departure isn't listed")
     return res
 
 
@@ -1094,9 +1101,9 @@ def own_inbound(L, f):
 
 
 def resolve_tail(browser, L, f, now):
-    """Which airplane is flying this leg. Trust order: your own flight's transponder; then the
-    newest of Flightradar24's airline assignment, your own earlier leg (turns) and AeroAPI; the
-    airplane seen on ADS-B flying in when Flightradar24 has no tail yet; FlightAware's page last."""
+    """Which airplane is flying this leg. Trust order: your own flight's transponder; the airplane
+    seen on ADS-B flying in (your inbound or an earlier leg of its day); then the newest of
+    Flightradar24's airline assignment, your own earlier leg on a turn and AeroAPI; FlightAware last."""
     info = dict(L.get("tail_info") or {})
     page_tail = f.get("tail") if not f.get("tail_source") else None
     if info.get("kind") == "chain" and not fa.same_flight(info.get("root"), f.get("inbound_fa_id")):
@@ -1108,6 +1115,8 @@ def resolve_tail(browser, L, f, now):
     if L.get("ident") and (ph == "taxi_out" or (ph == "scheduled" and out_t - now < 90 * 60)):
         try:
             live = sources.fetch_live(L["ident"])
+            saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", (live or {}).get("tail"),
+                None if (live or {}).get("tail") else "not transmitting yet")
             if live and live.get("tail"):
                 info = {"tail": live["tail"].upper(), "kind": "own", "at": now,
                         "source": "your flight's transponder"}
@@ -1116,6 +1125,9 @@ def resolve_tail(browser, L, f, now):
     # Free signals first: the airplane flying in on ADS-B, Flightradar24's airline assignment,
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
     chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") != "own" else None
+    ai = L.get("adsb_inbound") or {}
+    if not chain and ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
+        chain = {"tail": ai["tail"], "kind": "chain", "at": ai["at"], "root": ai["root"], "source": ai["source"]}
     fr = fr24_check(browser, L, f, now) or {}
     mine = own_inbound(L, f) if info.get("kind") != "own" else None
     mi = (mine or {}).get("tail_info") or {}
@@ -1131,10 +1143,10 @@ def resolve_tail(browser, L, f, now):
         a = L.get("aero") or {}
         aero_tail = a.get("tail")
     if info.get("kind") != "own":
-        # Flightradar24's airline assignment (when it lists a tail) and AeroAPI: the newest wins.
-        # Without a tail on Flightradar24, the airplane seen flying in on ADS-B beats an older
-        # AeroAPI answer: that's how a swap without a new inbound number shows up.
-        if chain and not fr.get("tail"):
+        # The airplane actually flying your inbound (ADS-B) is the strongest evidence short of your
+        # own transponder: that's how a swap without a new inbound number shows up. Otherwise the
+        # newest of Flightradar24's airline assignment, your earlier leg on a turn, and AeroAPI.
+        if chain:
             info = chain
         else:
             cands = []
@@ -1195,8 +1207,18 @@ def snapshot(L):
     return snap
 
 
-def log_lookup(L, prev, now, sources):
+def saw(L, src, tail, note=None):
+    """Record what a tail source said on this check, for the lookup log (even when nothing changed)."""
+    L.setdefault("_seen", []).append({"src": src, "tail": (tail or "").upper() or None, "note": note})
+
+
+def _seen_key(seen):
+    return [(x.get("src"), x.get("tail"), x.get("note")) for x in seen or []]
+
+
+def log_lookup(L, prev, now, sources, seen=None):
     """Append what this check changed (or count it as a quiet check)."""
+    seen = seen if seen is not None else L.pop("_seen", None) or []
     cur = snapshot(L)
     changes = [{"field": k, "from": prev.get(k), "to": v} for k, v in cur.items() if v != prev.get(k) and v is not None]
     if L.get("tail_source") is None and (L.get("flight") or {}).get("tail_source"):
@@ -1204,12 +1226,13 @@ def log_lookup(L, prev, now, sources):
             if c["field"] == "Tail":
                 c["via"] = L["flight"]["tail_source"]
     hist = L.setdefault("history", [])
-    if not changes and hist and not hist[-1]["changes"] and hist[-1]["sources"] == sources:
+    if not changes and hist and not hist[-1]["changes"] and hist[-1]["sources"] == sources \
+            and _seen_key(hist[-1].get("seen")) == _seen_key(seen):
         hist[-1]["quiet"] = hist[-1].get("quiet", 1) + 1
         hist[-1]["last"] = now
     else:
         hist.append({"at": now, "sources": sources, "changes": changes, "error": L.get("error"),
-                     "note": L.get("note")})
+                     "note": L.get("note"), "seen": seen})
     L["history"] = hist[-150:]
 
 
@@ -1231,6 +1254,7 @@ def update_leg(browser, lid):
     prev_snap = snapshot(L)
     prev_aero_at = (L.get("aero") or {}).get("at")
     prev_tail_at = (L.get("tail_info") or {}).get("at")
+    L["_seen"] = []
     sources = []
     first = None
     try:
@@ -1368,8 +1392,10 @@ def update_leg(browser, lid):
         if a_at and a_at != prev_aero_at and "AeroAPI" not in sources:
             sources.append(f"AeroAPI ({(L.get('aero') or {}).get('reason')})")
         ti = L.get("tail_info") or {}
-        if ti.get("at") == now and ti.get("kind") in ("own", "chain"):
-            sources.append(f"ADS-B ({ti.get('source')})")
+        for x in L.get("_seen") or []:
+            name = "Flightradar24" if x["src"].startswith("Flightradar24") else "adsb.lol"
+            if name not in sources:
+                sources.append(name)
         if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
                                     and d["at"] >= now for d in STATE["debug"][-6:]):
             sources.append("FlightAware page (inbound)")
@@ -1389,6 +1415,59 @@ def update_leg(browser, lid):
     # inbound aircraft) instead of waiting for the next cycle, so the inbound shows up right away.
     if first and watched(L, time.time()) and not finished(L, time.time()):
         update_leg(browser, lid)
+
+
+def inbound_adsb(now):
+    """Between your flight's own checks: while your inbound is taxiing or flying, read its
+    transponder every adsb_inbound_minutes. A different tail than the one we have (a swap that
+    kept the same flight number) triggers a full check of your flight right away. Every read
+    goes in the flight's lookup log, with the tail it saw."""
+    every = float(CFG.get("adsb_inbound_minutes") or 0)
+    if not every:
+        return
+    with LOCK:
+        legs = [L for L in STATE["legs"].values() if L.get("inbound") and rules_mod.kind_of(L) != "friends"]
+    for L in legs:
+        f = L.get("flight") or {}
+        inb = L["inbound"]
+        iph = fa.phase(inb, now)
+        t = inb.get("times") or {}
+        # FlightAware's snapshot of the inbound can be a few minutes old: also count it as moving
+        # from its expected pushback until its expected arrival
+        out_e, in_e = (fa.best_time(t, "out") if t else None), (fa.best_time(t, "in") if t else None)
+        moving = iph in ("taxi_out", "airborne", "landed") or (
+            iph == "scheduled" and out_e and in_e and out_e - 5 * 60 <= now <= in_e + 20 * 60)
+        if fa.phase(f, now) != "scheduled" or not moving or not inb.get("ident") \
+                or now - (L.get("adsb_at") or 0) < every * 60 or not watched(L, now):
+            continue
+        try:
+            live = sources.fetch_live(inb["ident"])
+            err = None
+        except Exception as e:
+            log.info("%s inbound ADS-B: %s", L.get("display"), e)
+            live, err = None, str(e)[:120]
+        route = f"{(inb.get('origin') or {}).get('iata') or '?'}→{(inb.get('destination') or {}).get('iata') or '?'}"
+        with LOCK:
+            cur = STATE["legs"].get(L["id"])
+            if cur is None:
+                continue
+            cur["adsb_at"] = now
+            if live:
+                cur["inbound_live"] = live
+                if live.get("tail"):
+                    cur["adsb_inbound"] = {"tail": live["tail"].upper(), "at": now, "root": f.get("inbound_fa_id"),
+                                           "source": f"inbound {inb.get('display_ident') or inb['ident']} {route} in flight"}
+            seen = (live or {}).get("tail")
+            have = ((cur.get("flight") or {}).get("tail") or "").upper()
+            log_lookup(cur, snapshot(cur), now, ["adsb.lol"],
+                       seen=[{"src": f"adsb.lol · inbound {inb.get('display_ident') or inb['ident']} {route}",
+                              "tail": (seen or "").upper() or None,
+                              "note": None if seen else ("error" if err else "not seen on ADS-B")}])
+            if seen and have and seen.upper() != have:
+                log.info("%s: inbound %s is %s on ADS-B, we had %s; checking now", L.get("display"), inb["ident"], seen, have)
+                REFRESH_Q.put(L["id"])
+                WAKE.set()
+        bump()
 
 
 def archive_finished(now):
@@ -1498,6 +1577,7 @@ def worker():
                 if when <= time.time():
                     STATE["worker"]["busy"] = lid
                     update_leg(browser, lid)
+            inbound_adsb(time.time())
             archive_finished(time.time())
             STATE["worker"].update(busy=None, last_cycle=time.time(), error=None)
             if time.time() - last_pub > 60 or due:
@@ -1720,7 +1800,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/settings":
             with LOCK:
                 return self._send(200, {"settings": [{"key": k, "kind": v[0], "min": v[1], "max": v[2], "label": v[3],
-                                                      "help": v[4], "value": STATE["app_settings"].get(k)}
+                                                      "help": v[4], "group": v[5], "value": STATE["app_settings"].get(k)}
                                                      for k, v in APP_SETTINGS.items()]})
         if path == "/api/history":
             return self._send(200, api_history(self._query()))

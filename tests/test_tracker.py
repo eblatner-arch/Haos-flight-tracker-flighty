@@ -299,6 +299,38 @@ class Fr24Swap(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class InboundAdsb(unittest.TestCase):
+    def test_swap_seen_on_inbound_transponder(self):
+        import server
+        out_s = T0 + 2 * H
+        f = {"times": {k: {"scheduled": out_s if k == "out" else None, "estimated": None, "actual": None}
+                       for k in ("out", "off", "on", "in")}, "inbound_fa_id": "UAL2291-1", "tail": "N38467"}
+        inb = {"ident": "UAL2291", "display_ident": "UA2291", "origin": {"iata": "PHX"}, "destination": {"iata": "EWR"},
+               "times": {"out": {"scheduled": T0 - H, "estimated": None, "actual": T0 - H}, "off": {"scheduled": None, "estimated": None, "actual": T0 - 0.8 * H},
+                         "on": {"scheduled": None, "estimated": None, "actual": None}, "in": {"scheduled": T0 + H, "estimated": None, "actual": None}}}
+        L = {"id": "a", "display": "UA 2785", "ident": "UAL2785", "dep": "EWR", "arr": "MIA", "sched_out": out_s,
+             "sched_in": out_s + 3 * H, "flight": f, "inbound": inb, "tail_info": {"tail": "N38467", "kind": "aeroapi"}}
+        server.STATE["legs"] = {"a": L}
+        server.CFG["adsb_inbound_minutes"] = 3
+        while not server.REFRESH_Q.empty():
+            server.REFRESH_Q.get_nowait()
+        real = server.sources.fetch_live
+        server.sources.fetch_live = lambda ident: {"lat": 1, "lon": 2, "tail": "N37560"}
+        try:
+            server.inbound_adsb(T0)
+            self.assertEqual(server.REFRESH_Q.get_nowait(), "a")                  # different tail: full check now
+            h = L["history"][-1]
+            self.assertEqual((h["sources"], h["seen"][0]["tail"]), (["adsb.lol"], "N37560"))
+            server.inbound_adsb(T0 + 60)                                          # inside the interval: nothing
+            self.assertEqual(len(L["history"]), 1)
+            server.inbound_adsb(T0 + 200)                                         # same answer: one log line, counted
+            self.assertEqual((len(L["history"]), L["history"][-1]["quiet"]), (1, 2))
+            server.resolve_tail(None, L, f, T0 + 210)                             # the full check takes it
+            self.assertEqual((f["tail"], L["tail_info"]["kind"]), ("N37560", "chain"))
+        finally:
+            server.sources.fetch_live = real
+
+
 class Startup(unittest.TestCase):
     def test_init_rules_with_old_saved_rules(self):
         """Rules saved by older versions (with settings since removed) must still load."""

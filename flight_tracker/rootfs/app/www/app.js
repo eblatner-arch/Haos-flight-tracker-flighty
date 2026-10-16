@@ -602,6 +602,18 @@
     </div>`).join("")}</div>`;
   }
 
+  // Collapsible sections that remember whether you left them open (per browser).
+  const openKey = (id) => `ft-open-${id}`;
+  function isOpen(id, dflt) { try { const v = localStorage.getItem(openKey(id)); return v === null ? dflt : v === "1"; } catch { return dflt; } }
+  function fold(id, title, body, dflt = false, extra = "") {
+    return `<details class="fold" data-fold="${esc(id)}" ${isOpen(id, dflt) ? "open" : ""}><summary><span>${esc(title)}</span>${extra}<i></i></summary>${body}</details>`;
+  }
+  function wireFolds() {
+    $app.querySelectorAll("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => {
+      try { localStorage.setItem(openKey(d.dataset.fold), d.open ? "1" : "0"); } catch {}
+    }));
+  }
+
   // ---------- history ----------
   const nm = (x) => x == null ? "—" : Math.round(x).toLocaleString();
   const mins = (m) => m == null ? "—" : `${m > 0 ? "+" : ""}${Math.round(m)}`;
@@ -914,7 +926,8 @@
       ${(leg.alerts || []).length ? `<h2 class="section">Alerts for this flight</h2>${alertsCard(leg.alerts)}` : ""}
       ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
           <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
-            ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B/.test(x) ? "adsb" : ""}">${esc(x)}</span>`).join("")}</div>
+            ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B|adsb/.test(x) ? "adsb" : /Flightradar24/.test(x) ? "fr24" : ""}">${esc(x)}</span>`).join("")}</div>
+          ${(h.seen || []).length ? `<div class="hist-seen">${h.seen.map((x) => `<div><span class="faint">${esc(x.src)}</span> ${x.tail ? `<b>${esc(x.tail)}</b>` : `<span class="faint">${esc(x.note || "no tail")}</span>`}</div>`).join("")}</div>` : ""}
           ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
             : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
           ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
@@ -1032,8 +1045,10 @@
           Changes save as you make them. Tracking itself always runs; this only decides what pushes.</p>
         <div id="n-msg" class="small" style="margin-top:8px"></div>
       </div>
-      ${groups.map((g) => `<h2 class="section">${esc(g.name)}</h2><div class="card nlist">${g.rows.map(rowHtml).join("")}</div>`).join("")}
+      ${groups.map((g) => fold(`notify-${g.name}`, g.name, `<div class="card nlist">${g.rows.map(rowHtml).join("")}</div>`, false,
+        `<span class="fold-n">${g.rows.filter((r) => r.rule.on).length}/${g.rows.length} on</span>`)).join("")}
       <p class="small faint" style="margin:16px 4px">Gates assigned while a rule's window is closed are pushed once when it opens, with the gate at that moment. Ground stops push whatever their scope and say whether they include your departure or your inbound. Weather only applies to Calendar and Manual flights.</p>`;
+    wireFolds();
     const msg = document.getElementById("n-msg");
     let timer = null;
     const pending = {};
@@ -1084,7 +1099,8 @@
     $app.innerHTML = `
       <a class="back" href="#/">‹ Flights</a>
       <h2 class="section"><span>Tracking</span><span id="s-msg" class="small"></span></h2>
-      <div class="card nlist">${st.settings.map(setRow).join("")}</div>
+      ${[...new Set(st.settings.map((x) => x.group || "Tracking"))].map((g, i) =>
+        fold(`set-${g}`, g, `<div class="card nlist">${st.settings.filter((x) => (x.group || "Tracking") === g).map(setRow).join("")}</div>`, i === 0)).join("")}
       <p class="small faint" style="margin:-4px 4px 14px">Alerts are on the bell page. Schedule file, notify service and API keys are in the add-on's Configuration tab in Home Assistant.</p>
       <div class="card">
         <h3 style="margin:0 0 4px">Notifications</h3>
@@ -1092,8 +1108,7 @@
         <button class="btn primary" id="t-notify">Send test notification</button>
         <div id="t-msg" class="small" style="margin-top:8px"></div>
       </div>
-      <h2 class="section">Setup check</h2>
-      <div class="card"><div class="kv">
+      ${fold("tools-setup", "Setup check", `<div class="card"><div class="kv">
         <div class="k">Schedule file</div><div>${sch.exists ? "✓ " : '<span class="err">missing </span>'}<span class="mono small">${esc(sch.path)}</span></div>
         <div class="k">Read</div><div>${sch.checked ? ago(sch.checked) : "not yet"}${sch.events != null ? ` · ${sch.events} events, ${sch.count} flights` : ""}</div>
         ${sch.error ? `<div class="k">Error</div><div class="err">${esc(sch.error)}</div>` : ""}
@@ -1109,20 +1124,20 @@
         <div class="k">Tapping a push opens</div><div class="mono small">${esc(c.ingress)}</div>
         <div class="k">Browser viewer</div><div>http://&lt;your-ha-ip&gt;:${c.viewer_port}/vnc.html <span class="faint">(needs viewer_password)</span></div>
         <div class="k">Version</div><div>${esc(d.version)}</div>
-      </div></div>
-      <h2 class="section">Flights found in your schedule</h2>
-      <div class="card">${(sch.legs || []).length ? sch.legs.map((l) => `<div class="sched-row">
+      </div></div>`, true)}
+      ${fold("tools-sched", "Flights found in your schedule", `<div class="card">${(sch.legs || []).length ? sch.legs.map((l) => `<div class="sched-row">
           <span class="mono small">${fmt(l.sched_out, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</span>
           <span><b>${esc(l.ident || "—")}</b> ${esc(l.dep)}→${esc(l.arr)}${l.dh ? " DH" : ""} <span class="faint">${l.finished ? "done" : l.watching ? "watching" : ""}</span><br><span class="small faint">${esc(l.summary)}</span></span></div>`).join("")
         : '<div class="small muted">None in the next three weeks.</div>'}
         ${(sch.unmatched || []).length ? `<div class="small muted" style="margin-top:12px">Events not recognised as flights (fine if they're hotels, reserve, etc.):</div><div class="small faint mono">${sch.unmatched.map(esc).join("<br>")}</div>` : ""}
-      </div>
-      ${d.aeroapi.enabled ? `<h2 class="section">AeroAPI calls</h2><div class="card">${d.aeroapi.calls.length ? d.aeroapi.calls.map((x) => `<div class="fetch ${x.ok === false ? "bad" : ""}"><div class="fx">
+      </div>`)}
+      ${d.aeroapi.enabled ? fold("tools-aero", "AeroAPI calls", `<div class="card">${d.aeroapi.calls.length ? d.aeroapi.calls.map((x) => `<div class="fetch ${x.ok === false ? "bad" : ""}"><div class="fx">
           <div><b>${esc(x.leg || "")}</b> · ${esc(x.reason)} <span class="faint">${fmt(x.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</span></div>
           <div class="small">${x.ok === false ? `<span class="err">${esc(x.error)}</span>` : x.found ? `tail ${esc(x.tail || "not assigned yet")}${x.inbound ? " · inbound linked" : ""}` : "flight not found in AeroAPI"}${x.billed ? "" : ' <span class="faint">(not billed)</span>'}</div>
-        </div></div>`).join("") : '<div class="small muted">No calls yet. The first one happens when a flight enters the watch window.</div>'}</div>` : ""}
-      <h2 class="section"><span>Page loads &amp; screenshots</span><button class="btn small" id="t-reload">Reload</button></h2>
-      <div class="card">${d.fetches.length ? d.fetches.map(fetchRow).join("") : '<div class="small muted">No pages loaded yet. Flights are checked from ' + STATE.settings.watch_hours + ' h before departure; add a flight to test now.</div>'}</div>`;
+        </div></div>`).join("") : '<div class="small muted">No calls yet. The first one happens when a flight enters the watch window.</div>'}</div>`) : ""}
+      ${fold("tools-pages", "Page loads & screenshots", `<div style="text-align:right;margin:-4px 0 8px"><button class="btn small" id="t-reload">Reload</button></div>
+      <div class="card">${d.fetches.length ? d.fetches.map(fetchRow).join("") : '<div class="small muted">No pages loaded yet. Flights are checked from ' + STATE.settings.watch_hours + ' h before departure; add a flight to test now.</div>'}</div>`)}`;
+    wireFolds();
     document.getElementById("t-notify").onclick = async (e) => {
       const msg = document.getElementById("t-msg");
       e.target.disabled = true; msg.className = "small muted"; msg.textContent = "Sending…";
