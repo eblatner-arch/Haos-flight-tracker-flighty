@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.5.5
+- Drive pill updates on every page (it stayed amber on Settings after the backup had gone up)
+
 ## 3.5.4
 - Importing a tracks .zip that got cut off in the download (iOS Safari does this) keeps every complete track in it and says the rest is missing, instead of failing with "File is not a zip file"
 

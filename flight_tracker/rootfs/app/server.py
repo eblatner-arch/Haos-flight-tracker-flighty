@@ -1951,6 +1951,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200 if d else 404, d or {"error": "not found"})
         if path == "/api/backup":
             return self._send(200, gdrive.status())
+        if path == "/api/backup/brief":
+            return self._send(200, backup_brief())
         if path == "/api/backup/download":
             blob = history.make_backup(backup_extra())
             self.send_response(200)

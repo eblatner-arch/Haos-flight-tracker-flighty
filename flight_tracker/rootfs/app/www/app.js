@@ -1253,6 +1253,12 @@
     $updated.textContent = STATE.worker && STATE.worker.busy ? "updating…" : "";
     setDrive(STATE.backup);
   }
+  // The pill updates on every page (Settings and forms don't redraw on live events).
+  let driveT = null;
+  function driveSoon() {
+    if (driveT || document.hidden) return;
+    driveT = setTimeout(async () => { driveT = null; try { setDrive(await api("api/backup/brief")); } catch {} }, 300);
+  }
   // Drive backup pill next to Live: green synced, amber changes waiting, blue syncing, red problem.
   const $drive = document.getElementById("drive");
   function setDrive(b) {
@@ -1345,7 +1351,7 @@
     try {
       es = new EventSource("api/events");
       es.onopen = () => { lastSeen = Date.now(); setLive(true); };
-      es.onmessage = (e) => { lastSeen = Date.now(); setLive(true, e.data); liveRefresh(); };
+      es.onmessage = (e) => { lastSeen = Date.now(); setLive(true, e.data); liveRefresh(); driveSoon(); };
       es.addEventListener("ping", () => { lastSeen = Date.now(); setLive(true); });
       es.onerror = () => { setLive(false); drop(); retry = setTimeout(() => connect(), 2000); };
     } catch { es = null; }
@@ -1360,6 +1366,7 @@
   connect();
   // Countdowns tick, and a fallback in case the stream is blocked somewhere.
   setInterval(liveRefresh, 30000);
+  setInterval(driveSoon, 20000);
   setInterval(() => { if (!document.hidden && es && Date.now() - lastSeen > 35000) { setLive(false); connect(true); } }, 5000);
   document.addEventListener("visibilitychange", wake);
   window.addEventListener("pageshow", (e) => { if (e.persisted) wake(); });
