@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.6.1
+- Search: From, To, Either airport, Route and Tail are typed boxes with suggestions (a partial code matches what starts with it; routes as EWR-FLL, EWR FLL or EWRFLL; tails with or without the N). Month is Jan–Dec, combined with Year when you pick one
+
 ## 3.6.0
 - History → Search: type a flight number, airport, route (EWR-FLL), tail, aircraft, month or day, or `>30` / `<-5` for minutes late/early; tap Late 15+/30+/60+, On time, Early, Diverted, Cancelled, No track; More filters for year, month, from, to, either airport, route, aircraft, tail, departure time, day of week, a delay range, and sort (newest, oldest, latest, earliest, longest). Shows the count, on-time %, average delay and distance of what matches
 - Every stat is a link: tap a route, airport, aircraft, tail, time-of-day bar, On time, Early, 30+ late or diverted and see those flights

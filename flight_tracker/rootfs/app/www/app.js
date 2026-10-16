@@ -817,17 +817,19 @@
   function applyFind(all, P) {
     const toks = (P.get("q") || "").toLowerCase().split(/\s+/).filter(Boolean);
     const sts = (P.get("st") || "").split(",").filter(Boolean);
-    const [rd, ra] = (P.get("route") || "").toUpperCase().split("-");
+    const [rd, ra] = (P.get("route") || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim().replace(/^([A-Z0-9]{3})([A-Z0-9]{3})$/, "$1 $2").split(" ");
     const g = (k) => (P.get(k) || "").trim();
     const minD = g("min") === "" ? null : parseFloat(g("min")), maxD = g("max") === "" ? null : parseFloat(g("max"));
     const out = all.filter((f) => {
       if (g("year") && !(f.date || "").startsWith(g("year"))) return false;
-      if (g("mo") && !(f.date || "").startsWith(g("mo"))) return false;
-      if (rd && (f.dep !== rd || (ra && f.arr !== ra))) return false;
-      if (g("dep") && f.dep !== g("dep").toUpperCase()) return false;
-      if (g("arr") && f.arr !== g("arr").toUpperCase() && f.diverted_to !== g("arr").toUpperCase()) return false;
-      if (g("ap") && ![f.dep, f.arr, f.diverted_to].includes(g("ap").toUpperCase())) return false;
-      if (g("tail") && (f.tail || "").toUpperCase() !== g("tail").toUpperCase()) return false;
+      if (g("mo") && parseInt((f.date || "").slice(5, 7), 10) !== parseInt(g("mo").slice(-2), 10)) return false;
+      // typed boxes: a partly typed airport or tail matches what starts with it
+      const ap = (x, v) => !!x && x.startsWith(v.toUpperCase());
+      if (rd && (!ap(f.dep, rd) || (ra && !ap(f.diverted_to || f.arr, ra) && !ap(f.arr, ra)))) return false;
+      if (g("dep") && !ap(f.dep, g("dep"))) return false;
+      if (g("arr") && !ap(f.arr, g("arr")) && !ap(f.diverted_to, g("arr"))) return false;
+      if (g("ap") && ![f.dep, f.arr, f.diverted_to].some((x) => ap(x, g("ap")))) return false;
+      if (g("tail") && !(f.tail || "").toUpperCase().includes(g("tail").toUpperCase().replace(/^(?!N)(?=\d)/, "N"))) return false;
       if (g("ac") && (f.aircraft || f.type || "") !== g("ac")) return false;
       if (g("hr") && localParts(f).hr !== g("hr")) return false;
       if (g("dow") && String(localParts(f).dw) !== g("dow")) return false;
@@ -855,6 +857,12 @@
     const all = FIND_CACHE.d.flights;
     const uniq = (fn) => [...new Set(all.map(fn).filter(Boolean))].sort();
     const opt = (k, vals, label, fmtOpt) => `<label class="ff"><span>${label}</span><select data-k="${k}"><option value="">Any</option>${vals.map((v) => `<option value="${esc(v)}" ${P.get(k) === String(v) ? "selected" : ""}>${esc(fmtOpt ? fmtOpt(v) : v)}</option>`).join("")}</select></label>`;
+    // typed boxes, with the values you've flown as suggestions
+    const txt = (k, label, ph, dl) => `<label class="ff"><span>${label}</span><input data-k="${k}" data-typed="1" list="${dl}" placeholder="${ph}" value="${esc(P.get(k) || "")}" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>`;
+    const apts = [...new Set(all.flatMap((f) => [f.dep, f.arr, f.diverted_to]).filter(Boolean))].sort();
+    const lists = `<datalist id="dl-ap">${apts.map((v) => `<option value="${v}">`).join("")}</datalist>
+      <datalist id="dl-rt">${uniq((f) => `${f.dep}-${f.arr}`).map((v) => `<option value="${v}">`).join("")}</datalist>
+      <datalist id="dl-tail">${uniq((f) => f.tail).map((v) => `<option value="${v}">`).join("")}</datalist>`;
     const sts = (P.get("st") || "").split(",").filter(Boolean);
     const nFilters = [...P.keys()].filter((k) => !["q", "st", "sort"].includes(k)).length;
     let h = histTabs("find", P.get("year") || "") + `
@@ -862,13 +870,13 @@
       <div class="chips-row wrap">${ST_CHIPS.map(([k, l]) => `<button class="ychip ${sts.includes(k) ? "on" : ""}" data-st="${k}">${l}</button>`).join("")}</div>
       ${fold("find-more", `More filters${nFilters ? ` · ${nFilters}` : ""}`, `<div class="card ffgrid">
         ${opt("year", uniq((f) => (f.date || "").slice(0, 4)).reverse(), "Year")}
-        ${opt("mo", uniq((f) => (f.date || "").slice(0, 7)).reverse(), "Month", (v) => fmt(Date.parse(v + "-15") / 1000, undefined, { month: "short", year: "numeric" }))}
-        ${opt("dep", uniq((f) => f.dep), "From")}
-        ${opt("arr", uniq((f) => f.diverted_to || f.arr), "To")}
-        ${opt("ap", uniq((f) => f.dep).concat(uniq((f) => f.arr)).filter((v, i, a) => a.indexOf(v) === i).sort(), "Either airport")}
-        ${opt("route", uniq((f) => `${f.dep}-${f.arr}`), "Route")}
+        ${opt("mo", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "Month", (v) => ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][v - 1])}
+        ${txt("dep", "From", "EWR", "dl-ap")}
+        ${txt("arr", "To", "FLL", "dl-ap")}
+        ${txt("ap", "Either airport", "MCO", "dl-ap")}
+        ${txt("route", "Route", "EWR-FLL", "dl-rt")}
         ${opt("ac", uniq((f) => f.aircraft || f.type), "Aircraft")}
-        ${opt("tail", uniq((f) => f.tail), "Tail")}
+        ${txt("tail", "Tail", "N37413", "dl-tail")}
         ${opt("hr", HOURS, "Departs (local)")}
         ${opt("dow", [0, 1, 2, 3, 4, 5, 6], "Day", (v) => DOW[v])}
         <label class="ff"><span>Late at least</span><input data-k="min" type="number" inputmode="numeric" placeholder="min" value="${esc(P.get("min") || "")}"></label>
@@ -877,7 +885,7 @@
           .map(([v, l]) => `<option value="${v}" ${(P.get("sort") || "new") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         ${[...P.keys()].length ? `<a class="btn" href="#/history/find" id="f-clear">Clear all</a>` : ""}
       </div>`, nFilters > 0)}
-      <div id="f-out"></div>`;
+      <div id="f-out"></div>${lists}`;
     $app.innerHTML = h;
     wireFolds();
     const draw = () => {
@@ -915,12 +923,17 @@
       P.set("st", [...cur].join(","));
       commit();
     });
-    $app.querySelectorAll(".ffgrid [data-k]").forEach((el) => el.onchange = () => {
-      P.set(el.dataset.k, el.value);
+    const setK = (el) => {
+      P.set(el.dataset.k, el.dataset.typed ? el.value.trim().toUpperCase() : el.value);
       commit();
       const n = [...P.keys()].filter((k) => !["q", "st", "sort"].includes(k)).length;
       const t = $app.querySelector('[data-fold="find-more"] summary > span');
       if (t) t.textContent = `More filters${n ? ` · ${n}` : ""}`;
+    };
+    let tt = null;
+    $app.querySelectorAll(".ffgrid [data-k]").forEach((el) => {
+      el.onchange = () => setK(el);
+      if (el.dataset.typed || el.type === "number") el.oninput = () => { clearTimeout(tt); tt = setTimeout(() => setK(el), 200); };
     });
   }
 

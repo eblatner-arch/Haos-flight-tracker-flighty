@@ -496,3 +496,5 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .ffgrid .btn { grid-column: 1 / -1; text-align: center; }
 .find-sum { margin: 4px 2px 6px; font-size: 14px; color: var(--muted); }
 .find-sum b { color: var(--text); }
+.ff input[data-typed] { text-transform: uppercase; }
+.ff input[data-typed]::placeholder { text-transform: none; color: var(--faint); }
