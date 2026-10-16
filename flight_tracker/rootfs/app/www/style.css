@@ -380,6 +380,17 @@ a.card.inbound { display: block; }
 .live.on i { background: var(--green); }
 .live.flash i { animation: livepulse .9s ease-out; }
 @keyframes livepulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 70%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+.drive { text-decoration: none; gap: 4px; }
+.drive[hidden] { display: none; }
+.drive svg { width: 13px; height: 13px; fill: currentColor; }
+.drive b { font-weight: 700; }
+.drive.synced { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.drive.waiting { color: var(--amber, #d29922); border-color: color-mix(in srgb, var(--amber, #d29922) 40%, transparent); }
+.drive.syncing { color: var(--accent, #3b82f6); border-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent); }
+.drive.syncing svg { animation: drivepulse 1s ease-in-out infinite alternate; }
+.drive.error { color: var(--red, #e5484d); border-color: color-mix(in srgb, var(--red, #e5484d) 45%, transparent); }
+@keyframes drivepulse { from { opacity: 1; } to { opacity: .35; } }
+@media (max-width: 420px) { .drive b { display: none; } .drive { padding: 3px 6px; } }
 @media (max-width: 420px) { .live { padding: 3px 6px; } .top-right { gap: 6px; } .icon-btn { width: 34px; height: 34px; } }
 
 /* NAS programs, shown at the top like an alert */

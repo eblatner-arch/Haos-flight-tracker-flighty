@@ -1251,6 +1251,20 @@
   async function load() {
     STATE = await api("api/state");
     $updated.textContent = STATE.worker && STATE.worker.busy ? "updating…" : "";
+    setDrive(STATE.backup);
+  }
+  // Drive backup pill next to Live: green synced, amber changes waiting, blue syncing, red problem.
+  const $drive = document.getElementById("drive");
+  function setDrive(b) {
+    if (!$drive) return;
+    const st = (b && b.state) || "off";
+    $drive.hidden = st === "off";
+    $drive.className = "live drive " + st;
+    const when = b && b.last ? `last backup ${ago(b.last)}` : "no backup yet";
+    $drive.title = { synced: `Drive: backed up · ${when}`, waiting: `Drive: changes waiting to upload (within 10 min) · ${when}`,
+                     syncing: "Drive: uploading…", disconnected: "Drive: not connected. Tap to connect in Settings → Backup",
+                     error: `Drive: ${(b && b.error) || "backup failed"} · ${when}` }[st] || "";
+    $drive.querySelector("b").textContent = { syncing: "Syncing", error: "Drive !", disconnected: "Drive off" }[st] || "Drive";
   }
 
   async function render(force) {

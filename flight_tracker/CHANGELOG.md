@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.5.1
+- Drive pill next to Live: green when backed up, amber when changes are waiting (uploads within 10 min), pulsing while uploading, red on a problem. Tap it for Settings → Backup. On narrow phones it's just the cloud icon
+
 ## 3.5.0
 - History → Import also takes the tracks .zip from the flight-track-history Backfill tracks run (the GitHub artifact download works as is). Adds the flown track to each past flight that doesn't have one
 

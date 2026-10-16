@@ -1532,6 +1532,7 @@ def run_backup(force=False):
     if not force and not ((BACKUP["dirty"] and now - BACKUP["tried"] > 600) or now - last > 86400):
         return False
     BACKUP.update(running=True, tried=now)
+    bump()
     try:
         files, _ = backup_files()
         ok = gdrive.upload(files)
@@ -1544,10 +1545,12 @@ def run_backup(force=False):
         return False
     finally:
         BACKUP["running"] = False
+        bump()
 
 
 def mark_dirty():
     BACKUP["dirty"] = True
+    bump()
 
 
 def archive_finished(now):
@@ -1767,7 +1770,21 @@ def api_state():
             "notify_target": CFG.get("notify_service") or "persistent notification",
             "gemini": bool(CFG.get("gemini_api_key")),
         }
+    data["backup"] = backup_brief()
     return data
+
+
+def backup_brief():
+    """The Drive pill in the header: off / synced / waiting / syncing / error."""
+    try:
+        g = gdrive.state()
+    except Exception:
+        g = {}
+    if not gdrive.configured() and not g.get("refresh_token"):
+        return {"state": "off"}
+    st = ("syncing" if BACKUP["running"] else "error" if g.get("last_error") else
+          "disconnected" if not g.get("refresh_token") else "waiting" if BACKUP["dirty"] else "synced")
+    return {"state": st, "last": g.get("last_backup"), "error": g.get("last_error")}
 
 
 def api_debug():
