@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.7.7
+- Double-tap-and-slide zoom no longer blanks the map: the tiles on screen are scaled while you slide (the way a pinch works) and it settles on a whole zoom level when you let go
+
 ## 3.7.6
 - adsb.lol reads retry once with a longer wait when adsb.lol is slow (read timeouts), and the last tail seen is kept meanwhile
 

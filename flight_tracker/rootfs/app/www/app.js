@@ -297,16 +297,22 @@
   }
 
   // Double-tap and hold, then slide down to zoom in or up to zoom out (like Apple and Google Maps);
-  // a plain double tap zooms in one step.
+  // a plain double tap zooms in one step. Driven the way Leaflet drives a pinch: the tiles already on
+  // screen are scaled while your finger moves (nothing reloads mid-gesture, so the map never blanks),
+  // then it settles on a whole zoom level with Leaflet's own zoom animation.
   function oneFingerZoom(map, el) {
     map.doubleClickZoom.disable();
     let last = 0, lastPt = null, zt = null;
+    const target = (z) => {  // keep the spot under your finger where it is
+      const size = map.getSize().divideBy(2);
+      return map.unproject(map.project(zt.ll, z).subtract(zt.pt.subtract(size)), z);
+    };
     el.addEventListener("touchstart", (e) => {
       if (e.touches.length !== 1) { zt = null; return; }
       const t = e.touches[0], now = Date.now();
       if (now - last < 320 && lastPt && Math.hypot(t.clientX - lastPt.x, t.clientY - lastPt.y) < 40) {
-        zt = { y: t.clientY, z: map.getZoom(), moved: false, pt: map.mouseEventToContainerPoint(t) };
-        map.options.zoomSnap = 0;
+        const pt = map.mouseEventToContainerPoint(t);
+        zt = { y: t.clientY, z0: map.getZoom(), z: map.getZoom(), moved: false, pt, ll: map.containerPointToLatLng(pt), started: false };
         if (map.dragging) map.dragging.disable();
         e.preventDefault(); e.stopPropagation();
         last = 0;
@@ -314,24 +320,34 @@
     }, { capture: true, passive: false });
     el.addEventListener("touchmove", (e) => {
       if (!zt) return;
-      const dy = e.touches[0].clientY - zt.y;
-      if (Math.abs(dy) > 4) zt.moved = true;
-      const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zt.z + dy / 90));
-      map.setZoomAround(zt.pt, z, { animate: false });
       e.preventDefault(); e.stopPropagation();
+      const dy = e.touches[0].clientY - zt.y;
+      if (!zt.moved && Math.abs(dy) < 5) return;
+      if (!zt.started) { map._stop(); map._moveStart(true, false); zt.started = true; }
+      zt.moved = true;
+      zt.z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zt.z0 + dy / 90));
+      const c = target(zt.z), z = zt.z;
+      cancelAnimationFrame(zt.raf);
+      zt.raf = requestAnimationFrame(() => map._move(c, z, { pinch: true, round: false }));
     }, { capture: true, passive: false });
     const end = (e) => {
       if (!zt) return;
-      const z = zt.moved ? Math.round(map.getZoom()) : Math.min(map.getMaxZoom(), zt.z + 1);
-      map.options.zoomSnap = 1;
-      map.setZoomAround(zt.pt, z, { animate: true });
+      const g = zt;
       zt = null;
+      cancelAnimationFrame(g.raf);
       if (e.cancelable) e.preventDefault();
       e.stopPropagation();
+      if (!g.moved) { map.setZoomAround(g.pt, Math.min(map.getMaxZoom(), Math.round(g.z0) + 1)); return; }
+      zt = g;
+      const z = map._limitZoom(Math.round(g.z)), c = target(z);
+      zt = null;
+      if (map._zoomAnimated) map._animateZoom(c, z, true, map.options.zoomSnap);
+      else map._resetView(c, z);
     };
     el.addEventListener("touchend", end, { capture: true, passive: false });
     el.addEventListener("touchcancel", end, { capture: true, passive: false });
   }
+
 
   function paintMap(entry, leg, fit) {
     const { layer, interactive } = entry;
