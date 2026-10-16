@@ -55,7 +55,7 @@ push, delay thresholds) were used as the starting values.
   countdown or progress bar.
 - **Inbound aircraft**: where your airplane is coming from, its ETA, and your
   turn time against your Short turn minimum (bell page). It's drawn on the map in purple.
-- **Upcoming** legs for the next three weeks, **Following** (extra flights from
+- **Upcoming** legs from your calendar (60 days ahead by default; Settings → Watch window), **Following** (extra flights from
   the + button), **Recent**.
 - **NAS**: ground stops, delay programs and closures at the airports on the flights you're watching.
 - Tap a flight for full times (gate out, takeoff, landing, gate in), METARs

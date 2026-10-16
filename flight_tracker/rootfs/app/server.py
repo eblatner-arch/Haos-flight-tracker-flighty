@@ -58,6 +58,7 @@ DEFAULTS = {
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
     "fr24_minutes": 15,
+    "schedule_days": 60,
     "adsb_inbound_minutes": 3,
     "nas_minutes": 5,
     "live_positions": True,
@@ -134,6 +135,7 @@ def load_state():
 # Settings that live in the app (Settings page) rather than the add-on configuration.
 # key: (kind, min, max, label, help)
 APP_SETTINGS = {
+    "schedule_days": ("int", 7, 180, "Show schedule ahead", "Days of your crew calendar shown on the Flights screen. Showing them costs nothing: no checks run until the watch window.", "Watch window"),
     "watch_hours": ("int", 1, 48, "Start watching", "Hours before departure. Nothing runs for a flight before this; then the first look is AeroAPI, then page checks.", "Watch window"),
     "poll_far_minutes": ("int", 5, 120, "More than 3 h out", "Minutes between FlightAware page checks.", "FlightAware page checks"),
     "poll_near_minutes": ("int", 2, 60, "Within 3 h", "Minutes between FlightAware page checks.", "FlightAware page checks"),
@@ -388,7 +390,7 @@ def reload_schedule(force=False):
             STATE["schedule"]["checked"] = now
             return
         data, mtime = schedule.load_file(path)
-        events = schedule.parse_ics(data, HOME_TZ, now)
+        events = schedule.parse_ics(data, HOME_TZ, now, int(CFG.get("schedule_days") or 60))
         legs = schedule.legs_from_events(events, CFG)
     except Exception as e:
         STATE["schedule"].update(error=str(e), checked=now)
@@ -455,7 +457,7 @@ def reload_schedule(force=False):
             else:
                 push_event("schedule_change", "Schedule: flight retimed",
                            f"{what} {alerting.hhmm(old_out, tz)} → {when}", "warn", leg=x, tag=f"sched-{x['id']}")
-    log.info("Schedule: %d flights in the next 3 weeks", len(legs))
+    log.info("Schedule: %d flights in the next %s days", len(legs), CFG.get("schedule_days") or 60)
 
 
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
@@ -1912,8 +1914,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/settings":
             body = self._json().get("settings") or {}
             with LOCK:
+                old_days = STATE["app_settings"].get("schedule_days")
                 STATE["app_settings"] = clean_app_settings(body)
                 CFG.update(STATE["app_settings"])
+                if STATE["app_settings"].get("schedule_days") != old_days:
+                    REFRESH_Q.put("schedule")
             save_state()
             WAKE.set()
             bump()

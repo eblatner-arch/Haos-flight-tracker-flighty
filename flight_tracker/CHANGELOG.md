@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.2.2
+- Your calendar is read 60 days ahead instead of 3 weeks (Settings → Watch window → Show schedule ahead, 7–180 days). Showing far-off flights costs nothing: checks still only start at the watch window
+
 ## 3.2.1
 - No changes (test update for diagnosing Home Assistant updates)
 

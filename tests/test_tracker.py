@@ -926,7 +926,7 @@ class ScheduleChange(unittest.TestCase):
                {"oid": "b", "start": now + 20 * H, "end": now + 23 * H, "allday": False, "summary": "2 ORD-EWR",
                 "location": ""}]
         server.schedule.load_file = lambda p: (b"x", now)
-        server.schedule.parse_ics = lambda d, tz, n: [dict(e) for e in evs]
+        server.schedule.parse_ics = lambda d, tz, n, days=60: [dict(e) for e in evs]
         server.STATE["legs"] = {}
         server.STATE["schedule"] = {"mtime": None, "error": None, "count": 0, "checked": None}
         server.CFG["airline_icao"] = "UAL"

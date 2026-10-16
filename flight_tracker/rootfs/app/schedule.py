@@ -58,8 +58,8 @@ def _ts(value, default_tz):
     raise ValueError(f"unsupported date value {value!r}")
 
 
-def parse_ics(ics_bytes, default_tz, now):
-    """Expand the feed into plain events with UTC epoch start/end (next 21 days, last 2)."""
+def parse_ics(ics_bytes, default_tz, now, days=60):
+    """Expand the feed into plain events with UTC epoch start/end (next `days` days, last 2)."""
     import icalendar
     import recurring_ical_events
 
@@ -69,7 +69,7 @@ def parse_ics(ics_bytes, default_tz, now):
         if comp.get("RRULE") is not None or comp.get("RDATE") is not None or comp.get("RECURRENCE-ID") is not None:
             recurring.add(str(comp.get("UID") or ""))
     start = datetime.fromtimestamp(now, timezone.utc) - timedelta(days=2)
-    end = datetime.fromtimestamp(now, timezone.utc) + timedelta(days=21)
+    end = datetime.fromtimestamp(now, timezone.utc) + timedelta(days=days)
     out = []
     for comp in recurring_ical_events.of(cal).between(start, end):
         try:

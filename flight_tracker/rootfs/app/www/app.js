@@ -816,7 +816,7 @@
       if (next.note) h += `<div class="small muted" style="margin:-4px 4px 10px">${esc(next.note)}</div>`;
       if (next.error) h += `<div class="err" style="margin:-4px 4px 10px">${esc(next.error)}</div>`;
     } else {
-      h += `<div class="card empty"><b>No upcoming flights</b>Nothing in the next three weeks${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to add a flight.</div>`;
+      h += `<div class="card empty"><b>No upcoming flights</b>Nothing coming up in your calendar${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to add a flight.</div>`;
     }
     const rest = live.slice(1);
     h += `<h2 class="section"><span>Upcoming</span><a class="small" style="color:var(--accent)" href="#/add">+ Add flight</a></h2>`;
@@ -1086,7 +1086,7 @@
       ? `<div class="nrow"><div class="nrow-head"><label class="switch"><input type="checkbox" data-s="${esc(x.key)}" ${x.value ? "checked" : ""}><span></span></label>
           <div class="nrow-txt"><div class="nrow-label">${esc(x.label)}</div><div class="small faint">${esc(x.help)}</div></div></div></div>`
       : `<div class="nrow"><div class="set-num"><div class="nrow-txt"><div class="nrow-label">${esc(x.label)}</div><div class="small faint">${esc(x.help)}</div></div>
-          <label class="hrs"><input type="number" min="${x.min}" max="${x.max}" inputmode="numeric" data-s="${esc(x.key)}" value="${x.value ?? ""}"> ${x.key === "watch_hours" ? "h" : "min"}</label></div></div>`;
+          <label class="hrs"><input type="number" min="${x.min}" max="${x.max}" inputmode="numeric" data-s="${esc(x.key)}" value="${x.value ?? ""}"> ${x.key === "watch_hours" ? "h" : x.key === "schedule_days" ? "days" : "min"}</label></div></div>`;
     const fetchRow = (x) => `<div class="fetch ${x.error ? "bad" : x.page_data === false ? "warn" : ""}">
       ${x.has_shot ? `<a href="api/shot/${esc(x.shot)}.png?t=${Math.round(x.at)}" target="_blank" rel="noopener"><img loading="lazy" src="api/shot/${esc(x.shot)}.png?t=${Math.round(x.at)}" alt="" onerror="this.parentNode.remove()"></a>` : ""}
       <div class="fx">
@@ -1128,7 +1128,7 @@
       ${fold("tools-sched", "Flights found in your schedule", `<div class="card">${(sch.legs || []).length ? sch.legs.map((l) => `<div class="sched-row">
           <span class="mono small">${fmt(l.sched_out, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</span>
           <span><b>${esc(l.ident || "—")}</b> ${esc(l.dep)}→${esc(l.arr)}${l.dh ? " DH" : ""} <span class="faint">${l.finished ? "done" : l.watching ? "watching" : ""}</span><br><span class="small faint">${esc(l.summary)}</span></span></div>`).join("")
-        : '<div class="small muted">None in the next three weeks.</div>'}
+        : '<div class="small muted">None coming up.</div>'}
         ${(sch.unmatched || []).length ? `<div class="small muted" style="margin-top:12px">Events not recognised as flights (fine if they're hotels, reserve, etc.):</div><div class="small faint mono">${sch.unmatched.map(esc).join("<br>")}</div>` : ""}
       </div>`)}
       ${d.aeroapi.enabled ? fold("tools-aero", "AeroAPI calls", `<div class="card">${d.aeroapi.calls.length ? d.aeroapi.calls.map((x) => `<div class="fetch ${x.ok === false ? "bad" : ""}"><div class="fx">
