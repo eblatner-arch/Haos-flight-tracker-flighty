@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.5.4
+- Importing a tracks .zip that got cut off in the download (iOS Safari does this) keeps every complete track in it and says the rest is missing, instead of failing with "File is not a zip file"
+
 ## 3.5.3
 - Backup card text matches the new timing
 

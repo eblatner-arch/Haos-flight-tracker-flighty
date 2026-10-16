@@ -673,7 +673,7 @@
         const r = await fetch("api/history/import", { method: "POST", headers: { "X-Filename": file.name }, body: await file.arrayBuffer() });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
-        msg.className = "small"; msg.textContent = d.tracks != null ? `${d.added} tracks added, ${d.kept} flights already had one${d.unknown ? `, ${d.unknown} for flights not in History` : ""}.` : `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
+        msg.className = "small"; msg.textContent = d.tracks != null ? `${d.added} tracks added, ${d.kept} flights already had one${d.unknown ? `, ${d.unknown} for flights not in History (import those flights first)` : ""}.${d.partial ? " The file was cut off in the download, so the tracks at its end are missing: download it again and import that copy to get the rest." : ""}` : `${d.added} added, ${d.already} already here${d.problems.length ? `, ${d.problems.length} rows skipped` : ""}.`;
         setTimeout(() => render(false), 900);
       } catch (e) { msg.className = "small err"; msg.textContent = `Import failed: ${e.message}`; }
     };

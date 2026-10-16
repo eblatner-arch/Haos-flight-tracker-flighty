@@ -320,12 +320,12 @@ def import_flighty(name, data):
 def import_tracks(blob):
     """tracks.zip from the flight-track-history backfill (or the GitHub artifact zip around it):
     tracks/<id>.json for flights here that don't have a track yet."""
-    import io
-    z = zipfile.ZipFile(io.BytesIO(blob))
-    inner = [n for n in z.namelist() if n.lower().endswith(".zip")]
-    if inner and not any(n.startswith("tracks/") for n in z.namelist()):
-        z = zipfile.ZipFile(io.BytesIO(z.read(inner[0])))
-    names = [n for n in z.namelist() if n.startswith("tracks/") and n.endswith(".json")]
+    entries, partial = _zip_entries(blob)
+    inner = [n for n in entries if n.lower().endswith(".zip")]
+    if inner and not any(n.startswith("tracks/") for n in entries):
+        entries, p2 = _zip_entries(entries[inner[0]])
+        partial = partial or p2
+    names = [n for n in entries if n.startswith("tracks/") and n.endswith(".json")]
     if not names:
         raise ValueError("No tracks in that file. Use the tracks.zip from the Backfill tracks run.")
     added = kept = unknown = 0
@@ -339,13 +339,54 @@ def import_tracks(blob):
                 kept += 1
                 continue
             try:
-                pts = json.loads(z.read(n))
+                pts = json.loads(entries[n])
             except ValueError:
                 continue
             if pts:
                 _save_track(fid, pts)
                 added += 1
-    return {"tracks": len(names), "added": added, "kept": kept, "unknown": unknown}
+    return {"tracks": len(names), "added": added, "kept": kept, "unknown": unknown, "partial": partial}
+
+
+def _zip_entries(blob):
+    """{name: bytes} of a zip. A download that got cut off (no directory at the end) is read
+    entry by entry from the front, keeping every complete file: (entries, partial)."""
+    import struct
+    import zlib
+    try:
+        z = zipfile.ZipFile(io.BytesIO(blob))
+        return {n: z.read(n) for n in z.namelist() if not n.endswith("/")}, False
+    except zipfile.BadZipFile:
+        pass
+    out, i = {}, 0
+    while True:
+        i = blob.find(b"PK\x03\x04", i)
+        if i < 0 or i + 30 > len(blob):
+            break
+        _, flag, meth, _, _, _, csize, usize, nl, el = struct.unpack("<HHHHHIIIHH", blob[i + 4:i + 30])
+        name = blob[i + 30:i + 30 + nl].decode("utf-8", "replace")
+        start = i + 30 + nl + el
+        data = blob[start:start + csize] if csize and not flag & 8 else blob[start:]
+        try:
+            if meth == 8:
+                d = zlib.decompressobj(-15)
+                raw = d.decompress(data)
+                if not d.eof:
+                    raise ValueError("cut off")
+            elif meth == 0 and csize and len(data) == csize:
+                raw = data
+            elif meth == 0 and name.lower().endswith(".zip"):
+                raw = data  # a stored zip inside, maybe cut off too: read what's there
+            else:
+                raise ValueError("unsupported")
+            if not name.endswith("/"):
+                out[name] = raw
+        except Exception:
+            pass
+        i = start if meth == 0 and name.lower().endswith(".zip") else i + 4
+    if not out:
+        raise ValueError("That file isn't a zip, or it was cut off before the first track. Download it again.")
+    return out, True
 
 
 # ---------------------------------------------------------------- stats
