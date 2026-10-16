@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.8.1
+- NAS pushes only while they can still hold your flight:
+  - Ground stops and ground delay programs at your arrival airport, and departure delays at your departure airport: only until you take off. Once you're airborne, none of them push
+  - A ground stop or ground delay program at your departure airport only matters through your inbound: it pushes only while the inbound hasn't taken off (or isn't known yet)
+
 ## 3.8.0
 - Faster loading on slow connections:
   - The app draws right away from what it showed last time, then updates when the add-on answers (no blank page while a weak signal catches up)

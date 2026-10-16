@@ -141,8 +141,8 @@ class Alerts(unittest.TestCase):
         keys = [x["key"] for x in a]
         self.assertIn("inbound_late", keys)
         self.assertIn("inbound_departed", keys)
-        self.assertEqual([x for x in a if x["key"] == "nas_gdp"][0]["title"], "EWR: Ground delay program")
-        self.assertEqual(len([x for x in a if x["key"].startswith("nas")]), 1)
+        # a GDP at your departure airport only holds your inbound, and it's already airborne: no push
+        self.assertEqual(len([x for x in a if x["key"].startswith("nas")]), 0)
         self.assertEqual(alerts.evaluate(L, CFG, T0 + 60, nas), [])
         probs = [p["text"] for p in alerts.problems(L, CFG, nas)]
         self.assertTrue(any("turn" in p for p in probs))
@@ -1217,3 +1217,20 @@ class SameNumberFromFlightAware(unittest.TestCase):
             self.assertEqual(ac["tail"], "N1")
         finally:
             sources.fetch_live_all, sources.fetch_route = real_all, real_route
+
+
+
+class NasOnlyBeforeTakeoff(unittest.TestCase):
+    def leg(self, **kw):
+        L = {"id": "n", "ident": "UAL249", "display": "UA 249", "dep": "ORD", "arr": "EWR", "sched_out": T0 + H,
+             "sched_in": T0 + 3 * H, "notified": {"watch": True}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + H, origin="ORD", dest="EWR", **kw))
+        return L
+
+    def test_arrival_ground_stop(self):
+        gs = [{"airport": "EWR", "kind": "gs", "label": "Ground stop", "reason": "thunderstorms", "detail": "",
+               "scope": ["ZAU"], "key": "EWR|gs|1"}]
+        L = self.leg()                                   # still at the gate: pushed
+        self.assertEqual([x["key"] for x in alerts.evaluate(L, CFG, T0, gs) if x["key"].startswith("nas")], ["nas_gs"])
+        L = self.leg(off_a=T0 - 600)                     # airborne: nothing
+        self.assertEqual([x for x in alerts.evaluate(L, CFG, T0, gs) if x["key"].startswith("nas")], [])

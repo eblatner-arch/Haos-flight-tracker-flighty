@@ -416,12 +416,22 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
                                                                f" · {mins(-d)} early" if d and d <= -5 else " · on time")
                     add(ev, f"{ident} {words}", msg)
 
-    # NAS programs at either end
-    if ph not in ("arrived", "cancelled"):
+    # NAS programs at either end. They only hold flights that haven't taken off: a ground stop or
+    # ground delay program at your arrival airport, and departure delays at your departure airport,
+    # matter until you're airborne. One at your departure airport only matters through your inbound,
+    # while it hasn't taken off yet. Once you're airborne, none of it applies: no pushes.
+    if ph in ("scheduled", "taxi_out"):
         seen = set(nt.get("nas") or [])
         ext = nt.get("nas_ext") or {}
         cur = {}
         for n in nas_for(leg, nas_items):
+            if n["kind"] in ("gs", "gdp") and n.get("here") == "dep" and n["airport"] != arr:
+                imp = [i for i in n.get("impact") or [] if i["who"] == "inbound"]
+                inb = leg.get("inbound") or {}
+                inb_ph = fa.phase(inb, now) if inb.get("times") else None
+                # no inbound known: tell you (it might be held); inbound airborne or in: it can't be
+                if (imp and all(i.get("airborne") for i in imp)) or inb_ph in ("airborne", "landed", "arrived"):
+                    continue
             ev = NAS_EVENT.get(n["kind"], "nas_other")
             atz = dep_tz if n["airport"] == dep else arr_tz
             hit = any(i["hit"] for i in n.get("impact") or [])
