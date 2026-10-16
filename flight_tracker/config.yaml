@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "3.3.0"
+version: "3.4.0"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -32,6 +32,9 @@ options:
   aeroapi_monthly_budget: 5
   gemini_api_key: ""
   gemini_model: gemini-flash-lite-latest
+  google_client_id: ""
+  google_client_secret: ""
+  drive_folder: Flight Tracker (Home Assistant)
   enable_viewer: true
   viewer_password: ""
 schema:
@@ -45,6 +48,9 @@ schema:
   aeroapi_max_per_leg: int(1,50)?
   gemini_api_key: password?
   gemini_model: str
+  google_client_id: str?
+  google_client_secret: password?
+  drive_folder: str?
   enable_viewer: bool
   viewer_password: password?
   flight_regex: str?

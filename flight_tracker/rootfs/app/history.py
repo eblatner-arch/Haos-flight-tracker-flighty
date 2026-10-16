@@ -451,3 +451,86 @@ def stats(recs, lk=None):
         "longest": summary(longest, lk) if longest else None, "worst_delay": summary(worst, lk) if worst else None,
         "years": sorted({(r.get("date") or "")[:4] for r in recs if r.get("date")}, reverse=True),
     }
+
+
+# ---------------------------------------------------------------- clearing, export, backup
+
+def clear(source=None):
+    """Delete every record (source=None) or only those from one source ('flighty'). -> count"""
+    with LOCK:
+        gone = [fid for fid, r in _DATA["flights"].items() if source is None or r.get("source") == source]
+        for fid in gone:
+            _DATA["flights"].pop(fid, None)
+    for fid in gone:
+        try:
+            os.remove(_track_path(fid))
+        except FileNotFoundError:
+            pass
+    save()
+    return len(gone)
+
+
+def _local_iso(ts, code):
+    return datetime.fromtimestamp(ts, _tz(code)).strftime("%Y-%m-%dT%H:%M") if ts else ""
+
+
+def export_csv():
+    """All flights in Flighty's column layout (local airport times), so the file re-imports here or elsewhere."""
+    cols = list(FLIGHTY_COLS.values())
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(cols)
+    for r in sorted(flights(), key=lambda x: (x.get("date") or "", _t(x, "out", "s") or 0), reverse=True):
+        dep, arr, land = r.get("dep"), r.get("arr"), r.get("diverted_to") or r.get("arr")
+        iata = ICAO_IATA.get(r.get("airline") or "", r.get("airline") or "")
+        w.writerow([r.get("date"), r.get("airline") or iata, r.get("flight_no"), dep, arr,
+                    r.get("dep_terminal") or "", r.get("dep_gate") or "", r.get("arr_terminal") or "", r.get("arr_gate") or "",
+                    "true" if r.get("cancelled") else "false", r.get("diverted_to") or "",
+                    _local_iso(_t(r, "out", "s"), dep), _local_iso(_t(r, "out", "a"), dep),
+                    _local_iso(_t(r, "off", "s"), dep), _local_iso(_t(r, "off", "a"), dep),
+                    _local_iso(_t(r, "on", "s"), arr), _local_iso(_t(r, "on", "a"), land),
+                    _local_iso(_t(r, "in", "s"), arr), _local_iso(_t(r, "in", "a"), land),
+                    r.get("aircraft") or TYPE_NAMES.get(r.get("type") or "", ""), r.get("tail") or ""])
+    return buf.getvalue().encode("utf-8")
+
+
+def make_backup(extra=None):
+    """A zip with everything needed to rebuild History: history.json, every track, plus `extra`
+    (settings worth keeping) as state.json."""
+    import zipfile
+    out = io.BytesIO()
+    with LOCK:
+        data = json.dumps(_DATA)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("history.json", data)
+        z.writestr("state.json", json.dumps({"saved_at": time.time(), **(extra or {})}))
+        tdir = os.path.join(_DIR or ".", "tracks")
+        for name in sorted(os.listdir(tdir)) if os.path.isdir(tdir) else []:
+            if name.endswith(".json"):
+                z.write(os.path.join(tdir, name), f"tracks/{name}")
+    return out.getvalue()
+
+
+def restore_backup(blob):
+    """Merge a backup zip into History (flights already here are kept). -> (result, extra state)"""
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    names = set(z.namelist())
+    if "history.json" not in names:
+        raise ValueError("This isn't a Flight Tracker backup (no history.json inside).")
+    data = json.loads(z.read("history.json"))
+    added = 0
+    for fid, rec in (data.get("flights") or {}).items():
+        if get(fid) is None:
+            added += 1
+        pts = None
+        tn = f"tracks/{os.path.basename(_track_path(fid))}"
+        if tn in names:
+            try:
+                pts = json.loads(z.read(tn))
+            except Exception:
+                pts = None
+        upsert(dict(rec, id=fid), pts=pts, prefer_new=False)
+    save()
+    extra = json.loads(z.read("state.json")) if "state.json" in names else {}
+    return {"flights": len(data.get("flights") or {}), "added": added}, extra

@@ -470,3 +470,4 @@ details.fold[open] > summary i { transform: rotate(45deg); }
 .hist-seen { font-size: 12.5px; margin-top: 3px; } .hist-seen b { font-family: var(--mono); font-size: 12px; }
 .src.fr24 { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #f59e0b; }
 .hdl small { display: block; font-weight: 500; color: var(--faint); }
+.btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }

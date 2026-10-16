@@ -17,6 +17,7 @@ import aeroapi
 import airports
 import alerts as alerting
 import flightaware as fa
+import gdrive
 import history
 import rules as rules_mod
 import schedule
@@ -1507,6 +1508,48 @@ def inbound_adsb(now):
         bump()
 
 
+BACKUP = {"dirty": True, "tried": 0, "running": False}
+
+
+def backup_extra():
+    with LOCK:
+        return {"rules": STATE.get("rules"), "app_settings": STATE.get("app_settings"), "manual": STATE.get("manual")}
+
+
+def backup_files():
+    stamp = datetime.now(HOME_TZ).strftime("%Y-%m-%d")
+    blob = history.make_backup(backup_extra())
+    return [("Flight Tracker backup.zip", "application/zip", blob),
+            ("Flight history.csv", "text/csv", history.export_csv())], stamp
+
+
+def run_backup(force=False):
+    """Upload the backup to Drive when History changed (at most every 10 min) and once a day."""
+    if BACKUP["running"] or not gdrive.state().get("refresh_token"):
+        return False
+    now = time.time()
+    last = gdrive.state().get("last_backup") or 0
+    if not force and not ((BACKUP["dirty"] and now - BACKUP["tried"] > 600) or now - last > 86400):
+        return False
+    BACKUP.update(running=True, tried=now)
+    try:
+        files, _ = backup_files()
+        ok = gdrive.upload(files)
+        if ok:
+            BACKUP["dirty"] = False
+            log.info("Drive backup done (%d flights)", len(history.flights()))
+        return ok
+    except Exception as e:
+        log.warning("Drive backup: %s", e)
+        return False
+    finally:
+        BACKUP["running"] = False
+
+
+def mark_dirty():
+    BACKUP["dirty"] = True
+
+
 def archive_finished(now):
     """Calendar and Manual flights go into History once they're done (friends' flights don't).
     Re-archived whenever a later check fills in more (e.g. the gate-arrival time)."""
@@ -1537,6 +1580,7 @@ def archive_finished(now):
             log.warning("History: couldn't save %s: %s", L.get("display"), e)
     if changed:
         history.save()
+        mark_dirty()
         bump()
 
 
@@ -1616,6 +1660,8 @@ def worker():
                     update_leg(browser, lid)
             inbound_adsb(time.time())
             archive_finished(time.time())
+            if gdrive.configured():
+                threading.Thread(target=run_backup, daemon=True).start() if not BACKUP["running"] else None
             STATE["worker"].update(busy=None, last_cycle=time.time(), error=None)
             if time.time() - last_pub > 60 or due:
                 publish()
@@ -1767,7 +1813,8 @@ def api_history(q):
     sel.sort(key=lambda r: (r.get("date") or "", ((r.get("times") or {}).get("out") or {}).get("s") or 0), reverse=True)
     lk = history.links(recs)
     return {"year": year, "years": sorted({(r.get("date") or "")[:4] for r in recs if r.get("date")}, reverse=True),
-            "total": len(recs), "stats": history.stats(sel, lk), "flights": [history.summary(r, lk) for r in sel]}
+            "total": len(recs), "flighty_count": sum(1 for r in recs if r.get("source") == "flighty"),
+            "stats": history.stats(sel, lk), "flights": [history.summary(r, lk) for r in sel]}
 
 
 def api_history_flight(fid):
@@ -1852,6 +1899,26 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             d = api_history_flight(m.group(1))
             return self._send(200 if d else 404, d or {"error": "not found"})
+        if path == "/api/backup":
+            return self._send(200, gdrive.status())
+        if path == "/api/backup/download":
+            blob = history.make_backup(backup_extra())
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", f'attachment; filename="flight-tracker-backup-{datetime.now(HOME_TZ):%Y-%m-%d}.zip"')
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            self.wfile.write(blob)
+            return
+        if path == "/api/history/export.csv":
+            blob = history.export_csv()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="flight-history.csv"')
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            self.wfile.write(blob)
+            return
         if path == "/api/alerts":
             with LOCK:
                 return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
@@ -1925,10 +1992,54 @@ class Handler(BaseHTTPRequestHandler):
                 log.warning("History import: %s", e)
                 return self._send(400, {"error": str(e)[:300]})
             log.info("History import %s: %s", name, res)
+            mark_dirty()
             bump()
             return self._send(200, res)
+        if path == "/api/history/clear":
+            what = (self._json() or {}).get("what")
+            n = history.clear("flighty" if what == "flighty" else None) if what in ("flighty", "all") else 0
+            log.info("History: cleared %d flights (%s)", n, what)
+            mark_dirty()
+            bump()
+            return self._send(200, {"removed": n})
+        if path == "/api/backup/connect":
+            try:
+                return self._send(200, gdrive.start_device_flow(on_connected=lambda: run_backup(force=True)))
+            except Exception as e:
+                return self._send(400, {"error": str(e)[:300]})
+        if path == "/api/backup/disconnect":
+            gdrive.disconnect()
+            return self._send(200, {"ok": True})
+        if path == "/api/backup/now":
+            ok = run_backup(force=True)
+            st = gdrive.status()
+            return self._send(200 if ok else 400, {"ok": ok, "error": None if ok else st.get("last_error") or "Not connected"})
+        if path in ("/api/backup/restore", "/api/backup/upload"):
+            try:
+                blob = gdrive.download("Flight Tracker backup.zip") if path.endswith("restore") else self._body(200 * 1024 * 1024)
+                if not blob:
+                    return self._send(404, {"error": "No backup in the Drive folder yet."})
+                res, extra = history.restore_backup(blob)
+                with LOCK:
+                    for k in ("manual",):
+                        for x in extra.get(k) or []:
+                            if x not in STATE["manual"]:
+                                STATE["manual"].append(x)
+                    if extra.get("rules") and not STATE.get("flags", {}).get("restored_rules"):
+                        STATE["rules"] = rules_mod.merge(extra["rules"], CFG)
+                        STATE["app_settings"] = clean_app_settings(extra.get("app_settings") or {})
+                        CFG.update(STATE["app_settings"])
+                        sync_rule_cfg()
+                        STATE.setdefault("flags", {})["restored_rules"] = True
+                save_state()
+                bump()
+                return self._send(200, res)
+            except Exception as e:
+                log.warning("Restore: %s", e)
+                return self._send(400, {"error": str(e)[:300]})
         if path == "/api/history/delete":
             ok = history.delete((self._json() or {}).get("id") or "")
+            mark_dirty()
             bump()
             return self._send(200 if ok else 404, {"ok": ok})
         if path == "/api/flights":
@@ -2001,6 +2112,7 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
     load_state()
     history.init(DATA_DIR)
+    gdrive.init(DATA_DIR, CFG)
     init_app_settings()
     init_rules()
     if not CFG["airline_icao"]:

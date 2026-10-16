@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.4.0
+- History → Export & delete: delete just the flights imported from Flighty (to re-import from scratch), delete all of History, or export a CSV in Flighty's columns
+- Google Drive backup (Settings → Backup), same setup as the OOOI Flight Logger: your own Google client (the logger's works), Connect Google with a code at google.com/device. Uploads "Flight Tracker backup.zip" (all of History with flown tracks, plus your alert and tracking settings) and "Flight history.csv" within 10 min of a History change and once a day
+- Restore from Drive or from a downloaded backup file; restoring adds what's missing and keeps what's here
+- New options in the Configuration tab: google_client_id, google_client_secret, drive_folder
+
 ## 3.3.0
 - Diversions are one journey: the diverted flight's lateness is when you finally reached the planned airport (via the continuation leg) against the original schedule, e.g. FLL→EWR diverted to IAD, into EWR 7h 26m late. The continuation leg (IAD→EWR) shows actual times only, links back, and no longer counts as its own 446-min-late flight in stats or route history. A diverted flight's distance is to the airport it actually landed at
 - Add a past flight: the date can be up to 10 days back. AeroAPI finds it, one FlightAware page load adds the track and gates, and it goes straight into History (Mine)

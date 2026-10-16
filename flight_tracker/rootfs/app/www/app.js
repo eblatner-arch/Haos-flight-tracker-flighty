@@ -636,14 +636,33 @@
       <div class="hdl ${delayCls(f.arr_delay)}">${f.continuation_of ? '<span class="faint">continuation</span>' : f.arr_delay == null ? "" : f.arr_delay >= 15 ? `${dur(f.arr_delay * 60)} late` : f.arr_delay <= -5 ? `${Math.round(-f.arr_delay)}m early` : "on time"}${f.continued_by && f.arr_delay != null ? `<small>into ${esc(f.final_ap || f.arr)}</small>` : ""}</div>
     </a>`;
   }
-  function importCard(empty) {
+  function importCard(empty, counts) {
+    counts = counts || {};
     return `<div class="card">
       <h3 style="margin:0 0 4px">${empty ? "Bring in your past flights" : "Import"}</h3>
-      <p class="small muted" style="margin:0 0 12px">A Flighty export (.xlsx or .csv). Flights already here are kept as they are, so importing again is safe.</p>
+      <p class="small muted" style="margin:0 0 12px">A Flighty export (.xlsx or .csv). Flights already here are kept as they are, so importing again is safe. To re-import from scratch, delete the imported flights first.</p>
       <label class="btn primary filebtn">Choose file<input type="file" id="h-file" accept=".xlsx,.csv,.xlsm" hidden></label>
-      <div id="h-msg" class="small" style="margin-top:8px"></div></div>`;
+      <div id="h-msg" class="small" style="margin-top:8px"></div></div>
+      ${empty ? "" : fold("hist-manage", "Export & delete", `<div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn" href="api/history/export.csv" download>Export CSV</a>
+          ${counts.flighty ? `<button class="btn" id="h-clear-flighty">Delete ${counts.flighty} imported flights</button>` : ""}
+          <button class="btn danger" id="h-clear-all">Delete all History</button>
+        </div>
+        <p class="small faint" style="margin:10px 0 0">The CSV uses Flighty's columns and local airport times, so it imports back here (or elsewhere). Deleting imported flights keeps the ones tracked here.</p></div>`)}`;
   }
   function wireImport() {
+    wireFolds();
+    const clr = async (what, q) => {
+      if (!confirm(q)) return;
+      const d = await api("api/history/clear", { method: "POST", body: JSON.stringify({ what }) });
+      alert(`Deleted ${d.removed} flight${d.removed === 1 ? "" : "s"}.`);
+      render(false);
+    };
+    const cf = document.getElementById("h-clear-flighty");
+    if (cf) cf.onclick = () => clr("flighty", "Delete every flight imported from Flighty? Flights tracked here stay.");
+    const ca = document.getElementById("h-clear-all");
+    if (ca) ca.onclick = () => { if (confirm("Delete ALL of History, including flights tracked here? This can't be undone (unless you have a Drive backup).")) clr("all", "Really delete everything in History?"); };
     const inp = document.getElementById("h-file");
     if (!inp) return;
     inp.onchange = async () => {
@@ -676,7 +695,7 @@
         if (mo !== month) { if (month) h += "</div>"; h += `<h2 class="section">${esc(mo)}</h2><div class="card hlist">`; month = mo; }
         h += histRow(f);
       }
-      h += "</div>" + importCard(false);
+      h += "</div>" + importCard(false, { flighty: d.flighty_count });
     }
     $app.innerHTML = h;
     wireImport();
@@ -1082,9 +1101,65 @@
   }
 
   // ---------- tools: test push + debug ----------
+  function backupCard(b) {
+    const when = b.last_backup ? `last backup ${ago(b.last_backup)}` : "no backup yet";
+    return `<div class="card">
+      ${!b.configured ? `<p class="small muted" style="margin:0 0 10px">Google Drive backup needs your own Google OAuth client: add <span class="mono">google_client_id</span> and <span class="mono">google_client_secret</span> in the add-on's Configuration tab and restart it. The client from the OOOI Flight Logger works (TVs and Limited Input devices type, Drive API on).</p>`
+        : b.connected ? `<p class="small" style="margin:0 0 10px">Backing up to <b>${esc(b.folder)}</b>${b.email ? ` in ${esc(b.email)}'s Drive` : ""} · ${when}. It runs within 10 minutes of a History change and once a day.${b.last_error ? `<br><span class="err">${esc(b.last_error)}</span>` : ""}</p>`
+        : `<p class="small muted" style="margin:0 0 10px">Not connected.${b.last_error ? ` <span class="err">${esc(b.last_error)}</span>` : ""}</p>`}
+      <div id="bk-code" class="small" style="margin-bottom:8px">${b.pending && !b.pending.error ? `Open <a href="${esc(b.pending.verification_url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(b.pending.verification_url)}</a> and enter <b class="mono" style="font-size:18px">${esc(b.pending.user_code)}</b>` : b.pending && b.pending.error ? `<span class="err">${esc(b.pending.error)}</span>` : ""}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${b.configured && !b.connected ? '<button class="btn primary" id="bk-connect">Connect Google</button>' : ""}
+        ${b.connected ? '<button class="btn primary" id="bk-now">Back up now</button><button class="btn" id="bk-restore">Restore from Drive</button>' : ""}
+        ${b.connected && b.folder_url ? `<a class="btn" href="${esc(b.folder_url)}" target="_blank" rel="noopener">Open folder ↗</a>` : ""}
+        <a class="btn" href="api/backup/download" download>Download backup</a>
+        <label class="btn filebtn">Restore from file<input type="file" id="bk-file" accept=".zip" hidden></label>
+        ${b.connected ? '<button class="btn" id="bk-disconnect">Disconnect</button>' : ""}
+      </div>
+      <div id="bk-msg" class="small" style="margin-top:8px"></div>
+      <p class="small faint" style="margin:10px 0 0">The backup is one zip with all of History (flights and flown tracks) plus your alert and tracking settings, and a CSV of your flights. Restoring adds what's missing and keeps what's here.</p></div>`;
+  }
+  function wireBackup() {
+    const msg = document.getElementById("bk-msg");
+    const say = (t, err) => { if (msg) { msg.className = err ? "small err" : "small"; msg.textContent = t; } };
+    const post = async (path, body, extra) => {
+      const r = await fetch(path, { method: "POST", body, ...(extra || {}) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || r.status);
+      return d;
+    };
+    const c = document.getElementById("bk-connect");
+    if (c) c.onclick = async () => {
+      try {
+        const d = await post("api/backup/connect");
+        document.getElementById("bk-code").innerHTML = `Open <a href="${esc(d.verification_url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(d.verification_url)}</a> and enter <b class="mono" style="font-size:18px">${esc(d.user_code)}</b>. This page updates when you're done.`;
+        const t = setInterval(async () => {
+          const b = await api("api/backup").catch(() => null);
+          if (b && (b.connected || (b.pending && b.pending.error))) { clearInterval(t); toolsView(); }
+        }, 4000);
+      } catch (e) { say(e.message, true); }
+    };
+    const n = document.getElementById("bk-now");
+    if (n) n.onclick = async () => { say("Backing up…"); try { await post("api/backup/now"); say("Backed up."); setTimeout(toolsView, 800); } catch (e) { say(e.message, true); } };
+    const rs = document.getElementById("bk-restore");
+    if (rs) rs.onclick = async () => {
+      if (!confirm("Restore from the Drive backup? Flights missing here are added; nothing here is removed.")) return;
+      say("Restoring…"); try { const d = await post("api/backup/restore"); say(`Restored: ${d.added} flights added (${d.flights} in the backup).`); } catch (e) { say(e.message, true); }
+    };
+    const f = document.getElementById("bk-file");
+    if (f) f.onchange = async () => {
+      const file = f.files[0]; if (!file) return;
+      say(`Restoring ${file.name}…`);
+      try { const d = await post("api/backup/upload", await file.arrayBuffer()); say(`Restored: ${d.added} flights added (${d.flights} in the backup).`); } catch (e) { say(e.message, true); }
+    };
+    const x = document.getElementById("bk-disconnect");
+    if (x) x.onclick = async () => { if (confirm("Disconnect Google Drive? The files already in Drive stay.")) { await post("api/backup/disconnect"); toolsView(); } };
+  }
+
   async function toolsView() {
     destroyMaps();
-    const [d, st] = await Promise.all([api("api/debug"), api("api/settings").catch(() => ({ settings: [] }))]);
+    const [d, st, bk] = await Promise.all([api("api/debug"), api("api/settings").catch(() => ({ settings: [] })),
+      api("api/backup").catch(() => ({ configured: false }))]);
     const sch = d.schedule || {};
     const c = d.config;
     const setRow = (x) => x.kind === "bool"
@@ -1106,6 +1181,7 @@
       <h2 class="section"><span>Tracking</span><span id="s-msg" class="small"></span></h2>
       ${[...new Set(st.settings.map((x) => x.group || "Tracking"))].map((g, i) =>
         fold(`set-${g}`, g, `<div class="card nlist">${st.settings.filter((x) => (x.group || "Tracking") === g).map(setRow).join("")}</div>`, i === 0)).join("")}
+      ${fold("set-backup", "Backup", backupCard(bk), !bk.connected)}
       <p class="small faint" style="margin:-4px 4px 14px">Alerts are on the bell page. Schedule file, notify service and API keys are in the add-on's Configuration tab in Home Assistant.</p>
       <div class="card">
         <h3 style="margin:0 0 4px">Notifications</h3>
@@ -1143,6 +1219,7 @@
       ${fold("tools-pages", "Page loads & screenshots", `<div style="text-align:right;margin:-4px 0 8px"><button class="btn small" id="t-reload">Reload</button></div>
       <div class="card">${d.fetches.length ? d.fetches.map(fetchRow).join("") : '<div class="small muted">No pages loaded yet. Flights are checked from ' + STATE.settings.watch_hours + ' h before departure; add a flight to test now.</div>'}</div>`)}`;
     wireFolds();
+    wireBackup();
     document.getElementById("t-notify").onclick = async (e) => {
       const msg = document.getElementById("t-msg");
       e.target.disabled = true; msg.className = "small muted"; msg.textContent = "Sending…";

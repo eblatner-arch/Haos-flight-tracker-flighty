@@ -262,6 +262,23 @@ class History(unittest.TestCase):
         st = self.h.stats(self.h.flights(), lk)
         self.assertEqual((st["flights"], st["on_time_pct"]), (3, 50))
 
+    def test_clear_export_backup_restore(self):
+        import tempfile
+        self.h.import_flighty("x.csv", self.CSV.encode())
+        self.h.upsert({"id": "2026-10-12_UAL1_EWR", "date": "2026-10-12", "ident": "UAL1", "dep": "EWR", "arr": "SFO",
+                       "source": "tracker", "times": {"out": {"s": T0, "a": T0}}}, pts=[[40.6, -74.1, 0, 0, T0]])
+        csvb = self.h.export_csv()
+        blob = self.h.make_backup({"manual": []})
+        self.assertEqual(self.h.clear("flighty"), 2)                 # imports gone, tracked flight stays
+        self.assertEqual([r["id"] for r in self.h.flights()], ["2026-10-12_UAL1_EWR"])
+        self.assertEqual(self.h.import_flighty("e.csv", csvb)["added"], 2)   # the export re-imports
+        self.h.clear()
+        self.assertEqual(self.h.flights(), [])
+        self.h.init(tempfile.mkdtemp())                              # a new box
+        res, extra = self.h.restore_backup(blob)
+        self.assertEqual((res["added"], extra["manual"]), (3, []))
+        self.assertEqual(len(self.h.track("2026-10-12_UAL1_EWR")), 1)
+
     def test_finished_calendar_flight_is_archived_friends_are_not(self):
         import server
         server.history = self.h

@@ -29,6 +29,15 @@ configuration:
   gemini_model:
     name: Gemini model
     description: Flash-Lite is cheapest and fast enough.
+  google_client_id:
+    name: Google client ID (optional, for Drive backup)
+    description: An OAuth client of the "TVs and Limited Input devices" type from your own Google Cloud project, with the Drive API on. The same client as the OOOI Flight Logger works. Then Settings → Backup → Connect Google in the app.
+  google_client_secret:
+    name: Google client secret
+    description: That client's secret.
+  drive_folder:
+    name: Drive folder
+    description: Folder the backup goes in. Default "Flight Tracker (Home Assistant)".
   enable_viewer:
     name: Enable browser viewer
     description: Serve the tracker's browser over noVNC on port 6080 (to clear a CAPTCHA or sign in to FlightAware).
