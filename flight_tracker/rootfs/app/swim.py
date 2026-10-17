@@ -40,7 +40,8 @@ def _apt(code):
 
 
 def parse(xml_text):
-    """Flight-data messages in one TFMS payload -> [{acid, dep, arr, type, at, igtd, gufi}].
+    """Flight-data messages in one TFMS payload -> [{acid, dep, arr, type, at, igtd, gufi, off, on, eta, diverted}].
+    off/on are actual wheels-up/down (UTC ISO), eta the FAA estimate, diverted the diversionIndicator flag.
     A payload can hold many messages; every element called fltdMessage (attributes acid, depArpt,
     arrArpt, msgType, sourceTimeStamp) or a flight block with aircraftId/departurePoint/arrivalPoint
     is read, whatever its namespace."""
@@ -54,10 +55,25 @@ def parse(xml_text):
         if name == "fltdMessage":
             a = el.attrib
             ev = {"acid": (a.get("acid") or "").upper(), "dep": _apt(a.get("depArpt")), "arr": _apt(a.get("arrArpt")),
-                  "type": a.get("msgType"), "at": a.get("sourceTimeStamp"), "igtd": None, "gufi": None}
+                  "type": a.get("msgType"), "at": a.get("sourceTimeStamp"), "igtd": None, "gufi": None,
+                  "off": None, "on": None, "eta": None, "diverted": False}
             for sub in el.iter():
                 n = _local(sub.tag)
-                if n == "igtd" and sub.text and not ev["igtd"]:
+                txt = (sub.text or "").strip()
+                if n == "timeOfDeparture" and txt and sub.get("estimated") == "false":
+                    ev["off"] = txt
+                elif n == "timeOfArrival" and txt and sub.get("estimated") == "false":
+                    ev["on"] = txt
+                elif n == "etd" and sub.get("etdType") == "ACTUAL" and not ev["off"]:
+                    ev["off"] = sub.get("timeValue")
+                elif n == "eta" and sub.get("etaType") in ("ESTIMATED", "ACTUAL"):
+                    if sub.get("etaType") == "ACTUAL":
+                        ev["on"] = ev["on"] or sub.get("timeValue")
+                    else:
+                        ev["eta"] = sub.get("timeValue")
+                elif n == "diversionIndicator" and txt and txt != "NO_DIVERSION":
+                    ev["diverted"] = True
+                elif n == "igtd" and sub.text and not ev["igtd"]:
                     ev["igtd"] = sub.text.strip()
                 elif n == "gufi" and sub.text and not ev["gufi"]:
                     ev["gufi"] = sub.text.strip()

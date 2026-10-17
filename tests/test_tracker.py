@@ -1340,6 +1340,22 @@ class Swim(unittest.TestCase):
         self.assertEqual([(e["acid"], e["dep"], e["arr"], e["type"]) for e in ev],
                          [("UAL2127", "KLAX", "KMDT", "flightPlanAmendmentInformation")])
 
+    def test_real_tfms_samples(self):
+        """Payloads captured from the live SWIM feed: many flights per message, ICAO and FAA codes."""
+        import swim
+        here = os.path.dirname(os.path.abspath(__file__))
+        def load(n):
+            with open(os.path.join(here, n)) as fh:
+                return {(e["acid"], e["type"]): e for e in swim.parse(fh.read())}
+        arr = load("swim_arrival.xml")
+        e = arr[("N279D", "arrivalInformation")]
+        self.assertEqual((e["dep"], e["arr"], e["off"], e["on"]), ("KBUR", "KMRY", "2026-10-17T01:02:00Z", None))
+        self.assertEqual(arr[("SWA2836", "trackInformation")]["eta"], "2026-10-17T01:59:35Z")
+        b = load("swim_boundary.xml")[("UAL1218", "boundaryCrossingUpdate")]
+        self.assertEqual((b["dep"], b["arr"], b["gufi"], b["igtd"]), ("KSEA", "KDEN", "KS009927Gk", "2026-10-17T01:05:00Z"))
+        d = [e for e in load("swim_departure.xml").values() if e["acid"] == "JBU2823" and e["type"] == "departureInformation"][0]
+        self.assertEqual((d["dep"], d["arr"], d["off"], d["diverted"]), ("KFLL", "KMSY", "2026-10-17T01:49:00Z", False))
+
     def test_amendment_marks_diversion(self):
         import server
         import swim

@@ -524,8 +524,20 @@ def swim_check(L, f, planned):
         out["new"] = True
         L["swim_seen"] = max(e.get("got") or 0 for e in fresh)
         e = fresh[-1]
-        saw(L, "FAA SWIM", None, " ".join(x for x in ((e.get("type") or "message"),
-                                                    f"{_iata(e.get('dep')) or '?'}→{_iata(e.get('arr')) or '?'}") if x))
+        bits = [e.get("type") or "message", f"{_iata(e.get('dep')) or '?'}→{_iata(e.get('arr')) or '?'}"]
+        for k, lbl in (("off", "off"), ("on", "on"), ("eta", "ETA")):
+            v = next((x.get(k) for x in reversed(fresh) if x.get(k)), None)
+            if v:
+                bits.append(f"{lbl} {v[11:16]}Z")
+        if any(x.get("diverted") for x in fresh):
+            bits.append("diversion flagged")
+        saw(L, "FAA SWIM", None, " ".join(bits))
+    for k in ("off", "on", "eta"):
+        v = next((x.get(k) for x in reversed(mine) if x.get(k)), None)
+        if v:
+            out[k] = v
+    if any(x.get("diverted") for x in mine) and arr and planned and arr != _iata(planned):
+        out["diverted_to"] = arr
     return out
 
 

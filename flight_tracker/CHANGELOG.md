@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.5
+- FAA SWIM: reads actual takeoff and landing times, the FAA ETA and the diversion flag from TFMS messages; the flight log shows them. Parser checked against real feed samples.
+
 ## 3.12.4
 - FAA SWIM certificate check fixed ("unable to get local issuer certificate"): the trust folder now holds all of Debian's roots plus the intermediate certificate the FAA server points to (fetched from its certificate's CA Issuers address), hashed with openssl
 
