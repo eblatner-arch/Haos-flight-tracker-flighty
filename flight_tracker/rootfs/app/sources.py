@@ -184,19 +184,55 @@ def fetch_metars(icaos):
     return out
 
 
-def fetch_live_all(callsign):
+class AdsbPaused(Exception):
+    pass
+
+
+# When adsb.lol stops answering (busy, or limiting how often we ask), stop asking for a while
+# instead of piling up slow calls: 20 s, then 40 s, 80 s ... up to 5 min, reset by the next answer.
+ADSB_PAUSE = {"until": 0.0, "fails": 0}
+
+
+def adsb_failed():
+    ADSB_PAUSE["fails"] += 1
+    ADSB_PAUSE["until"] = time.time() + min(300, 20 * 2 ** (ADSB_PAUSE["fails"] - 1))
+
+
+def adsb_error_text(e):
+    """A plain-language line for the lookup log instead of a Python traceback."""
+    if isinstance(e, AdsbPaused):
+        return str(e)
+    if isinstance(e, requests.exceptions.Timeout):
+        return "adsb.lol too slow to answer"
+    if isinstance(e, requests.exceptions.ConnectionError):
+        return "adsb.lol not answering"
+    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+        return f"adsb.lol answered {e.response.status_code}"
+    return f"adsb.lol: {(str(e).splitlines() or [type(e).__name__])[0][:80]}"
+
+
+def fetch_live_all(callsign, quick=False):
     """Every airplane transmitting this callsign right now (an earlier leg with the same flight
-    number can still be on it after landing)."""
+    number can still be on it after landing). quick: one short try (the 5-second position loop)."""
+    left = ADSB_PAUSE["until"] - time.time()
+    if left > 0:
+        raise AdsbPaused(f"adsb.lol not answering; asking again in {int(left) + 1} s")
     # adsb.lol is sometimes slow to answer: one more try with a longer wait before giving up
     # (when adsb.lol is busy even the TLS handshake is slow, and that counts against the connect time)
-    for i, wait in enumerate((20, 30)):
+    waits = ((6, 10),) if quick else ((10, 15), (10, 20))
+    for i, wait in enumerate(waits):
         try:
-            r = requests.get(ADSB_URL.format(callsign.upper()), headers=UA, timeout=(15, wait))
+            r = requests.get(ADSB_URL.format(callsign.upper()), headers=UA, timeout=wait)
             break
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            if i:
+            if i == len(waits) - 1:
+                adsb_failed()
                 raise
             time.sleep(2)
+    if r.status_code == 429 or r.status_code >= 500:
+        adsb_failed()
+    else:
+        ADSB_PAUSE["fails"] = 0
     r.raise_for_status()
     out = []
     for ac in (r.json() or {}).get("ac") or []:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.20.1
+- The big map on the Flights screen now moves the airplane every 5 s too (before, only the flight page did; on cellular the Flights screen could sit still for minutes).
+- A position request that hangs on a weak signal is dropped after 8 s instead of stalling the updates.
+- adsb.lol not answering no longer holds up the FAA radar positions: it's asked on its own thread with a short timeout, and after a failure the app waits (20 s, doubling up to 5 min) before asking again.
+- The lookup log says "adsb.lol not answering" instead of a raw connection error.
+
 ## 3.20.0
 - Live position every 5 s: airplanes taxiing, in the air or landing (yours, and your inbound in the air) move between flight checks. Near airports from FAA approach and surface radar (every few seconds, no extra network); en route from adsb.lol every 30 s (the FAA's center radar only reports about once a minute). The flight page fetches just the new position and track points and repaints the map in place.
 

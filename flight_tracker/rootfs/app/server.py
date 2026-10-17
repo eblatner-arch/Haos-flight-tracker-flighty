@@ -1581,7 +1581,7 @@ def live_src(live):
     return (live or {}).get("src") or "adsb.lol"
 
 
-def live_all(callsign):
+def live_all(callsign, quick=False):
     """Airplanes transmitting this callsign now: FAA radar first (approach and surface radar carry
     the transponder address, so the N-number), adsb.lol when the FAA has nothing fresh with an
     address (en route, outside the US, or before STDDS is set up)."""
@@ -1589,7 +1589,7 @@ def live_all(callsign):
     if s and all(a.get("tail") for a in s):
         return s
     try:
-        a = sources.fetch_live_all(callsign)
+        a = sources.fetch_live_all(callsign, quick=True) if quick else sources.fetch_live_all(callsign)
     except Exception:
         if s:
             return s
@@ -1597,12 +1597,15 @@ def live_all(callsign):
     return a or s
 
 
-def pick_live(callsign, fl, accept=None):
+def pick_live(callsign, fl, accept=None, quick=False):
     """The airplane broadcasting this callsign that is *this* flight. Two can be up at once with the
     same number (yesterday's late one still flying, an earlier leg holding): prefer the one with the
     tail we know, then the one nearest where this flight should be (its last tracked position, or
     its route between the two airports)."""
-    cands = [a for a in live_all(callsign) if accept is None or accept(a)]
+    return choose_live([a for a in (live_all(callsign, quick=True) if quick else live_all(callsign)) if accept is None or accept(a)], fl)
+
+
+def choose_live(cands, fl):
     if len(cands) <= 1:
         return cands[0] if cands else None
     fl = fl or {}
@@ -1657,34 +1660,50 @@ def live_tick(now):
                 return not ac.get("ground") or ph == "taxi_out"
         try:
             cands = [a for a in (swim.live_all(ident) if swim.STATE.get("status") != "off" else []) if mine(a)]
-            radar = cands and all(a.get("tail") for a in cands)   # approach / surface radar, every few seconds
-            if radar:
-                live = cands[0] if len(cands) == 1 else pick_live(ident, fl, mine)
-            elif now - polled >= ADSB_EVERY:
-                # en route the FAA's center radar only reports about once a minute: ask adsb.lol
-                with LOCK:
-                    L = STATE["legs"].get(lid)
-                    if L is not None:
-                        L["adsb_poll" if who == "own" else "adsb_poll_inb"] = now
-                live = pick_live(ident, fl, mine)
-            elif cands:
-                live = cands[0]
-            else:
-                continue
         except Exception as e:
             log.debug("live position %s: %s", ident, e)
             continue
-        if not live:
+        radar = cands and all(a.get("tail") for a in cands)   # approach / surface radar, every few seconds
+        if radar:
+            _set_live(lid, who, cands[0] if len(cands) == 1 else choose_live(cands, fl))
             continue
-        with LOCK:
-            L = STATE["legs"].get(lid)
-            if L is None:
-                continue
-            key = "live" if who == "own" else "inbound_live"
-            if (L.get(key) or {}).get("at", 0) >= live.get("at", 0):
-                continue
-            L[key] = live
-            add_fix(L.get("flight") if who == "own" else L.get("inbound"), live)
+        if cands:
+            _set_live(lid, who, choose_live(cands, fl))   # center radar meanwhile
+        if now - polled >= ADSB_EVERY and (lid, who) not in ADSB_ASKING:
+            # en route the FAA's center radar only reports about once a minute: ask adsb.lol, on its
+            # own thread so a slow answer never holds up the radar positions of other flights
+            with LOCK:
+                L = STATE["legs"].get(lid)
+                if L is not None:
+                    L["adsb_poll" if who == "own" else "adsb_poll_inb"] = now
+            ADSB_ASKING.add((lid, who))
+            threading.Thread(target=_ask_adsb, args=(lid, who, ident, fl, mine), daemon=True).start()
+
+
+ADSB_ASKING = set()
+
+
+def _ask_adsb(lid, who, ident, fl, mine):
+    try:
+        _set_live(lid, who, pick_live(ident, fl, mine, quick=True))
+    except Exception as e:
+        log.debug("live position %s: %s", ident, e)
+    finally:
+        ADSB_ASKING.discard((lid, who))
+
+
+def _set_live(lid, who, live):
+    if not live:
+        return
+    with LOCK:
+        L = STATE["legs"].get(lid)
+        if L is None:
+            return
+        key = "live" if who == "own" else "inbound_live"
+        if (L.get(key) or {}).get("at", 0) >= live.get("at", 0):
+            return
+        L[key] = live
+        add_fix(L.get("flight") if who == "own" else L.get("inbound"), live)
 
 
 def live_loop():
@@ -1894,8 +1913,7 @@ def resolve_tail(browser, L, f, now):
                         "source": "your flight's transponder"}
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
-            saw(L, f"Transponder · your flight {L.get('display') or L['ident']}", None,
-                f"error: {(str(e).splitlines() or [type(e).__name__])[0][:120] or type(e).__name__}")
+            saw(L, f"Transponder · your flight {L.get('display') or L['ident']}", None, sources.adsb_error_text(e))
     # Free signals first: the airplane flying in on ADS-B
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
     # Once the inbound has left its gate, the airplane can't change without a new inbound number
@@ -2304,7 +2322,7 @@ def inbound_adsb(now):
             err = None
         except Exception as e:
             log.info("%s inbound ADS-B: %s", L.get("display"), e)
-            live, err = None, (str(e).splitlines() or [type(e).__name__])[0][:120] or type(e).__name__
+            live, err = None, sources.adsb_error_text(e)
         route = f"{(inb.get('origin') or {}).get('iata') or '?'}→{(inb.get('destination') or {}).get('iata') or '?'}"
         with LOCK:
             cur = STATE["legs"].get(L["id"])
@@ -2323,7 +2341,7 @@ def inbound_adsb(now):
             log_lookup(cur, snapshot(cur), now, ["FAA radar" if live and live.get("src") else "adsb.lol"],
                        seen=[{"src": f"{who if live else 'Transponder'} · inbound {inb.get('display_ident') or inb['ident']} {route}",
                               "tail": (seen or "").upper() or None,
-                              "note": None if seen else (f"error: {err}" if err else "not seen by FAA radar or ADS-B")}])
+                              "note": None if seen else (err or "not seen by FAA radar or ADS-B")}])
             if seen and have and seen.upper() != have:
                 log.info("%s: inbound %s is %s on ADS-B, we had %s; checking now", L.get("display"), inb["ident"], seen, have)
                 REFRESH_Q.put(L["id"])

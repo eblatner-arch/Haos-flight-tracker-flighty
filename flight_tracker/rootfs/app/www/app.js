@@ -527,33 +527,38 @@
   const SURF = { id: null, timer: null, zoomed: false };
   // Between full refreshes the flight's own position (and its inbound's) moves every 5 s: only
   // the new position and track points are fetched, and the map repaints in place.
-  const LIVEW = { id: null, timer: null };
-  function liveWatch(leg) {
+  // Runs for the flight page's map and for the big map on the Flights screen; stops by itself
+  // once that map is gone. A request that hangs (weak cellular) is dropped after 8 s.
+  const LIVEW = { id: null, key: null, timer: null };
+  function liveWatch(leg, key) {
+    key = key || `leg-${leg.id}`;
     const moving = ["taxi_out", "airborne", "landed"].includes(leg.phase) ||
       (leg.inbound && ["taxi_out", "airborne"].includes(leg.inbound.phase));
-    if (!moving) { if (LIVEW.id === leg.id) { clearTimeout(LIVEW.timer); LIVEW.id = null; LIVEW.timer = null; } return; }
-    if (LIVEW.id === leg.id && LIVEW.timer) return;
+    if (!moving) { if (LIVEW.key === key) { clearTimeout(LIVEW.timer); LIVEW.id = LIVEW.key = LIVEW.timer = null; } return; }
+    if (LIVEW.key === key && LIVEW.timer) return;
     if (LIVEW.timer) clearTimeout(LIVEW.timer);
-    LIVEW.id = leg.id;
+    LIVEW.id = leg.id; LIVEW.key = key;
     const id = leg.id;
     const tick = async () => {
       LIVEW.timer = null;
-      if (LIVEW.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (LIVEW.id === id) LIVEW.id = null; return; }
+      const entry = MAPS[key];
+      if (LIVEW.key !== key || !entry || !entry.el.isConnected) { if (LIVEW.key === key) LIVEW.id = LIVEW.key = null; return; }
       const cur = LEGS[id];
       if (cur && !document.hidden) {
         const tr = (cur.flight && cur.flight.track) || [], itr = (cur.inbound && cur.inbound.track) || [];
         const since = Math.min(tr.length ? tr[tr.length - 1][4] || 0 : 0, itr.length ? itr[itr.length - 1][4] || 0 : Infinity);
+        const ctl = window.AbortController ? new AbortController() : null;
+        const stop = ctl && setTimeout(() => ctl.abort(), 8000);
         try {
-          const d = await api(`api/live/${encodeURIComponent(id)}?since=${Math.floor(since || 0)}`);
+          const d = await api(`api/live/${encodeURIComponent(id)}?since=${Math.floor(since || 0)}`, ctl ? { signal: ctl.signal } : undefined);
           let moved = false;
           if (d.live && (!cur.live || d.live.at > cur.live.at)) { cur.live = d.live; moved = true; }
           if (d.inbound_live && (!cur.inbound_live || d.inbound_live.at > cur.inbound_live.at)) { cur.inbound_live = d.inbound_live; moved = true; }
           const add = (arr, pts) => { const last = arr.length ? arr[arr.length - 1][4] || 0 : 0; for (const p of pts || []) if ((p[4] || 0) > last) { arr.push(p); moved = true; } };
           if (cur.flight) { cur.flight.track = cur.flight.track || []; add(cur.flight.track, d.track); }
           if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
-          const entry = MAPS[`leg-${id}`];
-          if (moved && entry) paintMap(entry, withChain(cur), false);
-        } catch {}
+          if (moved && MAPS[key]) paintMap(MAPS[key], withChain(cur), false);
+        } catch {} finally { if (stop) clearTimeout(stop); }
       }
       LIVEW.timer = setTimeout(tick, 5000);
     };
@@ -1520,7 +1525,7 @@
       const opt = { interactive: false, key: `hero-${next.id}` };
       // draw straight away from the last full copy so the map never shows blank, then update
       if (LEGS[next.id]) drawMap(hm_, withChain(LEGS[next.id]), opt);
-      api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), withChain(full), opt); })
+      api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), withChain(full), opt); liveWatch(full, opt.key); })
         .catch(() => { if (!LEGS[next.id]) drawMap(hm_, next, opt); });
     }
   }
