@@ -582,6 +582,19 @@ def surface(airport, max_age=15):
                 if now - v["t"] <= max_age and v.get("lat") is not None and v.get("lon") is not None]
 
 
+def prune(max_age=12 * 3600):
+    """Forget callsigns no longer watched (their last message over 12 h old), so months of flights
+    don't pile up in memory. Nothing from the feeds is ever written to disk."""
+    now = time.time()
+    with LOCK:
+        for acid in [a for a, lst in EVENTS.items() if a not in WATCH and (not lst or now - (lst[-1].get("got") or 0) > max_age)]:
+            del EVENTS[acid]
+        for acid in [a for a, recs in LIVE.items() if a not in WATCH and all(now - r["at"] > max_age for r in recs.values())]:
+            del LIVE[acid]
+        for ap in [a for a in SURFACE if a not in WATCH_AIRPORTS]:
+            del SURFACE[ap]
+
+
 def events(callsign):
     with LOCK:
         return list(EVENTS.get((callsign or "").upper(), []))

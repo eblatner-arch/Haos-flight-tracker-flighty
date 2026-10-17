@@ -499,6 +499,7 @@ def swim_watch(now):
     swim.WATCH.update(keep)
     swim.WATCH_AIRPORTS.clear()
     swim.WATCH_AIRPORTS.update(aps)
+    swim.prune()
 
 
 SWIM_FAST = set()   # legs whose next update applies SWIM news without loading the FlightAware page

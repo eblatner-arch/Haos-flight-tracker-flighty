@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.2
+- FAA SWIM: callsigns and airports no longer watched are forgotten after 12 hours, so memory stays flat over months.
+
 ## 3.15.1
 - Surface map: an XPDR button filters to aircraft with transponders on (the default) or shows everything the surface radar sees, including vehicles and untransponded targets. The choice is remembered on that device.
 
