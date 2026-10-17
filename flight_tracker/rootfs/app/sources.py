@@ -303,3 +303,72 @@ def pick_fr24(items, dep, arr, sched_out, dep_tz=None):
         dates.add(datetime.fromtimestamp(sched_out, dep_tz).strftime("%Y-%m-%d"))
     same = [x for x in cands if x["date"] in dates and not x["ts"]]
     return same[0] if len(same) == 1 else None
+
+
+# ---------------------------------------------------------------- AeroDataBox flight pages
+
+ADB_URL = "https://aerodatabox.com/flights/number/{}/{}"
+
+
+def _adb_time(x):
+    """AeroDataBox times: {"utc": "2026-10-16 23:05Z", "local": ...} or plain strings."""
+    if isinstance(x, dict):
+        x = x.get("utc") or x.get("local")
+    if not x:
+        return None
+    s = str(x).strip().replace(" ", "T").replace("Z", "+00:00")
+    try:
+        from datetime import datetime, timezone
+        d = datetime.fromisoformat(s)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d.timestamp()
+    except ValueError:
+        return None
+
+
+def _adb_code(ap):
+    ap = ap or {}
+    if isinstance(ap, dict) and isinstance(ap.get("airport"), dict):
+        ap = ap["airport"]
+    return ((ap.get("iata") or "") if isinstance(ap, dict) else "").upper() or None
+
+
+def parse_adb(payloads):
+    """Flights in whatever JSON the AeroDataBox page loaded (its API's shape: number, status,
+    departure/arrival {airport {iata}, scheduledTime, revisedTime}, aircraft {reg})."""
+    out, seen = [], set()
+
+    def walk(x, depth=0):
+        if depth > 8:
+            return
+        if isinstance(x, list):
+            for y in x:
+                walk(y, depth + 1)
+        elif isinstance(x, dict):
+            dep, arr = x.get("departure"), x.get("arrival")
+            if isinstance(dep, dict) and isinstance(arr, dict) and (_adb_code(dep) or _adb_code(arr)):
+                rec = {"dep": _adb_code(dep), "arr": _adb_code(arr), "status": x.get("status"),
+                       "out_s": _adb_time(dep.get("scheduledTime") or dep.get("scheduledTimeUtc")),
+                       "in_s": _adb_time(arr.get("scheduledTime") or arr.get("scheduledTimeUtc")),
+                       "in_e": _adb_time(arr.get("revisedTime") or arr.get("predictedTime") or arr.get("runwayTime")),
+                       "reg": ((x.get("aircraft") or {}).get("reg") or "").upper() or None,
+                       "number": x.get("number")}
+                key = (rec["dep"], rec["arr"], rec["out_s"])
+                if key not in seen:
+                    seen.add(key)
+                    out.append(rec)
+            for y in x.values():
+                walk(y, depth + 1)
+    for p in payloads or []:
+        walk(p)
+    return out
+
+
+def pick_adb(items, dep, sched_out):
+    """The record for this departure: same origin, scheduled within 4 h."""
+    c = [x for x in items if x["dep"] == (dep or "").upper() and x["out_s"] and abs(x["out_s"] - sched_out) < 4 * 3600]
+    if c:
+        return min(c, key=lambda x: abs(x["out_s"] - sched_out))
+    c = [x for x in items if x["dep"] == (dep or "").upper()]
+    return c[0] if len(c) == 1 else None

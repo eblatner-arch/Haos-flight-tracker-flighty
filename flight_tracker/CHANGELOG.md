@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.9.0
+- AeroDataBox diversion check (free, no key): while your flight is in the air, its page for the flight number is read every 15 minutes (Settings → Tail and position sources → AeroDataBox diversion check; 0 turns it off). When it shows a different arrival airport, the flight is marked diverted right away, often before FlightAware. Each read is in the lookup log (purple tag) with what it found, and a screenshot
+- Fix: your own flight's live ADS-B position (used for the map while you're flying) was never fetched since 2.6.0, because of a name clash in the code; it is now
+
 ## 3.8.5
 - "Check AeroAPI now" on a flight's page: one paid query on demand (counted in the monthly budget, always allowed past the per-flight limit). Its answer goes in the lookup log and a full check follows
 - After a diversion every message uses the real route (LAX→MDT), not the planned one

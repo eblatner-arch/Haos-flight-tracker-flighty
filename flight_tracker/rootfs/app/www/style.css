@@ -499,3 +499,4 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .ff input[data-typed] { text-transform: uppercase; }
 .ff input[data-typed]::placeholder { text-transform: none; color: var(--faint); }
 .linkbtn { background: none; border: 0; padding: 0; margin-left: 6px; color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.src.adb { background: color-mix(in srgb, var(--violet, #8b5cf6) 18%, transparent); color: var(--violet, #8b5cf6); }

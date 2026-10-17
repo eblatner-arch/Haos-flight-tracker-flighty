@@ -209,6 +209,57 @@ class Browser:
         finally:
             page.close()
 
+    def adb_page(self, url, shot_name):
+        """An AeroDataBox flight-number page: every JSON answer the page downloads while it draws
+        (that's where its flight data is), plus the page text after expanding each flight."""
+        self._ensure()
+        page = self._ctx.new_page()
+        payloads = []
+
+        def grab(resp):
+            try:
+                ct = (resp.headers or {}).get("content-type", "")
+                if "json" in ct and len(payloads) < 30:
+                    payloads.append(resp.json())
+            except Exception:
+                pass
+        page.on("response", grab)
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass
+            try:
+                page.get_by_role("button", name=re.compile("accept|agree|got it|consent", re.I)).first.click(timeout=2000)
+            except Exception:
+                pass
+            # each flight with this number is a collapsed row: open them all
+            for sel in ("[aria-expanded='false']", "summary", "button:has-text('Details')", "button:has-text('More')"):
+                try:
+                    for el in page.locator(sel).all()[:12]:
+                        try:
+                            el.click(timeout=1500)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            page.wait_for_timeout(1500)
+            try:
+                page.screenshot(path=os.path.join(self.shot_dir, f"{shot_name}.png"), full_page=True)
+            except Exception:
+                pass
+            try:
+                text = page.inner_text("body", timeout=3000)[:30000]
+            except Exception:
+                text = ""
+            low = text[:3000].lower()
+            if not payloads and ("verify you are human" in low or "security verification" in low or "just a moment" in low):
+                raise RuntimeError("AeroDataBox asked for a captcha")
+            return {"json": payloads, "text": text}
+        finally:
+            page.close()
+
     def read_screenshot(self, path, ident, dep, when):
         """Ask Gemini to read a saved screenshot. Returns a flight dict or None."""
         if not self.client or not path or not os.path.exists(path):

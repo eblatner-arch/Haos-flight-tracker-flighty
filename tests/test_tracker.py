@@ -1286,3 +1286,19 @@ class ManualAero(unittest.TestCase):
             self.assertEqual((seen["tail"], seen["note"]), ("N21108", "En Route · to MDT"))
         finally:
             server.aero_on, server.aero_call = real_on, real_call
+
+
+class AeroDataBox(unittest.TestCase):
+    def test_parse_and_divert(self):
+        payload = [{"number": "UA 2608", "status": "Diverted",
+                    "departure": {"airport": {"iata": "ORD", "icao": "KORD"}, "scheduledTime": {"utc": "2026-10-16 21:00Z"}},
+                    "arrival": {"airport": {"iata": "ABE"}, "scheduledTime": {"utc": "2026-10-17 00:10Z"},
+                                "revisedTime": {"utc": "2026-10-17 00:40Z"}},
+                    "aircraft": {"reg": "N12345", "model": "Boeing 737"}},
+                   {"number": "UA 2608", "status": "Expected",
+                    "departure": {"airport": {"iata": "EWR"}, "scheduledTime": {"utc": "2026-10-17 01:30Z"}},
+                    "arrival": {"airport": {"iata": "IAH"}, "scheduledTime": {"utc": "2026-10-17 04:30Z"}}}]
+        items = sources.parse_adb([{"data": payload}])
+        self.assertEqual(len(items), 2)
+        hit = sources.pick_adb(items, "ORD", sources._adb_time("2026-10-16 21:05Z"))
+        self.assertEqual((hit["arr"], hit["status"], hit["reg"]), ("ABE", "Diverted", "N12345"))

@@ -61,6 +61,7 @@ DEFAULTS = {
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
     "fr24_minutes": 0,
+    "adb_minutes": 15,
     "schedule_days": 60,
     "adsb_inbound_minutes": 3,
     "nas_minutes": 5,
@@ -144,6 +145,7 @@ APP_SETTINGS = {
     "poll_near_minutes": ("int", 2, 60, "Within 3 h", "Minutes between FlightAware page checks.", "FlightAware page checks"),
     "poll_fast_minutes": ("int", 1, 30, "Last 45 min, taxi, landing", "Minutes between page checks around departure, in the last 20 min before landing and taxiing in.", "FlightAware page checks"),
     "poll_air_minutes": ("int", 2, 60, "In the air", "Minutes between page checks after takeoff. Tracking stops at the gate.", "FlightAware page checks"),
+    "adb_minutes": ("int", 0, 120, "AeroDataBox diversion check", "Minutes between reads of AeroDataBox's page for your flight while it's in the air (free, no key). It often shows a diversion before FlightAware does. 0 turns it off.", "Tail and position sources"),
     "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check", "Off (0) by default: Flightradar24 now shows a Cloudflare 'verify you are human' check to the page reader. If you turn it on: minutes between checks for the airline's tail assignment, from the watch window until your inbound leaves its gate (after that the inbound's own transponder is the answer).", "Tail and position sources"),
     "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
@@ -468,6 +470,53 @@ def reload_schedule(force=False):
 
 
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
+
+
+def adb_check(browser, L, f, now, planned):
+    """While the flight is in the air, read AeroDataBox's page for it every adb_minutes: its arrival
+    airport changes to the diversion airport before FlightAware shows it. -> L['adb'] or None"""
+    every = float(CFG.get("adb_minutes") or 0)
+    ph = fa.phase(f, now)
+    if not every or browser is None or ph not in ("airborne", "landed") or not planned:
+        return L.get("adb") if ph in ("airborne", "landed") else None
+    prev = L.get("adb") or {}
+    if now - (prev.get("at") or 0) < every * 60:
+        return prev
+    ident = (fr24_ident(L) or "").upper()
+    if not ident:
+        return prev
+    out_s = (f.get("times") or {}).get("out", {}).get("scheduled") or L["sched_out"]
+    day = datetime.fromtimestamp(out_s, alerting.tz_for(L.get("dep"), f.get("origin"))).strftime("%Y-%m-%d")
+    url = sources.ADB_URL.format(ident, day)
+    t0 = time.time()
+    rec = {"at": t0, "leg": L.get("display"), "leg_id": L["id"], "what": "AeroDataBox (diversion check)",
+           "url": url, "shot": f"{L['id']}-adb", "has_shot": True}
+    res = {"at": now}
+    try:
+        page = browser.adb_page(url, rec["shot"])
+        items = sources.parse_adb(page.get("json"))
+        hit = sources.pick_adb(items, L.get("dep"), out_s)
+        res.update(ok=True, flights=len(items), arr=(hit or {}).get("arr"), status=(hit or {}).get("status"),
+                   reg=(hit or {}).get("reg"), eta=(hit or {}).get("in_e"))
+        if not items:  # couldn't find its data: keep a bit of the page text for the log
+            txt = page.get("text") or ""
+            res["text_hint"] = " ".join(txt.split())[:160]
+        if hit and hit.get("arr") and hit["arr"] != planned.upper():
+            res["diverted_to"] = hit["arr"]
+        rec.update(page_data=bool(items), flights=len(items), ms=int((time.time() - t0) * 1000),
+                   found=(f"{hit['dep']}→{hit['arr']} {hit.get('status') or ''}".strip() if hit
+                          else "no flight data read" if not items else "this departure isn't listed"))
+    except Exception as e:
+        res.update(ok=False, error=str(e).splitlines()[0][:200])
+        rec.update(error=res["error"], ms=int((time.time() - t0) * 1000))
+        log.info("%s AeroDataBox: %s", L.get("display"), res["error"])
+    with LOCK:
+        STATE["debug"] = (STATE["debug"] + [rec])[-60:]
+    L["adb"] = res
+    note = (f"to {res['arr']}" + (f" · {res['status']}" if res.get("status") else "")) if res.get("arr") else \
+        (f"error: {res['error']}" if res.get("error") else rec.get("found") or "nothing read")
+    saw(L, "AeroDataBox", res.get("reg"), note)
+    return res
 
 
 def route_end(route):
@@ -1453,7 +1502,7 @@ def update_leg(browser, lid):
     prev_aero_at = (L.get("aero") or {}).get("at")
     prev_tail_at = (L.get("tail_info") or {}).get("at")
     L["_seen"] = []
-    sources = []
+    used = []
     first = None
     try:
         if first_lookup_due(L, now):
@@ -1461,7 +1510,7 @@ def update_leg(browser, lid):
             if first:
                 L["fa_id"] = first.get("fa_id") or L.get("fa_id")
         if first:
-            sources.append("AeroAPI")
+            used.append("AeroAPI")
             flight, source, shot, note = first, "AeroAPI", None, None
             if first.get("tail"):
                 first["tail_source"] = "AeroAPI (airline assignment)"
@@ -1472,7 +1521,7 @@ def update_leg(browser, lid):
                 not_found_note(L) if (L.get("aero") or {}).get("at") else None)
         else:
             flight, source, shot, note = fetch_flight(browser, L)
-            sources.append(source or "FlightAware page (no flight data)")
+            used.append(source or "FlightAware page (no flight data)")
         if flight:
             # Fill in airport details FlightAware left out.
             for side, code in (("origin", L.get("dep")), ("destination", L.get("arr"))):
@@ -1483,7 +1532,10 @@ def update_leg(browser, lid):
                         ap[k] = ref[k]
                 flight[side] = ap
             planned = planned_arr(L)
-            fa.fix_diversion(flight, planned, route_end(flight.get("route")))
+            adb = adb_check(browser, L, flight, now, planned)
+            if adb and adb.get("at") == now:
+                used.append("AeroDataBox")
+            fa.fix_diversion(flight, planned, route_end(flight.get("route")) or (adb or {}).get("diverted_to"))
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
                 # a diversion keeps the airport you planned as the leg's arrival
@@ -1601,17 +1653,17 @@ def update_leg(browser, lid):
         for k in ("sched_out", "sched_in", "summary", "dh") if not L.get("extra") else ():
             L[k] = live.get(k, L.get(k))
         a_at = (L.get("aero") or {}).get("at")
-        if a_at and a_at != prev_aero_at and "AeroAPI" not in sources:
-            sources.append(f"AeroAPI ({(L.get('aero') or {}).get('reason')})")
+        if a_at and a_at != prev_aero_at and "AeroAPI" not in used:
+            used.append(f"AeroAPI ({(L.get('aero') or {}).get('reason')})")
         ti = L.get("tail_info") or {}
         for x in L.get("_seen") or []:
             name = "Flightradar24" if x["src"].startswith("Flightradar24") else "adsb.lol"
-            if name not in sources:
-                sources.append(name)
+            if name not in used:
+                used.append(name)
         if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
                                     and d["at"] >= now for d in STATE["debug"][-6:]):
-            sources.append("FlightAware page (inbound)")
-        log_lookup(L, prev_snap, now, sources or ["no lookup"])
+            used.append("FlightAware page (inbound)")
+        log_lookup(L, prev_snap, now, used or ["no lookup"])
         L["alerts"] = (L.get("alerts") or []) + new_alerts
         L["alerts"] = L["alerts"][-60:]
         STATE["legs"][lid] = L
