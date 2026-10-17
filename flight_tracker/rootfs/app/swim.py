@@ -150,22 +150,49 @@ def _run():
 
 
 def _cert_dir():
-    """A directory with just the ISRG Root X1 certificate under its OpenSSL hash name (what the kit's
-    README builds with c_rehash), falling back to the whole system store."""
+    """The trust folder for the Solace library (OpenSSL's hashed-directory form): every root in
+    Debian's store, plus the intermediate certificate(s) the FAA server points to but may not send
+    (fetched from the 'CA Issuers' address in its certificate), rehashed with openssl."""
     import os
-    src = "/etc/ssl/certs/ISRG_Root_X1.pem"
-    d = "/tmp/solace-ca"
+    import shutil
+    import ssl
+    import subprocess
+    import urllib.request
+    d = "/data/solace-ca" if os.path.isdir("/data") else "/tmp/solace-ca"
     try:
-        if os.path.exists(src):
-            os.makedirs(d, exist_ok=True)
-            for name in ("ISRG_Root_X1.pem", "4042bcee.0"):  # 4042bcee = its subject hash
-                p = os.path.join(d, name)
-                if not os.path.exists(p):
-                    os.symlink(src, p)
-            return d
-    except OSError:
-        pass
-    return "/etc/ssl/certs"
+        os.makedirs(d, exist_ok=True)
+        for n in os.listdir("/etc/ssl/certs"):
+            if n.endswith(".pem") and not os.path.exists(os.path.join(d, n)):
+                shutil.copy(os.path.join("/etc/ssl/certs", n), os.path.join(d, n))
+        host = (_cfg.get("swim_host") or "tcps://ems1.swim.faa.gov:55443").split("://")[-1]
+        h, _, port = host.partition(":")
+        url = None
+        try:
+            leaf = ssl.get_server_certificate((h, int(port or 55443)), timeout=15)
+            txt = subprocess.run(["openssl", "x509", "-noout", "-text"], input=leaf, capture_output=True,
+                                 text=True, timeout=15).stdout
+            for line in txt.splitlines():
+                if "CA Issuers - URI:" in line:
+                    url = line.split("URI:", 1)[1].strip()
+        except Exception as e:
+            log.info("SWIM: couldn't read the server certificate: %s", e)
+        if url:
+            name = "swim-issuer-" + os.path.basename(url).replace("/", "_") + ".pem"
+            path = os.path.join(d, name)
+            if not os.path.exists(path):
+                raw = urllib.request.urlopen(url, timeout=20).read()
+                pem = raw.decode() if raw.startswith(b"-----BEGIN") else subprocess.run(
+                    ["openssl", "x509", "-inform", "DER", "-outform", "PEM"], input=raw, capture_output=True,
+                    timeout=15).stdout.decode()
+                if "BEGIN CERTIFICATE" in pem:
+                    with open(path, "w") as f:
+                        f.write(pem)
+                    log.info("SWIM: added the server's issuer certificate from %s", url)
+        subprocess.run(["openssl", "rehash", d], capture_output=True, timeout=60)
+        return d
+    except Exception as e:
+        log.info("SWIM: trust folder: %s; using the system store", e)
+        return "/etc/ssl/certs"
 
 
 def _session():

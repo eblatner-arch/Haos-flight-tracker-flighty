@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.4
+- FAA SWIM certificate check fixed ("unable to get local issuer certificate"): the trust folder now holds all of Debian's roots plus the intermediate certificate the FAA server points to (fetched from its certificate's CA Issuers address), hashed with openssl
+
 ## 3.12.3
 - FAA SWIM: the first connection gives up after three tries and shows why (with a hint for login, certificate, network or queue problems) instead of sitting at "Connecting…"; it then tries again after a pause. Reconnecting after a drop still never gives up
 
