@@ -424,6 +424,20 @@ class Stdds(unittest.TestCase):
             <position><latitude>40.69</latitude><longitude>-74.17</longitude></position></positionReport></a:asdexMsg>""")
         self.assertNotIn("cs", reps[0])
 
+    def test_datalink_clearance(self):
+        import server
+        import swim
+        swim.WATCH.add("SWA9001")
+        self.feed("stdds_pdc.xml")
+        ev = [e for e in swim.events("SWA9001") if e["type"] == "TDLSCSPMessage"][0]
+        p = ev["pdc"]
+        self.assertEqual((p["tail"], p["cleared_to"], p["departure"], p["altitude"], p["dep_freq"], p["runway"], p["squawk"], p["at"]),
+                         ("N494WN", "KMCO", "ILEXY4.ZENZI", "4000", "127.225", "18L/36R", "2531", "2026-10-17T04:27:38Z"))
+        self.assertTrue(p["route"].startswith("KAUS ILEXY4 ZENZI DAS"))
+        sw = {}
+        server._swim_take(sw, ev)
+        self.assertEqual(sw["pdc"]["response"], "WILCO")
+
     def test_surface_positions_real(self):
         import swim
         swim.WATCH_AIRPORTS.clear(); swim.WATCH_AIRPORTS.add("KSEA")

@@ -1501,6 +1501,12 @@
         sw.arr.est_on && `est. landing ${fmt(sw.arr.est_on, tzB, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`,
         sw.arr.taxi && `${Math.round(sw.arr.taxi)} min taxi in`, sw.arr.at && `updated ${ago(sw.arr.at)}`].filter(Boolean).join(" · ") : ""],
       ["Landing estimate from", sw.eta_src === "tower" ? `${leg.arr} tower (TFDM)` : sw.eta_src === "FAA" ? "FAA (TFMS)" : ""],
+      ["Clearance (datalink)", sw.pdc ? [sw.pdc.cleared_to && `cleared to ${sw.pdc.cleared_to}`, sw.pdc.departure && `via ${sw.pdc.departure}`,
+        sw.pdc.altitude && `maintain ${sw.pdc.altitude}`, sw.pdc.fl && `FL${sw.pdc.fl}`, sw.pdc.dep_freq && `departure ${sw.pdc.dep_freq}`,
+        sw.pdc.runway && `expect ${sw.pdc.runway}`, sw.pdc.squawk && `squawk ${sw.pdc.squawk}`, sw.pdc.edct && `EDCT ${sw.pdc.edct}Z`,
+        sw.pdc.tail, sw.pdc.response && sw.pdc.response.toLowerCase(), sw.pdc.at && `at ${hm(Date.parse(sw.pdc.at) / 1000, tzA)}`]
+        .filter(Boolean).join(" · ") : ""],
+      ["Cleared route", sw.pdc && sw.pdc.route ? sw.pdc.route : ""],
       [`${leg.dep} ground`, [sw.tower_dep && sw.tower_dep.clearance && `cleared ${hm(sw.tower_dep.clearance, tzA)}`,
         sw.tower_dep && sw.tower_dep.gate && `gate ${sw.tower_dep.gate}`, sw.surf_dep && sw.surf_dep.ramp_out && `left ramp ${hm(sw.surf_dep.ramp_out, tzA)}`,
         sw.surf_dep && sw.surf_dep.took_off && `took off${sw.surf_dep.took_off_rwy ? " " + sw.surf_dep.took_off_rwy : ""} ${fmt(sw.surf_dep.took_off, tzA, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`]

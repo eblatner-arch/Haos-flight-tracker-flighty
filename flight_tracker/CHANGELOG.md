@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.16.1
+- Datalink clearance (PDC / CPDLC DCL) from STDDS on the flight page: cleared to, departure procedure, initial altitude, departure frequency, expected runway, squawk, EDCT revisions, the tail the clearance went to, the pilot's response, and the full cleared route. Also in the lookup log.
+
 ## 3.16.0
 - Map: the route ahead is the FAA's trajectory along the route ATC has cleared (FAA SWIM), updated with every amendment and clearance, drawn from the airplane onward so flown track, position and the (new) route ahead read as one line; fix names show from zoom 8. FlightAware's filed route is the fallback.
 - Map: takeoff and landing buttons jump to the departure or arrival airport zoomed in to see the surface traffic (they replace the runway button).

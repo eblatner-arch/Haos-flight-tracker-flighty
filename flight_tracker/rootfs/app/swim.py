@@ -462,7 +462,8 @@ def handle_stdds(xml_text):
     except Exception:
         pass
     root = (_ROOT_RE.findall(xml_text[:400]) or [""])[0]
-    if WATCH and root in ("TATrackAndFlightPlan", "SurfaceMovementEventMessage", "TowerDepartureEventMessage") \
+    if WATCH and root in ("TATrackAndFlightPlan", "SurfaceMovementEventMessage", "TowerDepartureEventMessage",
+                          "TDLSCSPMessage") \
             and any(cs in xml_text for cs in WATCH):
         try:
             _stdds_flight(root, xml_text)
@@ -532,6 +533,19 @@ def _stdds_flight(kind, xml_text):
     acid = (_txt(root, "callsign") or _txt(root, "aircraftID") or "").upper()
     if acid not in WATCH:
         return
+    if kind == "TDLSCSPMessage":
+        pdc = parse_pdc(_txt(root, "dataBody") or "")
+        t = _txt(root, "time") or ""
+        if len(t) == 14 and t.isdigit():   # MMDDYYYYhhmmss, UTC
+            pdc["at"] = f"{t[4:8]}-{t[0:2]}-{t[2:4]}T{t[8:10]}:{t[10:12]}:{t[12:14]}Z"
+        pdc["squawk"] = _txt(root, "beaconCode")
+        ev = {"acid": acid, "src": "STDDS", "got": now, "type": kind, "igtd": None,
+              "dep": _apt(_txt(root, "airportID")), "arr": _apt(_txt(root, "destinationAirport")), "pdc": pdc}
+        _keep(ev)
+        STDDS_STATE["matched"] += 1
+        MATCHED_RAW.append({"at": now, "xml": xml_text[:200000], "feed": "STDDS"})
+        del MATCHED_RAW[:-40]
+        return
     ev = {"acid": acid, "src": "STDDS", "got": now, "type": kind,
           "dep": _apt(_txt(root, "departureAirport")), "arr": _apt(_txt(root, "destinationAirport")), "igtd": None}
     if kind == "SurfaceMovementEventMessage":
@@ -549,6 +563,23 @@ def _stdds_flight(kind, xml_text):
     STDDS_STATE["matched"] += 1
     MATCHED_RAW.append({"at": now, "xml": xml_text[:200000], "feed": "STDDS"})
     del MATCHED_RAW[:-40]
+
+
+def parse_pdc(text):
+    """A pre-departure clearance by datalink (CPDLC DCL / PDC) as the tower's system logs it ->
+    {tail, response, cleared_to, departure, altitude, dep_freq, runway, fl, edct, route, text}."""
+    t = " ".join((text or "").split())
+    def g(rx):
+        m = _re.search(rx, t)
+        return m.group(1) if m else None
+    route = g(r"\b([A-Z]{4}\.[A-Z0-9./]+\.[A-Z]{4})\s*$")
+    return {k: v for k, v in {
+        "tail": g(r"/AN (N?[A-Z0-9-]+)"), "response": g(r"PILOT RESPONSE - ([A-Z ]+?)(?: \d{3}|$)"),
+        "cleared_to": g(r"CLEARED TO ([A-Z0-9]{3,4})"),
+        "departure": g(r"CLEARED TO [A-Z0-9]{3,4}(?: AIRPORT)? ([A-Z0-9]+[0-9][A-Z0-9]*(?:\.[A-Z0-9]+)?)"),
+        "altitude": g(r"MAINT (\d+) ?FT"), "dep_freq": g(r"DEP FREQ ([\d.]+)"), "runway": g(r"EXPECT RWY (\S+)"),
+        "fl": g(r"\bFL(\d{3})\b"), "edct": g(r"EDCT (\d{4})"),
+        "route": route_text(route) if route else None, "text": t or None}.items() if v}
 
 
 LIVE = {}   # callsign -> source key -> latest position from FAA radar (center, approach, surface)

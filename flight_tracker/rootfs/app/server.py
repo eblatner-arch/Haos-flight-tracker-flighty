@@ -592,6 +592,9 @@ def _swim_take(sw, ev):
         tw = ev.get("tower")
         if tw:
             sw["tower_dep"] = {"clearance": _ts(tw.get("clearance")), "gate": tw.get("gate"), "at": got}
+        if ev.get("pdc"):
+            # a later datalink message (an EDCT revision, the pilot's WILCO) adds to the clearance
+            sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got}
         return
     if ev.get("src") == "TFDM":
         td = ev.get("tfdm") or {}
@@ -717,6 +720,15 @@ def swim_check(L, f, planned):
                 w = {"on": "landed", "off": "took off", "spotin": "on the ramp", "spotout": "left the ramp"}.get(e.get("event"))
                 if w and e.get("at"):
                     bits.append(f"{ap_} surface radar: {w}{' ' + e['runway'] if e.get('runway') and e['event'] in ('on', 'off') else ''} {hm(e['at'], tz_)}")
+            pd = x.get("pdc")
+            if pd:
+                parts = [f"cleared to {pd['cleared_to']}" if pd.get("cleared_to") else None,
+                         pd.get("departure") and f"via {pd['departure']}",
+                         pd.get("altitude") and f"maintain {pd['altitude']}",
+                         pd.get("dep_freq") and f"departure {pd['dep_freq']}",
+                         pd.get("edct") and f"EDCT {pd['edct']}Z",
+                         pd.get("tail"), pd.get("response") and pd["response"].lower()]
+                bits.append(f"{dep} clearance by datalink: " + ", ".join(p for p in parts if p))
             tw = x.get("tower")
             if tw and tw.get("clearance"):
                 bits.append(f"{dep} tower: departure clearance {hm(tw['clearance'], tza)}" + (f", gate {tw['gate']}" if tw.get("gate") else ""))
@@ -841,6 +853,7 @@ def swim_overlay(L, f, now):
                 "taxi": (td_arr.get("arrivalTaxiTime") or {}).get("totalEstimatedTaxiInTime")} if td_arr else None,
         "state": sw.get("tfdm_state"),
         "surf_dep": sd or None, "surf_arr": sa or None, "tower_dep": sw.get("tower_dep"),
+        "pdc": sw.get("pdc"),
     }
     if sw.get("traj"):
         # the FAA's trajectory along the route ATC has on file (updated with every amendment)
