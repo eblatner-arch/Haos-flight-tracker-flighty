@@ -1697,18 +1697,22 @@
       ["Aircraft", [f.aircraft_name || f.aircraft_type, f.tail].filter(Boolean).join(" · ")],
       ["Tail from", f.tail_source || (leg.phase === "scheduled" ? "not known yet" : "")],
       ["Aircraft's day", (leg.chain || []).length ? leg.chain.map((c) => `${c.ident} ${c.route} (${c.phase === "scheduled" ? "not flown yet" : c.phase.replace("_", " ")})`).join(" ← ") : ""],
-      // The route: ATC's when it came; else the filed one, unless the FAA's own expected path (the
-      // dashed line) doesn't follow it. Then the FAA's is the current plan (UA1102 MIA-EWR: United's
-      // flight plan matched the FAA's inland path while FlightAware still showed an older filing).
+      // One route row: the clearance's route once the tower has sent it; else ATC's; else the filed
+      // one, unless the FAA's own expected path (the dashed line) doesn't go through the filed route's
+      // fixes. Then the FAA's is the current plan (UA1102 MIA-EWR: United's flight plan matched the
+      // FAA's inland path while FlightAware still showed an older filing). Airways (Q87) and
+      // procedures (FATHE4) are left out of the comparison: the FAA lists every fix along them.
       ...(() => {
+        if (sw.pdc && sw.pdc.route) return [["Route (cleared)", sw.pdc.route + (sw.pdc.at ? ` · ${hm(Date.parse(sw.pdc.at) / 1000, tzA)}` : "")]];
         const main = [f.route_source === "FAA" ? "Route (ATC)" : "Filed route", f.route ? f.route + (sw.route_changed ? ` · amended ${hm(sw.route_changed, tzA)}` : "") : ""];
         const fx = ((f.swim_route || {}).fixes || []).map((x) => x[2]).filter(Boolean);
-        if (!fx.length || f.route_source === "FAA") return [main];
-        const words = new Set((f.route || "").toUpperCase().split(/[\s.]+/));
-        const inner = fx.slice(1, -1), miss = inner.filter((x) => !words.has(x)).length;
-        if (f.route && inner.length && miss / inner.length > 0.5)
+        if (!fx.length || !f.route || f.route_source === "FAA") return [main];
+        const have = new Set(fx);
+        const named = (f.route || "").toUpperCase().split(/[\s.]+/).filter((w) => /^[A-Z]{2,5}$/.test(w) && w !== "DCT");
+        const found = named.filter((w) => have.has(w)).length;
+        if (named.length >= 2 && found / named.length < 0.5)
           return [["Route (FAA)", fx.join(" ")], ["FlightAware shows", `${f.route} · an older filing`]];
-        return [main, ["FAA's path", fx.join(" ")]];
+        return [main];
       })(),
       ["Previous route", sw.route_prev || ""],
       ["United", sw.airline ? [sw.airline.gate_out && `pushed ${hm(sw.airline.gate_out, tzA)}`, sw.airline.in && `gate arrival est. ${hm(sw.airline.in, tzB)}`,
@@ -1728,7 +1732,6 @@
         sw.pdc.runway && `expect ${sw.pdc.runway}`, sw.pdc.squawk && `squawk ${sw.pdc.squawk}`, sw.pdc.edct && `EDCT ${sw.pdc.edct}Z`,
         sw.pdc.tail && `airplane ${sw.pdc.tail}`, sw.pdc.gate && `gate ${sw.pdc.gate}`, sw.pdc.response && sw.pdc.response.toLowerCase(), sw.pdc.at && `at ${hm(Date.parse(sw.pdc.at) / 1000, tzA)}`]
         .filter(Boolean).join(" · ") : ""],
-      ["Cleared route", sw.pdc && sw.pdc.route ? sw.pdc.route : ""],
       [`${leg.dep} ground`, [sw.tower_dep && sw.tower_dep.clearance && `cleared ${hm(sw.tower_dep.clearance, tzA)}`,
         sw.tower_dep && sw.tower_dep.gate && `gate ${sw.tower_dep.gate}`, sw.surf_dep && sw.surf_dep.ramp_out && `left ramp ${hm(sw.surf_dep.ramp_out, tzA)}`,
         sw.surf_dep && sw.surf_dep.took_off && `took off${sw.surf_dep.took_off_rwy ? " " + sw.surf_dep.took_off_rwy : ""} ${fmt(sw.surf_dep.took_off, tzA, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`]

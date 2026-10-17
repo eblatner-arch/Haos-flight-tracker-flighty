@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.21.7
+- One route row in Details: the clearance's route once the tower has sent it ("Route (cleared)"); else ATC's; else the filed one. The separate "Cleared route" row is gone.
+- "Route (FAA) / FlightAware shows · an older filing" only when the FAA's path really misses the filed route's fixes. Airways and procedures are left out of the comparison (the FAA lists every fix along Q87; the filed route just says Q87), which wrongly flagged UA1643's route.
+
 ## 3.21.6
 - The EDCT no longer replaces the takeoff estimate: the estimate stays the tower's (or FlightAware's), and the EDCT shows under it in amber ("EDCT 14:59 · EWR program"), so a tower prediction later than the slot is visible next to it.
 
