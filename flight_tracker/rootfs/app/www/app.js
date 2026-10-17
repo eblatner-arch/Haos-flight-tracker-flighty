@@ -966,6 +966,7 @@
       ${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}
       ${scope}${lines.join("")}
       ${n.advisory ? `<a class="na-adv" href="${esc(n.advisory)}" target="_blank" rel="noopener">FAA advisory ↗</a>` : ""}
+      ${n.source ? `<div class="na-src faint small">from ${esc(n.source)}</div>` : ""}
     </div>`;
   }
   // FAA delay trends: they do affect you, so they sit up top too, but as a quiet card, not an alert.

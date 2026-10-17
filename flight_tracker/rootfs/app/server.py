@@ -2335,15 +2335,85 @@ def refresh_nas(now):
     try:
         items = sources.fetch_nas()
         with LOCK:
-            changed = [n["key"] for n in items] != [n["key"] for n in STATE["nas"]]
-            STATE["nas"], STATE["nas_at"], STATE["nas_error"] = items, now, None
-        if changed:
-            bump()
+            STATE["nas_page"], STATE["nas_at"], STATE["nas_error"] = items, now, None
+        rebuild_nas(now)
     except Exception as e:
         with LOCK:
             STATE["nas_error"] = str(e)[:200]
             STATE["nas_at"] = now
         log.warning("NAS status: %s", e)
+
+
+NAS_IDS = {}   # (airport, kind) -> the key a running program got when first seen, from either source
+
+
+def merge_nas(page, swim_items, cancelled, page_at, now):
+    """The NAS status page and the FAA's own flow messages (SWIM), woven together: ground stops and
+    ground delay programs come from SWIM the moment they're issued (with delays and scope), the
+    page fills in what SWIM lacks (advisory link, flights included) and supplies everything SWIM
+    doesn't carry (delay trends, closures, deicing). A program SWIM cancelled after the page was
+    last read stays gone. Each program keeps one key whichever source reports it, so it alerts once."""
+    out, seen = [], set()
+    page_prog = {(n["airport"], n["kind"]): n for n in page if n["kind"] in ("gs", "gdp")}
+    for k in list(dict.fromkeys(list(swim_items) + list(page_prog))):
+        sw, pg = swim_items.get(k), page_prog.get(k)
+        if sw and sw.get("end") and sw["end"] < now - 60:
+            sw = None   # program over
+        if not sw and pg and cancelled.get(k, 0) > (page_at or 0):
+            continue    # SWIM cancelled it after the page was read
+        if not sw and not pg:
+            continue
+        m = dict(pg or {})
+        if sw:
+            m.update({x: v for x, v in sw.items() if v not in (None, "", [])})
+            m["source"] = "FAA SWIM" + (" + NAS status" if pg else "")
+        else:
+            m["source"] = "NAS status"
+        m["key"] = NAS_IDS.get(k) or (pg or sw)["key"]
+        NAS_IDS[k] = m["key"]
+        seen.add(k)
+        out.append(m)
+    for k in [k for k in NAS_IDS if k not in seen]:
+        del NAS_IDS[k]   # program ended: a later one at that airport is new
+    out += [dict(n, source="NAS status") for n in page if n["kind"] not in ("gs", "gdp")]
+    return out
+
+
+def rebuild_nas(now):
+    with LOCK:
+        items = merge_nas(STATE.get("nas_page") or [], dict(swim.NAS), dict(swim.NAS_CANCELLED),
+                          STATE.get("nas_at"), now)
+        changed = [(n["key"], n.get("end"), tuple(n.get("scope") or [])) for n in items] != \
+                  [(n["key"], n.get("end"), tuple(n.get("scope") or [])) for n in STATE["nas"]]
+        STATE["nas"] = items
+    if changed:
+        bump()
+    return changed
+
+
+NAS_NEWS = set()   # airports whose SWIM ground stop / delay program just changed
+
+
+def nas_news(now):
+    """A ground stop or delay program SWIM just reported: rebuild the NAS list and check the
+    flights touching that airport now (no page load), so the alert goes out within seconds."""
+    if not NAS_NEWS:
+        return set()
+    aps = set(NAS_NEWS)
+    NAS_NEWS.difference_update(aps)
+    rebuild_nas(now)
+    out = set()
+    with LOCK:
+        for L in STATE["legs"].values():
+            f = L.get("flight") or {}
+            inb = (((L.get("inbound") or {}).get("origin") or {}).get("iata") or "").upper()
+            if watched(L, now) and aps & {(L.get("dep") or "").upper(), (L.get("arr") or "").upper(), inb,
+                                          ((f.get("destination") or {}).get("iata") or "").upper()}:
+                out.add(L["id"])
+                SWIM_FAST.add(L["id"])
+    if out:
+        log.info("FAA SWIM: ground stop / delay program change at %s", ", ".join(sorted(aps)))
+    return out
 
 
 def wx_codes(now):
@@ -2387,6 +2457,7 @@ def worker():
             while not REFRESH_Q.empty():
                 forced.add(REFRESH_Q.get_nowait())
             forced |= swim_news(now)
+            forced |= nas_news(now)
             if now - last_sched > 300 or "all" in forced or "schedule" in forced:
                 reload_schedule(force="all" in forced or "schedule" in forced)
                 check_schedule_stale(now)
@@ -3127,6 +3198,7 @@ def main():
     threading.Thread(target=worker, daemon=True, name="tracker").start()
     threading.Thread(target=backup_loop, daemon=True, name="backup").start()
     swim.ON_NEWS = lambda acid: WAKE.set()
+    swim.ON_NAS = lambda ap: (NAS_NEWS.add(ap), WAKE.set())
     swim.start(CFG)
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)

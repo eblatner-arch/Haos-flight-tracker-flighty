@@ -477,6 +477,44 @@ class AfterLanding(unittest.TestCase):
         self.assertEqual((f["times"]["in"]["estimated"], f["time_src"]["in"]["estimated"]), (land + 5 * 60, "United"))
         self.assertEqual(server._tower_state("AMA_TAXI_IN"), "taxiing in")
 
+
+class NasFromSwim(unittest.TestCase):
+    """Ground stops and delay programs from SWIM woven with the NAS status page."""
+    def setUp(self):
+        import server
+        server.NAS_IDS.clear()
+
+    def test_gdp_parsed_and_merged(self):
+        import server
+        import swim
+        here = os.path.dirname(os.path.abspath(__file__))
+        swim.NAS.clear(); swim.NAS_CANCELLED.clear()
+        with open(os.path.join(here, "swim_gdp.xml")) as fh:
+            swim._flow(fh.read())
+        g = swim.NAS[("JFK", "gdp")]
+        self.assertEqual((g["avg"], g["max"], g["reason"], g["scope"][0]), ("59.9", "133", "Thunderstorms", "ZLA"))
+        now = g["start"] + 600
+        page = [{"airport": "JFK", "kind": "gdp", "label": "Ground delay program", "key": "JFK|gdp|page1",
+                 "advisory": "https://x/adv", "start": g["start"], "end": g["end"]},
+                {"airport": "BWI", "kind": "delay", "label": "Departure delay trend", "key": "BWI|delay|Departure"}]
+        # SWIM first: the program appears before the page has it
+        out = server.merge_nas([], dict(swim.NAS), {}, None, now)
+        self.assertEqual([(n["airport"], n["source"]) for n in out], [("JFK", "FAA SWIM")])
+        key = out[0]["key"]
+        # then the page catches up: same program, same key (no second alert), page extras kept
+        out = server.merge_nas(page, dict(swim.NAS), {}, now, now)
+        jfk = [n for n in out if n["airport"] == "JFK"][0]
+        self.assertEqual((jfk["key"], jfk["advisory"], jfk["detail"]), (key, "https://x/adv", "avg 60 min, max 133 min"))
+        self.assertIn("BWI", [n["airport"] for n in out])          # delay trends still from the page
+
+    def test_swim_cancel_beats_stale_page(self):
+        import server
+        page = [{"airport": "SAN", "kind": "gs", "label": "Ground stop", "key": "SAN|gs|1"}]
+        out = server.merge_nas(page, {}, {("SAN", "gs"): T0 + 100}, T0, T0 + 120)
+        self.assertEqual(out, [])
+        out = server.merge_nas(page, {}, {("SAN", "gs"): T0 + 100}, T0 + 300, T0 + 320)   # page still shows it later
+        self.assertEqual(len(out), 1)
+
 class AirportLayout(unittest.TestCase):
     def test_osm_to_features(self):
         import server

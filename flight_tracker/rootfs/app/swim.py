@@ -216,6 +216,83 @@ def _sample(xml_text):
                 lst.append(xml_text[:200000])
 
 
+# Ground stops and ground delay programs as the FAA issues them (TFMS flow messages), for every
+# airport: (airport, kind) -> NAS item in the same shape as the NAS status page's. A cancel removes
+# it and is remembered for a while, so the slower NAS page can't bring it back.
+NAS = {}
+NAS_CANCELLED = {}
+ON_NAS = None
+
+
+def _flow(xml_text):
+    root = ET.fromstring(xml_text)
+    for msg in root.iter():
+        if _local(msg.tag) != "fiMessage" or msg.get("msgType") not in ("GS", "GDP", "AFP"):
+            continue
+        kind = {"GS": "gs", "GDP": "gdp", "AFP": "gdp"}[msg.get("msgType")]
+        for body in msg:
+            name = _local(body.tag)
+            f = {}
+            for c in body.iter():
+                n = _local(c.tag)
+                if n not in f and (c.text or "").strip() and not list(c):
+                    f[n] = c.text.strip()
+            arpt = (f.get("airportId") or f.get("ctlElement") or "").upper()
+            if not arpt or (f.get("elementType") and f["elementType"] != "APT"):
+                continue
+            status = (f.get("tmiStatus") or "ACTUAL").upper()
+            k = (arpt, kind)
+            if "cancel" in name.lower() or status in ("PURGED", "CANCELLED", "CANCELED", "EXPIRED"):
+                NAS.pop(k, None)
+                NAS_CANCELLED[k] = time.time()
+                _nas_changed(arpt)
+                continue
+            if status != "ACTUAL":
+                continue   # proposed programs aren't in effect yet
+            def period(*names):
+                for pn in names:
+                    el = next((c for c in body.iter() if _local(c.tag) == pn), None)
+                    if el is not None:
+                        st = next((c.text for c in el.iter() if _local(c.tag) == "startTime"), None)
+                        en = next((c.text for c in el.iter() if _local(c.tag) == "endTime"), None)
+                        if st or en:
+                            return st, en
+                return None, None
+            st, en = period("gsPeriod", "groundStopPeriod", "advisoryValidPeriod", "cumulativeProgramPeriod")
+            scope_el = next((c for c in body.iter() if _local(c.tag) == "departureFacilitiesIncludedList"), None) \
+                or next((c for c in body.iter() if _local(c.tag) == "departureScope"), None)
+            scope = [(c.text or "").strip() for c in scope_el.iter() if _local(c.tag) == "facilityId" and (c.text or "").strip()] \
+                if scope_el is not None else []
+            avg, mx = f.get("avgDelay"), f.get("maxDelay")
+            det = ", ".join(x for x in (f"avg {round(float(avg))} min" if avg else "", f"max {mx} min" if mx else "") if x)
+            NAS[k] = {"airport": arpt, "kind": kind, "label": "Ground stop" if kind == "gs" else "Ground delay program",
+                      "reason": (f.get("impactingCondition") or "").title(), "detail": det,
+                      "start": _iso_epoch(st), "end": _iso_epoch(en),
+                      "prob": (f.get("probabilityOfExtension") or "").title(), "center": f.get("center") or "",
+                      "scope": scope, "avg": avg, "max": mx, "source": "FAA SWIM", "at": time.time(),
+                      "key": f"{arpt}|{kind}|swim|{st or ''}"}
+            NAS_CANCELLED.pop(k, None)
+            _nas_changed(arpt)
+
+
+def _iso_epoch(iso):
+    if not iso:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(iso.strip().replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _nas_changed(arpt):
+    if ON_NAS:
+        try:
+            ON_NAS(arpt)
+        except Exception:
+            pass
+
+
 def handle(xml_text):
     """Keep the events for watched callsigns."""
     STATE["messages"] += 1
@@ -224,6 +301,13 @@ def handle(xml_text):
         _sample(xml_text)
     except Exception:
         pass
+    head = xml_text[:4000]
+    if "fiMessage" in head and ('msgType="GS"' in head or 'msgType="GDP"' in head or 'msgType="AFP"' in head):
+        try:
+            _flow(xml_text)
+        except Exception as e:
+            log.debug("SWIM flow message: %s", e)
+        return
     if not WATCH:
         return
     if not any(cs in xml_text for cs in WATCH):  # cheap test before parsing

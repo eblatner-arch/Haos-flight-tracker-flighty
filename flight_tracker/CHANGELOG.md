@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.17.0
+- NAS status woven from two sources: ground stops and ground delay programs come from FAA SWIM the moment they're issued, extended or cancelled (with average/max delay, reason and departure scope), and the flights they touch are checked right away; the NAS status page still supplies delay trends, closures and deicing, plus advisory links. One program keeps one alert whichever source reports it first, and a SWIM cancel isn't undone by an older page read. Each NAS card says where it came from.
+
 ## 3.16.1
 - Datalink clearance (PDC / CPDLC DCL) from STDDS on the flight page: cleared to, departure procedure, initial altitude, departure frequency, expected runway, squawk, EDCT revisions, the tail the clearance went to, the pilot's response, and the full cleared route. Also in the lookup log.
 
