@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.15
+- Lookup log entries are stamped when the check finishes (after the FlightAware page load), so news that arrived during the check no longer looks like it came before it happened.
+
 ## 3.15.14
 - After landing, the arrival time holds the last estimate (or takes United's gate time once United updates after landing) instead of jumping back to FlightAware's.
 - Lookup log: SWIM lines only show what's new since the previous line; no more "update, nothing new" or the same estimate every minute.

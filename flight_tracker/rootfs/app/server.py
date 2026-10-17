@@ -2087,7 +2087,7 @@ def update_leg(browser, lid):
         if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
                                     and d["at"] >= now for d in STATE["debug"][-6:]):
             used.append("FlightAware page (inbound)")
-        log_lookup(L, prev_snap, now, used or ["no lookup"])
+        log_lookup(L, prev_snap, time.time(), used or ["no lookup"])  # stamped when the check finished, after the page load
         L["alerts"] = (L.get("alerts") or []) + new_alerts
         L["alerts"] = L["alerts"][-60:]
         STATE["legs"][lid] = L
