@@ -501,9 +501,12 @@ def swim_watch(now):
     swim.WATCH_AIRPORTS.update(aps)
 
 
+SWIM_FAST = set()   # legs whose next update applies SWIM news without loading the FlightAware page
+
+
 def swim_news(now):
     """Legs to refresh right away because SWIM just reported their (or their inbound's) takeoff,
-    landing or diversion. At most once a minute per leg."""
+    landing or diversion: applied within seconds (no page load), at most every 20 s per leg."""
     if not swim.PENDING:
         return set()
     acids = set(swim.PENDING)
@@ -512,9 +515,10 @@ def swim_news(now):
     with LOCK:
         for L in STATE["legs"].values():
             idents = {(L.get("ident") or "").upper(), ((L.get("inbound") or {}).get("ident") or "").upper()}
-            if acids & idents and watched(L, now) and now - (L.get("swim_forced") or 0) >= 60:
+            if acids & idents and watched(L, now) and now - (L.get("swim_forced") or 0) >= 20:
                 L["swim_forced"] = now
                 out.add(L["id"])
+                SWIM_FAST.add(L["id"])
     if out:
         log.info("FAA SWIM news for %s: refreshing now", ", ".join(sorted(acids)))
     return out
@@ -688,6 +692,10 @@ def swim_overlay(L, f, now):
         t["on"]["estimated"] = eta
         if not t["in"].get("actual"):
             t["in"]["estimated"] = eta + max(2 * 60, min(45 * 60, gap))
+    for side, key, slot in ((td_dep, "offBlockTime", "out"), (td_arr, "inBlockTime", "in")):
+        v = _ts(((side.get(key) or {}) if isinstance(side.get(key), dict) else {}).get("actual"))
+        if v and v <= now + 60 and not t[slot].get("actual"):
+            t[slot]["actual"] = v
     est_off = (td_dep.get("runwayDepartureTime") or {}).get("estimated")
     if est_off and not t["off"].get("actual"):
         t["off"]["estimated"] = _ts(est_off)
@@ -1753,6 +1761,8 @@ def update_leg(browser, lid):
     L["_seen"] = []
     used = []
     first = None
+    fast = lid in SWIM_FAST
+    SWIM_FAST.discard(lid)
     try:
         if first_lookup_due(L, now):
             first = aero_call(L, now, "first lookup")
@@ -1768,6 +1778,10 @@ def update_leg(browser, lid):
         elif not watched(L, now):
             flight, source, shot, note = None, None, None, (
                 not_found_note(L) if (L.get("aero") or {}).get("at") else None)
+        elif fast and L.get("flight"):
+            # SWIM just reported takeoff/landing/diversion: apply it now (a second), not after a
+            # FlightAware page load; the page comes on the regular check right after.
+            flight, source, shot, note = None, L.get("source"), None, L.get("note")
         else:
             flight, source, shot, note = fetch_flight(browser, L)
             used.append(source or "FlightAware page (no flight data)")
@@ -1812,7 +1826,7 @@ def update_leg(browser, lid):
         if L.get("extra") and not L.get("flight") and (L.get("aero") or {}).get("at"):
             note = not_found_note(L)  # page check came up empty too: keep the clear "not found" story
         L["note"] = note
-        if shot or not first:
+        if (shot or not first) and not fast:
             L["shot"] = bool(shot)
         ph = fa.phase(L.get("flight"), now)
         if first or not watched(L, now):
@@ -1893,7 +1907,7 @@ def update_leg(browser, lid):
         log.error("%s: %s", L.get("display") or lid, e)
         L["error"] = str(e).splitlines()[0][:300]
     L["next_check"] = now + (90 if source_is_aero(L) and watched(L, now) and not L.get("compared")
-                             else poll_seconds(L, now))
+                             else 20 if fast else poll_seconds(L, now))
     if L.get("source") and L["source"] != "AeroAPI":
         L["compared"] = True
 

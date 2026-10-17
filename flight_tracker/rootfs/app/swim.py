@@ -263,7 +263,7 @@ def _keep(ev):
 def _news(ev):
     """Takeoff, landing, a diversion flag or a new destination: worth refreshing the flight now."""
     t = ev.get("tfdm") or {}
-    if (ev.get("off") or ev.get("on") or ev.get("diverted")
+    if (ev.get("off") or ev.get("on") or ev.get("diverted") or t.get("state")
             or ev.get("type") in ("departureInformation", "arrivalInformation")
             or ((t.get("dep") or {}).get("offBlockTime") or {}).get("actual")
             or ((t.get("dep") or {}).get("runwayDepartureTime") or {}).get("actual")

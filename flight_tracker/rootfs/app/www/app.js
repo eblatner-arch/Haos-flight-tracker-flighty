@@ -467,6 +467,9 @@
     const tg = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
     entry.airport = tg.length && d.center ? d.center : null;
     if (entry.aptBtn) entry.aptBtn.style.display = entry.airport ? "" : "none";
+    const mine = tg.some((t) => t.mine);
+    entry.surfaceMine = mine ? Date.now() : 0;
+    if (entry.ownMarker) entry.ownMarker.setOpacity(mine ? 0 : 1);
     if (!tg.length) return;
     const route = css("--route"), muted = css("--muted");
     for (const t of tg) {
@@ -551,7 +554,9 @@
     else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && track.length) {
       pos = track[track.length - 1]; hdg = track.length > 1 ? bearing(track[track.length - 2], pos) : 0;
     } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
-    if (pos) add(planeMarker([pos[0], pos[1]], hdg, route, leg.display));
+    // on the airport surface radar, that (more exact) target is your airplane: don't draw it twice
+    entry.ownMarker = pos && !(entry.surfaceMine && Date.now() - entry.surfaceMine < 10000)
+      ? add(planeMarker([pos[0], pos[1]], hdg, route, leg.display)) : null;
     entry.bounds = bounds;
     if (fit || !interactive) entry.center();
   }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.14.2
+- SWIM news (takeoff, landing, diversion, a tower state change) now updates the flight within seconds without waiting for a FlightAware page load; the page follows 20 s later.
+- Tower (TFDM) actual off-block and in-block times are used when present.
+- Map: your airplane isn't drawn twice when it's on the surface radar.
+
 ## 3.14.1
 - Maps use CARTO's OpenStreetMap tiles: current (EWR's new Terminal A) and detailed down to zoom 20.
 - Zoomed in on one of your flight's airports, the map labels runways and terminals (zoom 14+), taxiways (15+) and gates (16+), from OpenStreetMap, fetched once per airport and kept for a month.
