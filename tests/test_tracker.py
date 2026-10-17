@@ -1809,6 +1809,19 @@ class Swim(unittest.TestCase):
         self.assertIn("CLEARED SSTIK5", p["text"])
         swim.STATE["status"] = "off"; swim.STDDS_STATE["status"] = "off"
 
+    def test_artcc_keeps_low_and_high_shapes(self):
+        """A center's low- and high-altitude boundaries are both kept, wound the same way."""
+        import server
+        sq = lambda x0, y0, x1, y1: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+        data = {"features": [
+            {"properties": {"IDENT": "KZNY", "NAME": "NEW YORK", "LOCAL_TYPE": "ARTCC_L"},
+             "geometry": {"type": "Polygon", "coordinates": [sq(-76, 40, -73, 42)]}},
+            {"properties": {"IDENT": "KZNY", "NAME": "NEW YORK", "LOCAL_TYPE": "ARTCC_H"},
+             "geometry": {"type": "Polygon", "coordinates": [list(reversed(sq(-74, 38, -70, 41)))]}}]}
+        z = server._artcc_from_geojson(data)["ZNY"]
+        self.assertEqual(len(z["rings"]), 2)
+        self.assertTrue(all(server._ring_area(r) > 0 for r in z["rings"]))
+
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,
         and survives a restart."""

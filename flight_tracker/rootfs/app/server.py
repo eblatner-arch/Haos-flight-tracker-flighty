@@ -2865,14 +2865,19 @@ def airport_layout(code):
 # (AIS open data, public domain), fetched once and kept for 90 days. Used to draw a ground stop's
 # or delay program's departure scope on a map.
 ARTCC_URL = ("https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Boundary_Airspace/FeatureServer/0/query")
-ARTCC_PATH = os.path.join(DATA_DIR, "artcc_boundaries.json")
+ARTCC_PATH = os.path.join(DATA_DIR, "artcc_boundaries_v2.json")
 _artcc_lock = threading.Lock()
 
 
+def _ring_area(r):
+    return sum(r[i][1] * r[i + 1][0] - r[i + 1][1] * r[i][0] for i in range(len(r) - 1)) / 2
+
+
 def _artcc_from_geojson(data):
-    """FAA boundary features -> {ZNY: {name, rings: [[[lat, lon], …], …]}}: one shape per center,
-    the high-altitude one when there are several, rounded and thinned for drawing."""
-    best = {}
+    """FAA boundary features -> {ZNY: {name, rings: [[[lat, lon], …], …], parts: [...]}}: every ARTCC
+    shape of a center (its low- and high-altitude boundaries differ: drawing only one left part of
+    New York center uncovered), all wound the same way so the page can fill their union once."""
+    out = {}
     for ft in data.get("features") or []:
         p = ft.get("properties") or {}
         ident = (p.get("IDENT") or "").upper()
@@ -2886,13 +2891,17 @@ def _artcc_from_geojson(data):
             polys = [polys]
         elif g.get("type") != "MultiPolygon":
             continue
-        rings = [[[round(c[1], 3), round(c[0], 3)] for c in poly[0]] for poly in polys if poly and poly[0]]
-        size = sum(len(r) for r in rings)
-        high = "H" in str(p.get("LEVEL_") or "") or str(p.get("LOCAL_TYPE") or "").upper().endswith("_H")
-        score = (1 if high else 0, size)
-        if ident not in best or score > best[ident][0]:
-            best[ident] = (score, {"name": (p.get("NAME") or "").title() or ident, "rings": rings})
-    return {k: v for k, (_, v) in best.items()}
+        c = out.setdefault(ident, {"name": (p.get("NAME") or "").title() or ident, "rings": [], "parts": []})
+        c["parts"].append(" ".join(str(x) for x in (p.get("TYPE_CODE"), p.get("LOCAL_TYPE"), p.get("LEVEL_")) if x))
+        for poly in polys:
+            if not poly or not poly[0]:
+                continue
+            ring = [[round(pt[1], 3), round(pt[0], 3)] for pt in poly[0]]
+            if _ring_area(ring) < 0:
+                ring.reverse()
+            if ring not in c["rings"]:
+                c["rings"].append(ring)
+    return out
 
 
 def artcc_boundaries():

@@ -1626,11 +1626,10 @@
     const scope = new Set(n.scope || []);
     for (const [id, c] of Object.entries(ARTCC)) {
       const inS = scope.has(id);
-      for (const ring of c.rings) {
-        L.polygon(ring, { color: inS ? hot : muted, weight: inS ? 1.5 : 0.8, opacity: inS ? 0.9 : 0.5,
-          fillColor: hot, fillOpacity: inS ? 0.22 : 0, interactive: false }).addTo(map);
-        if (inS) ring.forEach((p) => bounds.push(p));
-      }
+      // all of a center's shapes (low and high altitude) as one area, filled once where they overlap
+      L.polygon(c.rings.map((r) => [r]), { color: inS ? hot : muted, weight: inS ? 1.5 : 0.8, opacity: inS ? 0.9 : 0.5,
+        fillColor: hot, fillOpacity: inS ? 0.22 : 0, fillRule: "nonzero", interactive: false }).addTo(map);
+      if (inS) c.rings.forEach((ring) => ring.forEach((p) => bounds.push(p)));
       const big = c.rings.slice().sort((a, b) => b.length - a.length)[0];
       if (big && big.length) {
         const lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;

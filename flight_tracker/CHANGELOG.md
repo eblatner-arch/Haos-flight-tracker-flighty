@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.20.7
+- Ground stop / delay program maps: each center is drawn from all of its FAA boundaries (low and high altitude), filled once where they overlap. Only one was drawn before, which left part of New York center (ZNY) uncovered. The boundaries are fetched again once.
+
 ## 3.20.6
 - Datalink clearances in the flight-strip format (United at SFO) are read: cleared route, SID and transition, climb via SID / expected altitude, departure frequency, runway, and the EDCT printed after the destination. The airline's delivery note that follows ("UAL444 001 Y C .N14214 P1527 GE6") gives the airplane and gate, so the PDC tail source works there too.
 - An EDCT in the clearance becomes the flight's EDCT when the FAA's own assignment didn't reach the app.
