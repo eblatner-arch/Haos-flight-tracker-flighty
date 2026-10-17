@@ -225,13 +225,25 @@
   // point at least ~2 km back (FAA center radar sends no heading).
   function headingOf(live, track) {
     if (live && live.heading != null) return live.heading;
-    const pos = live ? [live.lat, live.lon] : track && track.length ? track[track.length - 1] : null;
-    if (!pos || !track) return 0;
-    for (let i = track.length - 1; i >= 0; i--) {
-      const p = track[i];
-      if (p && p[0] != null && Math.abs(p[0] - pos[0]) + Math.abs(p[1] - pos[1]) > 0.02) return bearing(p, pos);
+    // newest known position (the live fix or the track's last point, whichever is later), and the
+    // direction from a point at least ~2 km before it in time: never from a point that came after it
+    const pts = (track || []).filter((p) => p && p[0] != null);
+    let pos = live ? [live.lat, live.lon] : null, t = live ? live.at || 0 : -Infinity;
+    const last = pts[pts.length - 1];
+    if (last && (!pos || (last[4] || 0) > t)) { pos = last; t = last[4] || Infinity; }
+    if (!pos) return 0;
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      if (p === pos || (p[4] && t !== Infinity && p[4] >= t)) continue;
+      if (Math.abs(p[0] - pos[0]) + Math.abs(p[1] - pos[1]) > 0.02) return bearing(p, pos);
     }
     return 0;
+  }
+  // the newest of the live fix and the track's last point
+  function newestPos(live, track) {
+    const last = (track || []).filter((p) => p && p[0] != null).pop();
+    if (live && !(last && (last[4] || 0) > (live.at || 0) + 5)) return [live.lat, live.lon];
+    return last ? [last[0], last[1]] : live ? [live.lat, live.lon] : null;
   }
   // Where the airplane is now, carried forward from its last fix at its speed and heading (at most
   // 2 min): moves smoothly between radar reports that only come about once a minute en route.
@@ -582,8 +594,9 @@
           const m = MAPS[key];
           if (moved && m) paintMap(m, withChain(cur), false);
           // between fixes, carry the airplane forward along its heading
-          if (m && m.ownMarker && cur.live && cur.phase === "airborne") { const a = aheadOf(cur.live, m.ownHdg || 0, Date.now()); if (a) m.ownMarker.setLatLng(a); }
-          if (m && m.inbMarker && cur.inbound_live && cur.inbound && cur.inbound.phase === "airborne") { const a = aheadOf(cur.inbound_live, m.inbHdg || 0, Date.now()); if (a) m.inbMarker.setLatLng(a); }
+          const fresh = (lv, trk) => { const l = (trk || []).filter((p) => p && p[0] != null).pop(); return !(l && (l[4] || 0) > (lv.at || 0) + 5); };
+          if (m && m.ownMarker && cur.live && cur.phase === "airborne" && fresh(cur.live, cur.flight && cur.flight.track)) { const a = aheadOf(cur.live, m.ownHdg || 0, Date.now()); if (a) m.ownMarker.setLatLng(a); }
+          if (m && m.inbMarker && cur.inbound_live && cur.inbound && cur.inbound.phase === "airborne" && fresh(cur.inbound_live, cur.inbound.track)) { const a = aheadOf(cur.inbound_live, m.inbHdg || 0, Date.now()); if (a) m.inbMarker.setLatLng(a); }
         } catch {} finally { if (stop) clearTimeout(stop); }
       }
       LIVEW.timer = setTimeout(tick, 5000);
@@ -747,7 +760,7 @@
       if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       let ip = null, ih = 0;
-      if (leg.inbound_live) { ip = [leg.inbound_live.lat, leg.inbound_live.lon]; ih = headingOf(leg.inbound_live, itr); }
+      if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
       else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
       if (ip) { entry.inbMarker = add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); entry.inbHdg = ih; ibounds.push([ip[0], ip[1]]); }
       if (ia && interactive) { ibounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
@@ -774,7 +787,7 @@
       add(L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label">${esc(ap.iata || "")}</span>`, iconSize: null, iconAnchor: [-6, 8] }) }));
     }
     let pos = null, hdg = 0;
-    if (leg.live) { pos = [leg.live.lat, leg.live.lon]; hdg = headingOf(leg.live, track); }
+    if (leg.live) { pos = newestPos(leg.live, track); hdg = headingOf(leg.live, track); }
     else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && track.length) {
       pos = track[track.length - 1]; hdg = headingOf(null, track);
     } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }

@@ -283,6 +283,14 @@ def _flow(xml_text):
             if "cancel" in name.lower() or status in ("PURGED", "CANCELLED", "CANCELED", "EXPIRED"):
                 NAS.pop(k, None)
                 NAS_CANCELLED[k] = time.time()
+                if kind == "gdp":
+                    # the program's EDCTs no longer apply ("DISREGARD EDCTS FOR DEST AUS")
+                    with LOCK:
+                        for acid in list(EDCTS):
+                            EDCTS[acid] = [e for e in EDCTS[acid] if _apt(e.get("element") or "") != _apt(arpt)]
+                            if not EDCTS[acid]:
+                                del EDCTS[acid]
+                    _edct_dirty[0] = True
                 _nas_changed(arpt)
                 continue
             if status != "ACTUAL":
@@ -788,37 +796,58 @@ def _stdds_flight(kind, xml_text):
     del MATCHED_RAW[:-40]
 
 
+def _strip_route(t):
+    """The flight-strip clearance's route and destination, and the EDCT printed after it:
+    '… 370 -SSTIK5 YYUNG LAX- KSFO SSTIK5 KTINA … PLYYA2 KSAN 1557 CLEARED …' (the -…- part is the
+    amended piece; remarks like @MEDEVAC and the './.' route shorthand can follow)."""
+    m = _re.search(r"\bP\d{4} \S+ \d{2,3} (.*?) CLEARED ", t)
+    if not m:
+        return None, None, None
+    body = _re.sub(r"(?:^| )-[^-]*- ?", " ", " " + m.group(1)).split()
+    edct = None
+    while body and (body[-1].startswith("@") or _re.fullmatch(r"\d{4}", body[-1])):
+        tok = body.pop()
+        if tok.isdigit():
+            edct = tok
+    if not body:
+        return None, None, edct
+    dest = body[-1].split("./.")[-1]
+    return " ".join(body), (dest if _re.fullmatch(r"[A-Z0-9]{3,4}", dest) else None), edct
+
+
 def parse_pdc(text):
-    """A pre-departure clearance by datalink (CPDLC DCL / PDC) as the tower's system logs it ->
-    {tail, response, cleared_to, departure, altitude, dep_freq, runway, fl, edct, route, text}."""
+    """A pre-departure clearance by datalink as the tower's system logs it, in either format: the CPDLC
+    DCL ('/AN N47434 … CLEARED TO KIAD ARPT …') or the flight-strip style ('001 UAL444 3616 KSFO B738/L
+    P1527 960 370 … CLEARED SSTIK5 DEPARTURE …'); or the delivery note that follows ('UAL444 001 Y C
+    .N14214 P1527 GE6', 'DAL425 001 N193DN KLAX G133') naming the airplane and gate ->
+    {tail, gate, response, cleared_to, departure, altitude, expect_alt, dep_freq, runway, fl, edct, route, text}."""
     t = " ".join((text or "").split())
     def g(rx):
         m = _re.search(rx, t)
         return m.group(1) if m else None
     route = g(r"\b([A-Z]{4}\.[A-Z0-9./]+\.[A-Z]{4})\s*$")
-    # The flight-strip style (United at SFO): "001 UAL444 3616 KSFO B738/L P1527 960 370 -SSTIK5 YYUNG
-    # LAX- KSFO SSTIK5 KTINA … PLYYA2 KSAN 1557 CLEARED SSTIK5 DEPARTURE YYUNG TRSN CLIMB VIA SID EXP 370
-    # 10 MIN AFT DP,DPFRQ 135.1 EXPECT RWY 01L", the time after the destination being the EDCT; then
-    # the airline's delivery note "UAL444 001 Y C .N14214 P1527 GE6" naming the airplane and gate.
-    strip = _re.search(r"\b([A-Z]{4} [A-Z0-9 ]+? ([A-Z]{4}))(?: (\d{4}))? CLEARED ", t)
+    s_route, s_dest, s_edct = _strip_route(t)
+    note = _re.fullmatch(r"[A-Z0-9]+ \d{1,3} (?:Y C \.(N[0-9][0-9A-Z]{0,4})? P\d{4}|(N[0-9][0-9A-Z]{0,4}) [A-Z0-9]{4})(?: G([A-Z0-9]{1,5}))?", t)
+    alt = g(r"MAINT(?:AIN)? (\d+) ?FT")
     out = {
-        "tail": g(r"/AN (N?[A-Z0-9-]+)") or g(r"(?:^| )\.(N[0-9][0-9A-Z]{0,4})\b"),
-        "gate": g(r"\.N[0-9][0-9A-Z]{0,4} P\d{4} ([A-Z0-9]{1,5})\b"),
+        "tail": g(r"/AN (N?[A-Z0-9-]+)") or (note and (note.group(1) or note.group(2))),
+        "gate": note and note.group(3),
         "response": g(r"PILOT RESPONSE - ([A-Z ]+?)(?: \d{3}|$)"),
-        "cleared_to": g(r"CLEARED TO ([A-Z0-9]{4}) (?:ARPT|AIRPORT)") or (strip and strip.group(2))
+        "cleared_to": g(r"CLEARED TO ([A-Z0-9]{4}) (?:ARPT|AIRPORT)") or s_dest
                       or g(r"\.([A-Z]{4})\s*$") or g(r"CLEARED TO ([A-Z0-9]{3,4})"),
         "departure": g(r"CLEARED TO [A-Z0-9]{3,4}(?: AIRPORT)? ([A-Z0-9]+[0-9][A-Z0-9]*(?:\.[A-Z0-9]+)?)")
                      or " ".join(x for x in (g(r"CLEARED ([A-Z]+\d[A-Z]?) DEPARTURE"), g(r"DEPARTURE ([A-Z0-9]+) TRSN")) if x)
                      or g(r"CLEARED TO [A-Z0-9]{3,5} VIA [A-Z0-9 ]*?\b([A-Z]+\d\.[A-Z0-9]+)") or None,
-        "altitude": g(r"MAINT (\d+) ?FT") or ("climb via SID" if "CLIMB VIA SID" in t else None),
+        "altitude": alt or ("climb via SID" if _re.search(r"CL(?:IM)?B VIA SID", t) else None),
         "expect_alt": g(r"\bEXP (\d{3}) "),
-        "dep_freq": g(r"DEP FREQ ([\d.]+)") or g(r"DPFRQ ([\d.]+)"), "runway": g(r"EXPECT RWY (\S+)"),
-        "fl": g(r"\bFL(\d{3})\b") or g(r"\bP\d{4} \d+ (\d{3}) "),
-        "edct": g(r"EDCT (\d{4})") or (strip and strip.group(3)),
-        "route": route_text(route) if route else (strip.group(1) if strip else None),
+        "dep_freq": g(r"DEP FREQ ([\d.]+)") or g(r"DPFRQ ([\d.]+)")
+                    or ("see SID" if _re.search(r"(?:DPFRQ|DEP FREQ) SEE SID", t) else None),
+        "runway": g(r"(?:EXPECT|XPCT|DEP) RWY (\S+)"),
+        "fl": g(r"\bFL(\d{3})\b") or g(r"\bP\d{4} \S+ (\d{3}) "),
+        "edct": g(r"EDCT (\d{4})") or s_edct,
+        "route": route_text(route) if route else s_route,
         "text": t if "CLEAR" in t else None}
     return {k: v for k, v in out.items() if v}
-
 
 LIVE = {}   # callsign -> source key -> latest position from FAA radar (center, approach, surface)
 

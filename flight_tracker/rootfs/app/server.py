@@ -611,7 +611,7 @@ def _swim_take(sw, ev):
             sw["tower_dep"] = {"clearance": _ts(tw.get("clearance")), "gate": tw.get("gate"), "at": got}
         if ev.get("pdc"):
             # a later datalink message (an EDCT revision, the pilot's WILCO) adds to the clearance
-            sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got, "v": 2}
+            sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got, "v": 3}
             e = _hhmm_near(ev["pdc"].get("edct"), _ts(ev["pdc"].get("at")) or got)
             if e and not sw.get("edct_tfms") and e != sw.get("edct"):
                 # the EDCT printed in the clearance, when the FAA's own assignment didn't reach us
@@ -697,13 +697,20 @@ def swim_check(L, f, planned):
     mine = swim_events_for(L, f)
     sw = L.setdefault("swim", {})
     pd = sw.get("pdc")
-    if pd and pd.get("text") and pd.get("v") != 2:
+    if pd and pd.get("text") and pd.get("v") != 3:
         # saved before the parser knew this tower's format: read the saved text again
-        sw["pdc"] = {**pd, **swim.parse_pdc(pd["text"]), "v": 2}
+        sw["pdc"] = {**pd, **swim.parse_pdc(pd["text"]), "v": 3}
     seen_at = max(L.get("swim_seen") or 0, sw.get("seen") or 0)
     fresh = [e for e in mine if (e.get("got") or 0) > seen_at]
     for e in fresh:
         _swim_take(sw, e)
+    # the delay program that set the EDCT was cancelled after it: the EDCT no longer applies
+    ef = sw.get("edct_for")
+    if sw.get("edct") and ef and (swim.NAS_CANCELLED.get((ef, "gdp")) or 0) > (sw.get("edct_at") or 0):
+        sw["edct_prev"] = sw.pop("edct")
+        sw.pop("edct_tfms", None)
+        sw.pop("edct_new", None)
+        saw(L, "FAA SWIM", None, f"{ef} delay program cancelled: the EDCT no longer applies")
     if fresh:
         out["new"] = True
         sw["seen"] = L["swim_seen"] = max(e.get("got") or 0 for e in fresh)

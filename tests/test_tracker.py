@@ -1804,7 +1804,7 @@ class Swim(unittest.TestCase):
             server._swim_take(sw, e)
         p = sw["pdc"]
         self.assertEqual((p["tail"], p["gate"], p["edct"], p["departure"], p["runway"], p["dep_freq"], p["cleared_to"]),
-                         ("N14214", "GE6", "1557", "SSTIK5 YYUNG", "01L", "135.1", "KSAN"))
+                         ("N14214", "E6", "1557", "SSTIK5 YYUNG", "01L", "135.1", "KSAN"))
         self.assertEqual(sw["edct"], datetime(2026, 10, 17, 15, 57, tzinfo=timezone.utc).timestamp())
         self.assertIn("CLEARED SSTIK5", p["text"])
         swim.STATE["status"] = "off"; swim.STDDS_STATE["status"] = "off"
@@ -1821,6 +1821,28 @@ class Swim(unittest.TestCase):
         z = server._artcc_from_geojson(data)["ZNY"]
         self.assertEqual(len(z["rings"]), 2)
         self.assertTrue(all(server._ring_area(r) > 0 for r in z["rings"]))
+
+    def test_pdc_formats_across_towers(self):
+        """Clearances and delivery notes captured live from 40 towers: the airplane, gate and destination."""
+        import swim
+        cases = [
+            ("DAL629 002 N573DT KATL GC55", "N573DT", "C55", None),
+            ("SWA621 001 N429WN KBNA", "N429WN", None, None),
+            ("ENY3862 001 Y C .N273NN P1545 GB46", "N273NN", "B46", None),
+            ("GJS4446 1 Y C . P1545 G", None, None, None),
+            ("001 LN36BL 2440 KHOU LJ31/L P1545 369 200 KHOU BLTWY7 CRIED REEKO3 KGKY @MEDEVAC CLEARED BLTWY7 "
+             "DEPARTURE CRIED TRSN MAINTAIN 5000FT EXP 200 10 MIN AFT DP,DPFRQ 132.25", None, None, "KGKY"),
+            ("001 QXE2330 2441 KSAN E75L/L P1545 902 320 -ECHHO2 SLI OROSZ COREZ RGOOD VNYRD1 KSTS- KSAN ECHHO OROSZ "
+             "COREZ./.KSTS CLEARED ECHHO2 DEPARTURE SLI TRSN CLIMB VIA SID EXP 320 10 MIN AFT DP,DPFRQ 124.35", None, None, "KSTS"),
+            ("005 CPDLC DCL DISPATCH MSG - NOT TO BE USED AS A CLEARANCE UAL1742 KSMF MODIFIED RTE B39M/L P1518 /AN N47434 "
+             "595 FL330 CLEARED TO LCU VIA MACUS Q122 RVRCT4.MACUS, AFTER LCU CLEARED TO KIAD ARPT AS FILED CLB VIA SID EXC "
+             "MAINT 9000FT DEP FREQ 127.4 KSMF.RVRCT4.MACUS.Q122.LCU..DDY.J158.RAP.J82.FSD..DBQ..JOT.J30.APE..MGW.GIBBZ6.KIAD",
+             "N47434", None, "KIAD"),
+        ]
+        for text, tail, gate, dest in cases:
+            p = swim.parse_pdc(text)
+            self.assertEqual((p.get("tail"), p.get("gate"), p.get("cleared_to")), (tail, gate, dest), text)
+        self.assertEqual(swim.parse_pdc(cases[4][0])["altitude"], "5000")
 
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,

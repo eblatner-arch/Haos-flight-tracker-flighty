@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.20.9
+- Airplane pointing backwards: when FlightAware's track had a newer point than the FAA radar fix, the direction was taken from that newer point back to the older fix. The airplane now sits at the newest known position and points along the track from an earlier point; it's only carried forward when the radar fix is the newest.
+- Datalink clearances checked against 40 towers: the delivery notes without the dot ("DAL425 001 N193DN KLAX G133", Delta, Southwest, American) now give the airplane and gate; gates read without the leading G (E6, not GE6); "MAINTAIN 5000FT", "XPCT RWY" / "DEP RWY", "DPFRQ SEE SID", remarks like @MEDEVAC and the "./." route shorthand are understood.
+- A delay program cancel ("DISREGARD EDCTS") clears the EDCTs it had assigned, and the flight's EDCT with a line in the log.
+
 ## 3.20.8
 - The datalink clearance's airplane is logged once (and again only if it changes), not on every check.
 - The ZNY label sits over Pennsylvania instead of the New Jersey coast.
