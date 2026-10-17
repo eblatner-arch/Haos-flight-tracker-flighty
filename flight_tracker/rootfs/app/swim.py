@@ -187,12 +187,14 @@ def _feeds(cfg):
     out = []
     if configured(cfg):
         out.append({"name": "TFMS", "state": STATE, "handle": handle, "queue": cfg["swim_queue"],
+                    "host": cfg.get("swim_host") or "tcps://ems1.swim.faa.gov:55443",
                     "vpn": cfg.get("swim_vpn") or "TFMS", "user": cfg["swim_username"], "password": cfg["swim_password"]})
     if (cfg.get("swim_tfdm_queue") or "").strip():
         user = cfg.get("swim_tfdm_username") or cfg.get("swim_username")
         pw = cfg.get("swim_tfdm_password") or cfg.get("swim_password")
         if user and pw:
             out.append({"name": "TFDM", "state": TFDM_STATE, "handle": handle_tfdm, "queue": cfg["swim_tfdm_queue"],
+                        "host": cfg.get("swim_tfdm_host") or "tcps://ems3.swim.faa.gov:55443",
                         "vpn": cfg.get("swim_tfdm_vpn") or "TFDM", "user": user, "password": pw})
     return out
 
@@ -229,7 +231,7 @@ def _run(feed):
         backoff = min(backoff * 2, 600)
 
 
-def _cert_dir():
+def _cert_dir(host):
     """The trust folder for the Solace library (OpenSSL's hashed-directory form): every root in
     Debian's store, plus the intermediate certificate(s) the FAA server points to but may not send
     (fetched from the 'CA Issuers' address in its certificate), rehashed with openssl."""
@@ -244,8 +246,7 @@ def _cert_dir():
         for n in os.listdir("/etc/ssl/certs"):
             if n.endswith(".pem") and not os.path.exists(os.path.join(d, n)):
                 shutil.copy(os.path.join("/etc/ssl/certs", n), os.path.join(d, n))
-        host = (_cfg.get("swim_host") or "tcps://ems1.swim.faa.gov:55443").split("://")[-1]
-        h, _, port = host.partition(":")
+        h, _, port = host.split("://")[-1].partition(":")
         url = None
         try:
             leaf = ssl.get_server_certificate((h, int(port or 55443)), timeout=15)
@@ -284,13 +285,13 @@ def _session(feed):
     from solace.messaging.receiver.message_receiver import MessageHandler
 
     # Set up the way the FAA's own Python JumpStart kit does it.
-    host = (_cfg.get("swim_host") or "tcps://ems1.swim.faa.gov:55443").strip()
+    host = feed["host"].strip()
     if _cfg.get("swim_skip_cert_check"):
         tls = TLS.create().without_certificate_validation()
     else:
         # SCDS presents a Let's Encrypt certificate; Debian's store has its root (ISRG Root X1)
         # in the hashed-directory form the Solace library expects.
-        tls = TLS.create().with_certificate_validation(True, False, _cert_dir())
+        tls = TLS.create().with_certificate_validation(True, False, _cert_dir(host))
     # The first connection gives up after a few tries so its error is shown (forever would keep
     # retrying silently); once connected, reconnecting after a drop never gives up.
     first = RetryStrategy.parametrized_retry(3, 5000)

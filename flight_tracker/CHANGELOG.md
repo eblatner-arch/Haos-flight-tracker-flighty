@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.13.1
+- TFDM: its own connection URL (ems3) and password fields.
+
 ## 3.13.0
 - FAA SWIM: optional second subscription, TFDM (tower surface data). Set its queue and VPN in the Configuration; it uses the TFMS login unless given its own. Messages are counted and sampled (not used yet) so the parser can be built from the real feed.
 

@@ -74,9 +74,12 @@ configuration:
   swim_tfdm_vpn:
     name: FAA SWIM TFDM message VPN
     description: The TFDM subscription's "Message VPN" from its JumpStart tab.
+  swim_tfdm_host:
+    name: FAA SWIM TFDM connection URL
+    description: The TFDM subscription's "JMS Connection URL". Default tcps://ems3.swim.faa.gov:55443.
   swim_tfdm_username:
     name: FAA SWIM TFDM username
     description: Only if it differs from the TFMS one.
   swim_tfdm_password:
     name: FAA SWIM TFDM password
-    description: Only if it differs from the TFMS one.
+    description: The TFDM subscription's own "Connection Password" (each subscription has its own). Blank uses the TFMS one.
