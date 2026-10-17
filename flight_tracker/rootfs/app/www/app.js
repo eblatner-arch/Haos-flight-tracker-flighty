@@ -255,6 +255,22 @@
     const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
     return [la2 / R, lo2 / R];
   }
+  // Rounds the corners between track points (two passes of corner cutting, ends kept), so the
+  // drawn track reads as the curved path an airplane flies rather than straight jumps between fixes.
+  function smooth(pts) {
+    let a = pts;
+    if (a.length < 3) return a;
+    for (let k = 0; k < 2; k++) {
+      const out = [a[0]];
+      for (let i = 0; i < a.length - 1; i++) {
+        const p = a[i], q = a[i + 1];
+        out.push([0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1]], [0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1]]);
+      }
+      out.push(a[a.length - 1]);
+      a = out;
+    }
+    return a;
+  }
   const ll = (ap) => ap && ap.lat != null && ap.lon != null ? [ap.lat, ap.lon] : null;
 
   function planeMarker(pos, heading, color, title) {
@@ -742,7 +758,7 @@
       g.forEach((p) => bounds.push(p));
     }
     const track = (f.track || []).filter((p) => p[0] != null);
-    if (track.length > 1) add(L.polyline(track.map((p) => [p[0], p[1]]), { color: route, weight: 3.5, opacity: 0.95 }));
+    if (track.length > 1) add(L.polyline(smooth(track.map((p) => [p[0], p[1]])), { color: route, weight: 3.5, opacity: 0.95 }));
     // the airplane's live position is fresher than the drawn track: join them so it sits on its line
     if (leg.live && track.length && ["airborne", "taxi_out", "landed"].includes(leg.phase))
       add(L.polyline([[track[track.length - 1][0], track[track.length - 1][1]], [leg.live.lat, leg.live.lon]], { color: route, weight: 3.5, opacity: 0.95 }));
@@ -754,7 +770,7 @@
     const ibounds = inbOpen ? bounds : [];
     if (inb) {
       const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
-      if (itr.length > 1) add(L.polyline(itr.map((p) => [p[0], p[1]]), { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
+      if (itr.length > 1) add(L.polyline(smooth(itr.map((p) => [p[0], p[1]])), { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
       if (leg.inbound_live && itr.length) add(L.polyline([[itr[itr.length - 1][0], itr[itr.length - 1][1]], [leg.inbound_live.lat, leg.inbound_live.lon]], { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
       const iw = (inb.waypoints || []).filter((p) => p[0] != null);
       if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
@@ -769,7 +785,7 @@
     (leg.chain || []).forEach((c, i) => {
       const ca = ll(c.origin), cb = ll(c.destination), op = Math.max(0.35, 0.75 - i * 0.15);
       const ct = (c.track || []).filter((p) => p[0] != null);
-      if (ct.length > 1) add(L.polyline(ct.map((p) => [p[0], p[1]]), { color: violet, weight: 2, opacity: op }));
+      if (ct.length > 1) add(L.polyline(smooth(ct.map((p) => [p[0], p[1]])), { color: violet, weight: 2, opacity: op }));
       const cw = (c.waypoints || []).filter((p) => p[0] != null);
       if (cw.length > 1) add(L.polyline(cw, { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
       else if (ca && cb) add(L.polyline(gcPoints(ca, cb), { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));

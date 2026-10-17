@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.20.12
+- Smoother tracks: below 18,000 ft (or under 250 kt) a track point is kept every 5 s from FAA approach and surface radar (15 s at cruise), so departures and approaches follow the real turns; and the drawn line rounds the corners between points.
+
 ## 3.20.11
 - Lookup log: a check where no source saw the tail (adsb.lol not answering) no longer makes the known tail show again on the next check. Each tail shows once; each reason for no tail shows once.
 

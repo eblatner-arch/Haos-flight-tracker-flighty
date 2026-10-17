@@ -1791,7 +1791,10 @@ def add_fix(fl, live):
     if not isinstance(tr, list):
         return
     at = int(live.get("at") or time.time())
-    if tr and tr[-1] and len(tr[-1]) > 4 and tr[-1][4] and at <= tr[-1][4] + 15:
+    # near the ground the airplane turns a lot (departures, approaches, taxiing) and approach and
+    # surface radar report every few seconds: keep a point every 5 s there, every 15 s at cruise
+    low = (live.get("alt_ft") or 0) < 18000 or (live.get("gs_kt") or 0) < 250
+    if tr and tr[-1] and len(tr[-1]) > 4 and tr[-1][4] and at <= tr[-1][4] + (5 if low else 15):
         return
     tr.append([round(live["lat"], 5), round(live["lon"], 5), live.get("alt_ft"), live.get("gs_kt"), at])
 
