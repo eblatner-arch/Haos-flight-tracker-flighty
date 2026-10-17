@@ -381,6 +381,7 @@
     // padding 0: the route layer is exactly the map's size instead of 10% larger
     const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: interactive, attributionControl: true, dragging: interactive,
       scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
+    if (map.attributionControl) map.attributionControl.setPrefix("");   // no "Leaflet" flag; the map credits stay
     addTiles(map, dark);
     const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive };
     entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);

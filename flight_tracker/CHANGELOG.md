@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.16
+- Map credits restyled: small, dim and translucent in the map's colors instead of a bright strip; the Leaflet tag is gone (the required OpenStreetMap and CARTO credits stay).
+
 ## 3.15.15
 - Lookup log entries are stamped when the check finishes (after the FlightAware page load), so news that arrived during the check no longer looks like it came before it happened.
 
