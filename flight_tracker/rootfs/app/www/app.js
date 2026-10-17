@@ -373,6 +373,24 @@
         },
       });
       map.addControl(new Apt());
+      const Xp = L.Control.extend({
+        options: { position: "topright" },
+        onAdd() {
+          const b = L.DomUtil.create("button", "map-center xpdr");
+          b.type = "button"; b.setAttribute("aria-label", "Transponder filter");
+          b.textContent = "XPDR";
+          b.style.display = "none"; b.style.marginTop = "6px";
+          L.DomEvent.disableClickPropagation(b);
+          L.DomEvent.on(b, "click", (e) => {
+            L.DomEvent.preventDefault(e);
+            try { localStorage.setItem("ft-surf-all", localStorage.getItem("ft-surf-all") === "1" ? "0" : "1"); } catch {}
+            if (entry.lastSurface) paintSurface(entry, entry.lastSurface);
+          });
+          entry.xpdrBtn = b;
+          return b;
+        },
+      });
+      map.addControl(new Xp());
     }
     if (interactive) {
       oneFingerZoom(map, el);
@@ -442,7 +460,7 @@
   function stopSurface() {
     if (SURF.timer) clearTimeout(SURF.timer);
     SURF.timer = null; SURF.id = null;
-    for (const m of Object.values(MAPS)) { if (m.surface) m.surface.clearLayers(); if (m.aptBtn) m.aptBtn.style.display = "none"; }
+    for (const m of Object.values(MAPS)) { if (m.surface) m.surface.clearLayers(); if (m.aptBtn) m.aptBtn.style.display = "none"; if (m.xpdrBtn) m.xpdrBtn.style.display = "none"; }
   }
   function surfaceWatch(leg) {
     if (!STATE || !STATE.stdds || STATE.stdds.status !== "connected") { stopSurface(); return; }
@@ -464,8 +482,17 @@
   function paintSurface(entry, d) {
     if (!entry.surface) entry.surface = L.layerGroup().addTo(entry.map);
     entry.surface.clearLayers();
-    const tg = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
-    entry.airport = tg.length && d.center ? d.center : null;
+    let only = true;
+    try { only = localStorage.getItem("ft-surf-all") !== "1"; } catch {}
+    const all = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
+    const tg = only ? all.filter((t) => t.mine || (t.xpdr && t.kind !== "vehicle")) : all;
+    if (entry.xpdrBtn) {
+      entry.xpdrBtn.style.display = all.length ? "" : "none";
+      entry.xpdrBtn.classList.toggle("on", only);
+      entry.xpdrBtn.title = only ? "Showing aircraft with transponders on (tap for everything)" : "Showing everything on the surface (tap for transponders only)";
+    }
+    entry.airport = all.length && d.center ? d.center : null;
+    entry.lastSurface = d;
     if (entry.aptBtn) entry.aptBtn.style.display = entry.airport ? "" : "none";
     const mine = tg.some((t) => t.mine);
     entry.surfaceMine = mine ? Date.now() : 0;

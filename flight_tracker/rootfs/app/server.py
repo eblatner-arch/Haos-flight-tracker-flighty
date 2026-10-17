@@ -2395,6 +2395,8 @@ def api_surface(lid, now):
                or x["alt"] <= elev + 500]   # aircraft still in the air on approach aren't "on the surface"
     for x in targets:
         x["mine"] = bool(ident) and x.get("cs") == ident
+        # answering the radar with a transponder: a callsign, a squawk or a transponder address
+        x["xpdr"] = bool(x.get("cs") or x.get("squawk") or x.get("hex"))
         x.pop("t", None)
     return {"airport": ap.get("iata") or code, "icao": icao, "phase": ph,
             "center": [ap["lat"], ap["lon"]] if ap.get("lat") is not None else None, "targets": targets}

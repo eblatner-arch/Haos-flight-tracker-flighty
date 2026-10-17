@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.1
+- Surface map: an XPDR button filters to aircraft with transponders on (the default) or shows everything the surface radar sees, including vehicles and untransponded targets. The choice is remembered on that device.
+
 ## 3.15.0
 - FAA radar first for live positions: approach radar (every ~5 s near airports) and airport surface radar give the position and the airplane itself (its transponder address decodes to the N-number, no lookup). adsb.lol is still used en route, for foreign aircraft and outside the US.
 - Surface radar events on the flight: landing and takeoff to the second with the runway, runway exit, onto/off the ramp. Wheels up/down now come from surface radar first, then the FAA, then the airline.
