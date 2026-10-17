@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.20.0
+- Live position every 5 s: airplanes taxiing, in the air or landing (yours, and your inbound in the air) move between flight checks. Near airports from FAA approach and surface radar (every few seconds, no extra network); en route from adsb.lol every 30 s (the FAA's center radar only reports about once a minute). The flight page fetches just the new position and track points and repaints the map in place.
+
 ## 3.19.3
 - Faster loading: the flights list no longer carries each flight's SWIM route drawing, clearance text and time sources (the flight page loads them); a flight page no longer downloads the tracks of the airplane's earlier legs (only the aircraft page does) and shows the latest 40 lookup-log entries with a "Show older" button. A typical flight page is about a third of its old size.
 - Live updates redraw at most every 2.5 s, so frequent SWIM changes don't make the phone stutter.

@@ -1624,6 +1624,91 @@ def pick_live(callsign, fl, accept=None):
     return min(cands, key=lambda a: min(sources.nm_between(p[0], p[1], a["lat"], a["lon"]) for p in pts))
 
 
+LIVE_EVERY = 5          # s between position refreshes for flights moving now
+ADSB_EVERY = 30        # s between adsb.lol asks when the FAA radar has nothing fresh
+
+
+def live_tick(now):
+    """Keep moving airplanes moving between flight checks: your flights (taxiing, in the air,
+    landing) and inbounds in the air get their position from FAA radar every few seconds (no
+    network: it's already here), else from adsb.lol every 30 s. The page polls /api/live."""
+    with LOCK:
+        todo = []
+        for L in STATE["legs"].values():
+            f = L.get("flight") or {}
+            if not L.get("ident") or not f or not watched(L, now):
+                continue
+            ph = fa.phase(f, now)
+            if ph in ("taxi_out", "airborne", "landed"):
+                todo.append(("own", L["id"], L["ident"], ph, dict(f), L.get("dep"),
+                             (f.get("destination") or {}).get("iata") or L.get("arr"), L.get("adsb_poll") or 0))
+            inb = L.get("inbound") or {}
+            if inb.get("ident") and ph == "scheduled" and fa.phase(inb, now) in ("taxi_out", "airborne"):
+                todo.append(("inb", L["id"], inb["ident"], fa.phase(inb, now), dict(inb), None, None,
+                             L.get("adsb_poll_inb") or 0))
+    for who, lid, ident, ph, fl, dep, arr, polled in todo:
+        if who == "own":
+            def mine(ac, ph=ph, dep=dep, arr=arr):
+                if ph == "airborne":
+                    return not ac.get("ground")
+                return _near(dep if ph == "taxi_out" else arr, ac, 12) is not False
+        else:
+            def mine(ac, ph=ph):
+                return not ac.get("ground") or ph == "taxi_out"
+        try:
+            cands = [a for a in (swim.live_all(ident) if swim.STATE.get("status") != "off" else []) if mine(a)]
+            radar = cands and all(a.get("tail") for a in cands)   # approach / surface radar, every few seconds
+            if radar:
+                live = cands[0] if len(cands) == 1 else pick_live(ident, fl, mine)
+            elif now - polled >= ADSB_EVERY:
+                # en route the FAA's center radar only reports about once a minute: ask adsb.lol
+                with LOCK:
+                    L = STATE["legs"].get(lid)
+                    if L is not None:
+                        L["adsb_poll" if who == "own" else "adsb_poll_inb"] = now
+                live = pick_live(ident, fl, mine)
+            elif cands:
+                live = cands[0]
+            else:
+                continue
+        except Exception as e:
+            log.debug("live position %s: %s", ident, e)
+            continue
+        if not live:
+            continue
+        with LOCK:
+            L = STATE["legs"].get(lid)
+            if L is None:
+                continue
+            key = "live" if who == "own" else "inbound_live"
+            if (L.get(key) or {}).get("at", 0) >= live.get("at", 0):
+                continue
+            L[key] = live
+            add_fix(L.get("flight") if who == "own" else L.get("inbound"), live)
+
+
+def live_loop():
+    while True:
+        try:
+            live_tick(time.time())
+        except Exception:
+            log.exception("live positions")
+        time.sleep(LIVE_EVERY)
+
+
+def api_live(lid, since=0):
+    """Position and the newest track points for the flight page between full refreshes."""
+    with LOCK:
+        L = STATE["legs"].get(lid)
+        if not L:
+            return None
+        f, inb = L.get("flight") or {}, L.get("inbound") or {}
+        tail = [p for p in (f.get("track") or [])[-60:] if p and len(p) > 4 and (p[4] or 0) > since]
+        itail = [p for p in (inb.get("track") or [])[-60:] if p and len(p) > 4 and (p[4] or 0) > since]
+        return {"live": L.get("live"), "inbound_live": L.get("inbound_live"), "track": tail, "inbound_track": itail,
+                "phase": fa.phase(f, time.time()) if f else None}
+
+
 def add_fix(fl, live):
     """Extend a flight's drawn track with a live ADS-B position, so the airplane sits on its line
     between FlightAware's (less frequent) track updates."""
@@ -3094,6 +3179,15 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             d = airport_layout(m.group(1).upper())
             return self._send(200, d, cache="private, max-age=86400") if d else self._send(404, {"error": "no layout"})
+        m = re.match(r"^/api/live/([\w-]+)$", path)
+        if m:
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                since = float((qs.get("since") or ["0"])[0])
+            except ValueError:
+                since = 0
+            d = api_live(m.group(1), since)
+            return self._send(200, d) if d else self._send(404, {"error": "not found"})
         m = re.match(r"^/api/surface/([\w-]+)$", path)
         if m:
             want = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("ap") or [None])[0]
@@ -3316,6 +3410,7 @@ def main():
     find_ingress()
     threading.Thread(target=worker, daemon=True, name="tracker").start()
     threading.Thread(target=backup_loop, daemon=True, name="backup").start()
+    threading.Thread(target=live_loop, daemon=True, name="live").start()
     swim.ON_NEWS = lambda acid: WAKE.set()
     swim.ON_NAS = lambda ap: (NAS_NEWS.add(ap), WAKE.set())
     swim.start(CFG)

@@ -531,6 +531,30 @@ class NasFromSwim(unittest.TestCase):
         new = [{"airport": "SAN", "kind": "gs", "label": "Ground stop", "key": "SAN|gs|2", "start": T0 + 900}]
         self.assertEqual(len(server.merge_nas(new, {}, {("SAN", "gs"): T0 + 100}, T0 + 1000, T0 + 1000)), 1)
 
+
+class LivePositions(unittest.TestCase):
+    def test_radar_moves_the_airplane_between_checks(self):
+        import server
+        import swim
+        now = T0
+        f, _ = fa.flights_from_bootstrap(boot(out_s=now - H, origin="EWR", dest="SFO", off_a=now - 120))
+        f["track"] = [[40.69, -74.17, 0, 0, now - 120]]
+        server.STATE["legs"]["lv"] = {"id": "lv", "ident": "UAL1593", "dep": "EWR", "arr": "SFO", "flight": f,
+                                       "sched_out": now - H, "sched_in": now + 5 * H}
+        swim.STATE["status"] = "connected"
+        swim.LIVE.clear()
+        swim.WATCH.add("UAL1593")
+        swim._live("UAL1593", "TAIS:N90:1", {"lat": 40.75, "lon": -74.10, "alt_ft": 4000, "gs_kt": 220,
+                                            "hex": "a1b2c3", "src": "N90 approach radar", "max_age": 20})
+        with mock.patch.object(server, "watched", return_value=True), \
+                mock.patch.object(server.time, "time", return_value=now):
+            server.live_tick(now)
+        L = server.STATE["legs"]["lv"]
+        self.assertEqual((L["live"]["src"], L["live"]["lat"]), ("N90 approach radar", 40.75))
+        d = server.api_live("lv", since=now - 60)
+        self.assertEqual(len(d["track"]), 1)
+        del server.STATE["legs"]["lv"]
+
 class AirportLayout(unittest.TestCase):
     def test_osm_to_features(self):
         import server

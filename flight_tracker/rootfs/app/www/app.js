@@ -525,6 +525,41 @@
   // surface radar: everything on the field, your flight highlighted. Polls only while that
   // flight's page is open: every 3 s while there's traffic to show, every 20 s otherwise.
   const SURF = { id: null, timer: null, zoomed: false };
+  // Between full refreshes the flight's own position (and its inbound's) moves every 5 s: only
+  // the new position and track points are fetched, and the map repaints in place.
+  const LIVEW = { id: null, timer: null };
+  function liveWatch(leg) {
+    const moving = ["taxi_out", "airborne", "landed"].includes(leg.phase) ||
+      (leg.inbound && ["taxi_out", "airborne"].includes(leg.inbound.phase));
+    if (!moving) { if (LIVEW.id === leg.id) { clearTimeout(LIVEW.timer); LIVEW.id = null; LIVEW.timer = null; } return; }
+    if (LIVEW.id === leg.id && LIVEW.timer) return;
+    if (LIVEW.timer) clearTimeout(LIVEW.timer);
+    LIVEW.id = leg.id;
+    const id = leg.id;
+    const tick = async () => {
+      LIVEW.timer = null;
+      if (LIVEW.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (LIVEW.id === id) LIVEW.id = null; return; }
+      const cur = LEGS[id];
+      if (cur && !document.hidden) {
+        const tr = (cur.flight && cur.flight.track) || [], itr = (cur.inbound && cur.inbound.track) || [];
+        const since = Math.min(tr.length ? tr[tr.length - 1][4] || 0 : 0, itr.length ? itr[itr.length - 1][4] || 0 : Infinity);
+        try {
+          const d = await api(`api/live/${encodeURIComponent(id)}?since=${Math.floor(since || 0)}`);
+          let moved = false;
+          if (d.live && (!cur.live || d.live.at > cur.live.at)) { cur.live = d.live; moved = true; }
+          if (d.inbound_live && (!cur.inbound_live || d.inbound_live.at > cur.inbound_live.at)) { cur.inbound_live = d.inbound_live; moved = true; }
+          const add = (arr, pts) => { const last = arr.length ? arr[arr.length - 1][4] || 0 : 0; for (const p of pts || []) if ((p[4] || 0) > last) { arr.push(p); moved = true; } };
+          if (cur.flight) { cur.flight.track = cur.flight.track || []; add(cur.flight.track, d.track); }
+          if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
+          const entry = MAPS[`leg-${id}`];
+          if (moved && entry) paintMap(entry, withChain(cur), false);
+        } catch {}
+      }
+      LIVEW.timer = setTimeout(tick, 5000);
+    };
+    LIVEW.timer = setTimeout(tick, 5000);
+  }
+
   function stopSurface() {
     if (SURF.timer) clearTimeout(SURF.timer);
     SURF.timer = null; SURF.id = null;
@@ -1681,6 +1716,7 @@
     `;
     drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
     surfaceWatch(leg);
+    liveWatch(leg);
     const lm = document.getElementById("log-more");
     if (lm) lm.onclick = async () => {
       lm.disabled = true; lm.textContent = "Loading…";
