@@ -61,7 +61,7 @@ DEFAULTS = {
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
     "fr24_minutes": 0,
-    "adb_minutes": 15,
+    "adb_minutes": 0,
     "schedule_days": 60,
     "adsb_inbound_minutes": 3,
     "nas_minutes": 5,
@@ -145,7 +145,7 @@ APP_SETTINGS = {
     "poll_near_minutes": ("int", 2, 60, "Within 3 h", "Minutes between FlightAware page checks.", "FlightAware page checks"),
     "poll_fast_minutes": ("int", 1, 30, "Last 45 min, taxi, landing", "Minutes between page checks around departure, in the last 20 min before landing and taxiing in.", "FlightAware page checks"),
     "poll_air_minutes": ("int", 2, 60, "In the air", "Minutes between page checks after takeoff. Tracking stops at the gate.", "FlightAware page checks"),
-    "adb_minutes": ("int", 0, 120, "AeroDataBox diversion check", "Minutes between reads of AeroDataBox's page for your flight while it's in the air (free, no key). It often shows a diversion before FlightAware does. 0 turns it off.", "Tail and position sources"),
+    "adb_minutes": ("int", 0, 120, "AeroDataBox diversion check", "Off (0) by default: AeroDataBox's site answers the page reader with \"Verification required\". If turned on: minutes between reads of its page for your flight while it's in the air.", "Tail and position sources"),
     "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check", "Off (0) by default: Flightradar24 now shows a Cloudflare 'verify you are human' check to the page reader. If you turn it on: minutes between checks for the airline's tail assignment, from the watch window until your inbound leaves its gate (after that the inbound's own transponder is the answer).", "Tail and position sources"),
     "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
@@ -160,6 +160,9 @@ def init_app_settings():
         if k not in s:
             s[k] = CFG.get(k, DEFAULTS.get(k))
     flags = STATE.setdefault("flags", {})
+    if not flags.get("adb_off"):
+        s["adb_minutes"] = 0  # AeroDataBox's site asks the page reader for verification
+        flags["adb_off"] = True
     if not flags.get("fr24_off"):
         s["fr24_minutes"] = 0  # Flightradar24 started answering the page reader with a captcha
         flags["fr24_off"] = True

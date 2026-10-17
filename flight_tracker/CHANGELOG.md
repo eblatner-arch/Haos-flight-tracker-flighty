@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.10.1
+- AeroDataBox diversion check is off by default: its site answers the page reader with "Verification required" (the lookup log now says so instead of "no flight data read")
+
 ## 3.10.0
 - Recovery flights are followed automatically: when a flight you track diverts and lands at the diversion airport, the same flight number from there to the original destination is added and found (UA2608 IAH→EWR diverted to ABE → UA2608 ABE→EWR), with a push "UA 2608 continues ABE→EWR" (Alerts → Recovery flight followed). It's yours (kept in History, paired with the diversion) or a friend's, like the diverted flight
 - If your work calendar already has that leg, nothing is added; if the calendar lists it later, the calendar's copy wins and the automatic one is removed

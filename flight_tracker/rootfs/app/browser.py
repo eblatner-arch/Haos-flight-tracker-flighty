@@ -275,8 +275,9 @@ class Browser:
             except Exception:
                 text = ""
             low = text[:3000].lower()
-            if not payloads and ("verify you are human" in low or "security verification" in low or "just a moment" in low):
-                raise RuntimeError("AeroDataBox asked for a captcha")
+            if "verification required" in low or "verify you are human" in low or "security verification" in low \
+                    or "just a moment" in low:
+                raise RuntimeError("AeroDataBox asked for verification (it blocks automated readers)")
             return {"json": payloads, "text": text}
         finally:
             page.close()
