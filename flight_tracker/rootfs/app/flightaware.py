@@ -197,6 +197,23 @@ def best_time(times, key):
     return t.get("actual") or t.get("estimated") or t.get("scheduled")
 
 
+def fix_diversion(f, planned_arr=None):
+    """A diverted flight shows up two ways: a flight 'cancelled' after it took off (AeroAPI marks the
+    original EWR flight that way), or a flight headed somewhere other than where you planned (LAX→MDT
+    instead of LAX→EWR). Both mean diverted: keep following it, don't call it cancelled."""
+    if not f:
+        return f
+    t = f.get("times") or {}
+    flew = (t.get("off") or {}).get("actual") or (t.get("on") or {}).get("actual")
+    if f.get("cancelled") and flew:
+        f["cancelled"] = False
+    dest = ((f.get("destination") or {}).get("iata") or "").upper()
+    planned = (planned_arr or "").upper()
+    if planned and dest and dest != planned:
+        f["diverted_to"], f["planned_arr"] = dest, planned
+    return f
+
+
 def phase(f, now):
     """scheduled | taxi_out | airborne | landed | arrived | cancelled | diverted"""
     if not f:

@@ -1234,3 +1234,23 @@ class NasOnlyBeforeTakeoff(unittest.TestCase):
         self.assertEqual([x["key"] for x in alerts.evaluate(L, CFG, T0, gs) if x["key"].startswith("nas")], ["nas_gs"])
         L = self.leg(off_a=T0 - 600)                     # airborne: nothing
         self.assertEqual([x for x in alerts.evaluate(L, CFG, T0, gs) if x["key"].startswith("nas")], [])
+
+
+class Diversion(unittest.TestCase):
+    def test_cancelled_after_takeoff_and_new_destination(self):
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="LAX", dest="MDT", off_a=T0 + 600))
+        f["cancelled"] = True                              # AeroAPI's view of the original LAX→EWR
+        fa.fix_diversion(f, "EWR")
+        self.assertFalse(f["cancelled"])
+        self.assertEqual((f["diverted_to"], f["planned_arr"]), ("MDT", "EWR"))
+        L = {"id": "d", "ident": "UAL2127", "display": "UA 2127", "dep": "LAX", "arr": "EWR", "sched_out": T0,
+             "sched_in": T0 + 5 * H, "notified": {"watch": True, "cancelled": True}, "flight": f}
+        a = alerts.evaluate(L, CFG, T0 + 3600, [])
+        keys = [x["key"] for x in a]
+        self.assertIn("diverted", keys)
+        self.assertNotIn("reinstated", keys)
+        self.assertEqual([x for x in a if x["key"] == "diverted"][0]["title"], "UA 2127 diverted to MDT")
+        self.assertEqual(alerts.status_label(L, CFG), "Diverted")
+        import history
+        rec = history.from_leg(L, "manual")
+        self.assertEqual((rec["arr"], rec["diverted_to"]), ("EWR", "MDT"))

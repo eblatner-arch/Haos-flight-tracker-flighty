@@ -35,8 +35,14 @@ def mins(n):
     return f"{sign}{n // 60}h {n % 60:02d}m" if n >= 60 else f"{sign}{n} min"
 
 
+def alerting_tz(code):
+    return tz_for(code, None)
+
+
 def status_label(leg, cfg):
     f = leg.get("flight")
+    if f and f.get("diverted_to") and not f.get("cancelled"):
+        return "Diverted"
     if leg.get("extra") and not f and (leg.get("aero") or {}).get("at"):
         return "Not found"
     ph = fa.phase(f, 0)
@@ -86,8 +92,9 @@ def problems(leg, cfg, nas_items, rules=None):
     ph = fa.phase(f, 0)
     if ph == "cancelled":
         out.append({"level": "critical", "text": "Cancelled"})
-    if ph == "diverted":
-        out.append({"level": "critical", "text": "Diverted"})
+    if ph == "diverted" or (f or {}).get("diverted_to"):
+        to = (f or {}).get("diverted_to")
+        out.append({"level": "critical", "text": f"Diverted to {to} (planned {(f or {}).get('planned_arr')})" if to else "Diverted"})
     if ph == "scheduled":
         d = fa.delay_minutes(f, leg.get("sched_out"))
         if d is not None and d >= int(cfg.get("delay_threshold_minutes", 15)):
@@ -241,11 +248,15 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
             "critical")
     elif ph != "cancelled" and nt.get("cancelled"):
         nt["cancelled"] = False
-        add("reinstated", f"{ident} is back on", f"{route} reinstated, departs {hhmm(out_now, dep_tz)}", "warn")
-    if ph == "diverted" and not nt.get("diverted"):
+        if not f.get("diverted_to"):  # "cancelled" then flying elsewhere is a diversion, said below
+            add("reinstated", f"{ident} is back on", f"{route} reinstated, departs {hhmm(out_now, dep_tz)}", "warn")
+    if (ph == "diverted" or f.get("diverted_to")) and not nt.get("diverted"):
         nt["diverted"] = True
-        to = (f.get("destination") or {}).get("iata") or "another airport"
-        add("diverted", f"{ident} diverted", f"{route} diverted to {to}.", "critical")
+        to = f.get("diverted_to") or (f.get("destination") or {}).get("iata") or "another airport"
+        eta = fa.best_time(f["times"], "in")
+        add("diverted", f"{ident} diverted to {to}",
+            f"{dep}→{f.get('planned_arr') or arr} diverted to {to}" + (f", arriving {hhmm(eta, alerting_tz(to))}" if eta else "") + ".",
+            "critical")
 
     o, d = f.get("origin") or {}, f.get("destination") or {}
     # Departure gate and terminal

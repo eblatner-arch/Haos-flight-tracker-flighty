@@ -470,6 +470,20 @@ def reload_schedule(force=False):
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
 
 
+def planned_arr(L):
+    """Where this flight was supposed to go: your calendar's arrival, or what you entered when you
+    added it (a followed flight's arrival is otherwise overwritten by wherever it actually goes)."""
+    if not L.get("extra"):
+        return L.get("arr")
+    if L.get("planned_arr"):
+        return L["planned_arr"]
+    for m in STATE.get("manual") or []:
+        if m.get("arr") and extra_id(m.get("ident") or "", m.get("dep") or "", m.get("arr") or "", m.get("date") or "") == L.get("id"):
+            L["planned_arr"] = m["arr"]
+            return m["arr"]
+    return None
+
+
 def extra_id(ident, dep="", arr="", date=""):
     parts = [re.sub(r"[^A-Z0-9]", "", ident), dep, arr, date.replace("-", "")]
     return "x-" + "-".join(p for p in parts if p)
@@ -1420,9 +1434,12 @@ def update_leg(browser, lid):
                     if not ap.get(k) and ref.get(k) is not None:
                         ap[k] = ref[k]
                 flight[side] = ap
+            planned = planned_arr(L)
+            fa.fix_diversion(flight, planned)
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
-                L["arr"] = flight["destination"].get("iata") or L["arr"]
+                # a diversion keeps the airport you planned as the leg's arrival
+                L["arr"] = planned or flight["destination"].get("iata") or L["arr"]
                 L["sched_out"] = flight["times"]["out"]["scheduled"] or flight["times"]["off"]["scheduled"] or now
                 L["sched_in"] = flight["times"]["in"]["scheduled"] or flight["times"]["on"]["scheduled"] or now
             # Keep the flown track across refreshes when a page only shows the recent part.
@@ -1889,7 +1906,9 @@ def leg_summary(L, now, nas, full=False):
     out["arr_delay"] = fa.arrival_delay_minutes(f, L["sched_in"]) if f else None
     t = alerting.turn_minutes(L)
     out["turn"] = round(t) if t is not None else None
-    for side, code in (("dep_ap", L.get("dep")), ("arr_ap", L.get("arr"))):
+    if f and f.get("diverted_to"):
+        out["arr"], out["planned_arr"] = f["diverted_to"], f.get("planned_arr")
+    for side, code in (("dep_ap", L.get("dep")), ("arr_ap", out.get("arr"))):
         ref = airports.get(code)
         fl = (f or {}).get("origin" if side == "dep_ap" else "destination") or {}
         out[side] = {**ref, **{k: v for k, v in fl.items() if v is not None}}

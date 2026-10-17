@@ -208,7 +208,7 @@ def from_leg(L, kind):
     for k, fallback in (("out", L.get("sched_out")), ("off", None), ("on", None), ("in", L.get("sched_in"))):
         x = t.get(k) or {}
         times[k] = {"s": x.get("scheduled") or fallback, "a": x.get("actual")}
-    diverted_to = d.get("iata") if f.get("diverted") and d.get("iata") and d.get("iata") != arr else None
+    diverted_to = f.get("diverted_to") or (d.get("iata") if f.get("diverted") and d.get("iata") and d.get("iata") != arr else None)
     typ = f.get("aircraft_type")
     return {
         "id": make_id(local_date(sched_out, dep), L.get("ident"), dep),
