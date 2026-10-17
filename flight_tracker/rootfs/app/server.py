@@ -626,6 +626,13 @@ def _swim_take(sw, ev):
         sw["arr"] = _iata(ev["arr"])
     if ev.get("diverted"):
         sw["diverted"] = True
+    if ev.get("edct"):
+        e = _ts(ev["edct"])
+        if e and e != sw.get("edct"):
+            sw["edct_prev"] = sw.get("edct")
+            sw["edct"], sw["cta"], sw["edct_at"] = e, _ts(ev.get("cta")), got
+            sw["edct_for"] = _iata(ev.get("element")) if ev.get("element") else None
+            sw["edct_new"] = True
     if ev.get("traj"):
         sw["traj"] = [[p[0], p[1]] for p in ev["traj"]]
         sw["traj_fixes"] = ev.get("traj_fixes") or []
@@ -732,6 +739,10 @@ def swim_check(L, f, planned):
             tw = x.get("tower")
             if tw and tw.get("clearance"):
                 bits.append(f"{dep} tower: departure clearance {hm(tw['clearance'], tza)}" + (f", gate {tw['gate']}" if tw.get("gate") else ""))
+        if sw.get("edct_new"):
+            prev = f" (was {alerting.hhmm(sw['edct_prev'], tza)})" if sw.get("edct_prev") else ""
+            bits.append(f"FAA: EDCT {alerting.hhmm(sw['edct'], tza)}{prev}"
+                        + (f" for {sw['edct_for']}" if sw.get("edct_for") else ""))
         if any(x.get("route") for x in fresh) and sw.get("route_changed", 0) > seen_at:
             bits.append(f"ATC: new route {sw.get('route')}")
         if any(x.get("diverted") for x in fresh):
@@ -744,6 +755,15 @@ def swim_check(L, f, planned):
         sw["logged"] = list(dict.fromkeys(bits))[-20:]
         if new_bits:
             saw(L, "FAA SWIM", None, "; ".join(new_bits))
+    if sw.pop("edct_new", False) and fa.phase(f, time.time()) in ("scheduled", "taxi_out"):
+        tza = alerting.tz_for(L.get("dep"), f.get("origin") or {})
+        so_ = ((f.get("times") or {}).get("off") or {}).get("scheduled") or L.get("sched_out")
+        late = f" · {round((sw['edct'] - so_) / 60)} min after scheduled takeoff" if so_ and sw["edct"] > so_ + 60 else ""
+        prev = f" (was {alerting.hhmm(sw['edct_prev'], tza)})" if sw.get("edct_prev") else ""
+        push_event("edct", f"{L.get('display') or L['ident']} EDCT {alerting.hhmm(sw['edct'], tza)}{prev}",
+                   f"{L.get('dep')}→{L.get('arr')}: expect departure clearance {alerting.hhmm(sw['edct'], tza)}"
+                   + (f" ({sw['edct_for']} program)" if sw.get("edct_for") else "") + late,
+                   level="warn", leg=L, tag=f"edct-{L.get('id')}")
     if not sw.get("seen"):
         L.pop("swim", None)
         return out
@@ -830,8 +850,11 @@ def swim_overlay(L, f, now):
         if v and v <= now + 60 and not t[slot].get("actual"):
             t[slot]["actual"] = v
             src[slot]["actual"] = "tower"
+    if sw.get("edct") and not t["off"].get("actual"):
+        t["off"]["estimated"] = sw["edct"]
+        src["off"]["estimated"] = "FAA EDCT"
     est_off = (td_dep.get("runwayDepartureTime") or {}).get("estimated")
-    if est_off and not t["off"].get("actual"):
+    if est_off and not t["off"].get("actual") and not sw.get("edct"):
         t["off"]["estimated"] = _ts(est_off)
         src["off"]["estimated"] = f"{L.get('dep')} tower"
     if sw.get("route"):
@@ -854,6 +877,8 @@ def swim_overlay(L, f, now):
         "state": sw.get("tfdm_state"),
         "surf_dep": sd or None, "surf_arr": sa or None, "tower_dep": sw.get("tower_dep"),
         "pdc": sw.get("pdc"),
+        "edct": {"at": sw.get("edct"), "cta": sw.get("cta"), "prev": sw.get("edct_prev"), "for": sw.get("edct_for")}
+        if sw.get("edct") else None,
     }
     if sw.get("traj"):
         # the FAA's trajectory along the route ATC has on file (updated with every amendment)

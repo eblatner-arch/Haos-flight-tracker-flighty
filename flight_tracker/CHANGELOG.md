@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.18.0
+- EDCTs from FAA SWIM: when a ground delay program or ground stop gives your flight an expected departure clearance time (or changes it), you get a push ("UA 698 EDCT 23:45 · SFO→EWR · EWR program · 40 min after scheduled takeoff"), the takeoff estimate shows it ("from FAA EDCT"), and the details show the EDCT, the earlier one and the arrival slot. New "EDCT" notification under NAS, on by default.
+
 ## 3.17.3
 - SWIM ground stops: delays so far and the FAA's expected average (checked against tonight's real LAS ground stop).
 

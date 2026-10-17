@@ -1700,6 +1700,32 @@ class Swim(unittest.TestCase):
         server.swim_overlay(L, f, T0)
         self.assertEqual(f["swim_route"]["pts"][-1], [40.69, -74.17])
 
+    def test_edct_from_slot_assignment(self):
+        """TMI_UPDATE slot assignment: CTF173 HND→PHX, EDCT 06:13Z, arrival slot 07:15Z (captured live)."""
+        import server
+        import swim
+        swim.STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("CTF173")
+        swim.EVENTS.clear()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_edct.xml")) as fh:
+            swim.handle(fh.read())
+        ev = [e for e in swim.events("CTF173") if e["type"] == "EDCT"][0]
+        self.assertEqual((ev["dep"], ev["arr"], ev["edct"], ev["cta"], ev["element"]),
+                         ("HND", "PHX", "2026-10-17T06:13:00Z", "2026-10-17T07:15:00Z", "PHX"))
+        so = datetime(2026, 10, 17, 5, 45, tzinfo=timezone.utc).timestamp()
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="HND", dest="PHX"))
+        L = {"id": "e1", "ident": "CTF173", "display": "CTF 173", "dep": "HND", "arr": "PHX", "sched_out": so}
+        pushed = []
+        with mock.patch.object(server, "push_event", lambda *a, **k: pushed.append(a)):
+            server.swim_check(L, f, "PHX")
+            server.swim_overlay(L, f, so)
+        self.assertEqual(f["times"]["off"]["estimated"], datetime(2026, 10, 17, 6, 13, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(f["time_src"]["off"]["estimated"], "FAA EDCT")
+        self.assertEqual(pushed[0][0], "edct")
+        with mock.patch.object(server, "push_event", lambda *a, **k: pushed.append(a)):
+            server.swim_check(L, f, "PHX")          # nothing new: no second push
+        self.assertEqual(len(pushed), 1)
+
     def test_amendment_marks_diversion(self):
         import server
         import swim

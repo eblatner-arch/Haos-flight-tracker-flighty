@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?><ns5:tfmDataService xmlns:ns2="urn:us:gov:dot:faa:atm:tfm:flightdatacommonmessages" xmlns:ns4="urn:us:gov:dot:faa:atm:tfm:ficommondatatypes" xmlns:ns3="urn:us:gov:dot:faa:atm:tfm:flightdata" xmlns:ns6="http://www.fixm.aero/tfm/3.1" xmlns:ns5="urn:us:gov:dot:faa:atm:tfm:tfmdataservice" xmlns:ns8="http://www.faa.aero/nas/3.1" xmlns:ns7="urn:us:gov:dot:faa:atm:tfm:tfmdatacoreelements" xmlns:ns13="urn:us:gov:dot:faa:atm:tfm:rapttimeline" xmlns:ns9="urn:us:gov:dot:faa:atm:tfm:ficommonmessages2" xmlns:ns12="urn:us:gov:dot:faa:atm:tfm:flowinformation" xmlns:ns11="urn:us:gov:dot:faa:atm:tfm:ficommonmessages" xmlns:ns10="urn:us:gov:dot:faa:atm:tfm:tfmrequestreplytypes" xmlns:ns16="http://www.fixm.aero/flight/3.0" xmlns:ns15="http://www.fixm.aero/foundation/3.0" xmlns:ns14="http://www.fixm.aero/base/3.0">
+    <ns5:fiOutput>
+        <ns12:fiMessage sensitivity="A" destinationCodes="ALL" sourceFacility="TFMS" sourceTimeStamp="2026-10-17T02:29:03Z" msgType="TMI_UPDATE">
+            <ns12:cdmUpdateData>
+                <ns12:gaapSlotAssignment>
+                    <ns9:elementName>PHX</ns9:elementName>
+                    <ns9:elementType>AIRPORT</ns9:elementType>
+                    <ns9:flight>
+                        <ns9:commonCompositeFlightId>
+                            <ns9:flightReference>160105560</ns9:flightReference>
+                            <ns9:callSign>CTF173</ns9:callSign>
+                            <ns9:departureAirport>HND</ns9:departureAirport>
+                            <ns9:arrivalAirport>PHX</ns9:arrivalAirport>
+                            <ns9:departureDateTime>2026-10-17T06:13:00Z</ns9:departureDateTime>
+                        </ns9:commonCompositeFlightId>
+                        <ns9:assignedArrivalSlot>
+                            <ns4:controlledElement>PHX</ns4:controlledElement>
+                            <ns4:slotTime>2026-10-17T07:15:00Z</ns4:slotTime>
+                            <ns4:uniqueLetter>A</ns4:uniqueLetter>
+                        </ns9:assignedArrivalSlot>
+                        <ns9:controlledDepartureTime>2026-10-17T06:13:00Z</ns9:controlledDepartureTime>
+                        <ns9:controlledArrivalTime>2026-10-17T07:15:00Z</ns9:controlledArrivalTime>
+                        <ns9:exemptFlag>-</ns9:exemptFlag>
+                        <ns9:cancelFlag>-</ns9:cancelFlag>
+                        <ns9:slotHoldFlag>-</ns9:slotHoldFlag>
+                        <ns9:initialGateDepartureTime>2026-10-17T05:45:00Z</ns9:initialGateDepartureTime>
+                    </ns9:flight>
+                </ns12:gaapSlotAssignment>
+            </ns12:cdmUpdateData>
+        </ns12:fiMessage>
+    </ns5:fiOutput>
+</ns5:tfmDataService>

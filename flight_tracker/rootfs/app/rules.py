@@ -81,6 +81,8 @@ CATALOG = [
     ("inbound_changed", "Inbound", "Different inbound linked", "FlightAware links a different inbound flight.",
      dict(on=False, hours=2, calendar=True, manual=False, friends=False, ts=False), {}),
     # NAS (any flight; ground stops push whatever their scope, and say whether it includes you)
+    ("edct", "NAS", "EDCT", "Your flight gets an expected departure clearance time from a ground delay program or ground stop, or it changes (FAA SWIM).",
+     dict(on=True, hours=None, calendar=True, manual=True, friends=True, ts=True), {}),
     ("nas_gs", "NAS", "Ground stop", "At either airport, even if its scope doesn't include you yet; also when it's extended or expanded.",
      dict(on=True, hours=None, calendar=True, manual=True, friends=True, ts=True), {}),
     ("nas_gdp", "NAS", "Ground delay program", "At either airport; also when it's extended or expanded.",

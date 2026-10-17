@@ -216,6 +216,35 @@ def _sample(xml_text):
                 lst.append(xml_text[:200000])
 
 
+def parse_edct(xml_text):
+    """EDCTs: a flight's controlled departure (and arrival) time from a ground delay program or
+    ground stop, in TFMS slot assignments and program flight lists ->
+    [{acid, dep, arr, igtd, type: 'EDCT', edct, cta, element, exempt}]."""
+    root = ET.fromstring(xml_text)
+    out = []
+    for el in root.iter():
+        if _local(el.tag) != "flight":
+            continue
+        kids = {}
+        for c in el.iter():
+            n = _local(c.tag)
+            if n not in kids and (c.text or "").strip():
+                kids[n] = c.text.strip()
+        if not kids.get("controlledDepartureTime"):
+            continue
+        acid = (kids.get("callSign") or kids.get("aircraftId") or "").upper()
+        if not acid:
+            continue
+        out.append({"acid": acid, "type": "EDCT", "src": "TFMS",
+                    "dep": _apt(kids.get("departureAirport") or kids.get("airport")),
+                    "arr": _apt(kids.get("arrivalAirport")),
+                    "igtd": kids.get("igtd") or kids.get("initialGateDepartureTime"),
+                    "edct": kids["controlledDepartureTime"], "cta": kids.get("controlledArrivalTime"),
+                    "element": kids.get("controlledElement") or kids.get("elementName"),
+                    "exempt": kids.get("exemptFlag") not in (None, "-", "N", "false")})
+    return out
+
+
 # Ground stops and ground delay programs as the FAA issues them (TFMS flow messages), for every
 # airport: (airport, kind) -> NAS item in the same shape as the NAS status page's. A cancel removes
 # it and is remembered for a while, so the slower NAS page can't bring it back.
@@ -313,6 +342,16 @@ def handle(xml_text):
     except Exception:
         pass
     head = xml_text[:4000]
+    if WATCH and "controlledDepartureTime" in xml_text and any(cs in xml_text for cs in WATCH):
+        try:
+            for ev in parse_edct(xml_text):
+                if ev["acid"] in WATCH:
+                    ev["got"] = time.time()
+                    _keep(ev)
+                    _news(ev, force=True)
+                    STATE["matched"] += 1
+        except Exception as e:
+            log.debug("SWIM EDCT: %s", e)
     if "fiMessage" in head and ('msgType="GS"' in head or 'msgType="GDP"' in head or 'msgType="AFP"' in head):
         try:
             _flow(xml_text)
