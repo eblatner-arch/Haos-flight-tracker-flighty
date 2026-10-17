@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.9.3
+- A flight you add that isn't on the flight number's main FlightAware page (a diversion's recovery leg like UA2608 ABE→EWR) is found through FlightAware's history list for the number, which links every leg by route and date (…/UAL2608/history/20261017/0123Z/KABE/KEWR)
+
 ## 3.9.2
 - AeroDataBox reader waits for the page's search to finish ("Searching…" gone, up to 45 s) before reading and taking its screenshot
 

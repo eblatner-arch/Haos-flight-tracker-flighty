@@ -1302,3 +1302,12 @@ class AeroDataBox(unittest.TestCase):
         self.assertEqual(len(items), 2)
         hit = sources.pick_adb(items, "ORD", sources._adb_time("2026-10-16 21:05Z"))
         self.assertEqual((hit["arr"], hit["status"], hit["reg"]), ("ABE", "Diverted", "N12345"))
+
+
+class HistoryList(unittest.TestCase):
+    def test_pick_recovery_leg(self):
+        links = ["https://www.flightaware.com/live/flight/UAL2608/history/20261016/2003Z/KIAH/KABE",
+                 "https://www.flightaware.com/live/flight/UAL2608/history/20261017/0123Z/KABE/KEWR",
+                 "https://www.flightaware.com/live/flight/UAL2608/history/20261015/2003Z/KIAH/KEWR"]
+        self.assertEqual(fa.pick_history_link(links, "KABE", "KEWR", "2026-10-16"), links[1])
+        self.assertIsNone(fa.pick_history_link(links, "KABE", "KEWR", "2026-10-14"))

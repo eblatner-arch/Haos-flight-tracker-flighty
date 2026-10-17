@@ -567,6 +567,32 @@ def manual_aero(lid):
     return 200, {"ok": True, "status": got.get("status_text"), "tail": got.get("tail")}
 
 
+def history_lookup(browser, L, ident, lid):
+    """Find a followed flight through FlightAware's history list (…/UAL2608/history), then load its
+    own page (…/history/20261017/0123Z/KABE/KEWR) and pin it."""
+    dep_i = (airports.get(L["dep"]).get("icao") or "").upper()
+    arr_i = (airports.get(L["arr"]).get("icao") or "").upper()
+    if not dep_i or not arr_i:
+        return None
+    try:
+        links = browser.links(fa.history_url(ident), "/history/")
+    except Exception as e:
+        log.info("%s history list: %s", L.get("display"), e)
+        return None
+    url = fa.pick_history_link(links, dep_i, arr_i, L.get("date"))
+    with LOCK:
+        STATE["debug"] = (STATE["debug"] + [{"at": time.time(), "leg": L.get("display"), "leg_id": lid,
+                                              "what": "FlightAware history list", "url": fa.history_url(ident),
+                                              "found": url or f"no {dep_i}→{arr_i} leg listed"}])[-60:]
+    if not url:
+        return None
+    boot, _ = load(browser, url, lid, L, "flight (from history list)")
+    cur, _ = fa.flights_from_bootstrap(boot)
+    if cur and cur.get("fa_id"):
+        L["fa_id"] = cur["fa_id"]
+    return cur
+
+
 def planned_arr(L):
     """Where this flight was supposed to go: your calendar's arrival, or what you entered when you
     added it (a followed flight's arrival is otherwise overwritten by wherever it actually goes)."""
@@ -847,6 +873,12 @@ def fetch_flight(browser, L):
         note_same_number(L, activity)
         if L.get("extra") and boot is not None:
             inst = fa.pick_followed(cur, activity, L.get("dep"), L.get("arr"), L.get("date"), time.time())
+            if inst is None and L.get("dep") and L.get("arr"):
+                # Not on the flight number's main page (a diversion's recovery leg often isn't):
+                # FlightAware's history list for the number links every leg by route and date.
+                hist = history_lookup(browser, L, ident, lid)
+                if hist:
+                    return hist, "FlightAware page data", None, None
             if inst is None:
                 route = f" {L['dep']}→{L['arr']}" if L.get("dep") else ""
                 when = f" on {L['date']}" if L.get("date") else ""

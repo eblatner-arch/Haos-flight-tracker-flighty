@@ -209,6 +209,18 @@ class Browser:
         finally:
             page.close()
 
+    def links(self, url, contains):
+        """Every link on a page whose address contains `contains` (FlightAware's flight history list)."""
+        self._ensure()
+        page = self._ctx.new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(2500)
+            return page.evaluate("(c) => Array.from(document.querySelectorAll('a[href]')).map(a => a.href).filter(h => h.includes(c))",
+                                 contains) or []
+        finally:
+            page.close()
+
     def adb_page(self, url, shot_name):
         """An AeroDataBox flight-number page: every JSON answer the page downloads while it draws
         (that's where its flight data is), plus the page text after expanding each flight."""

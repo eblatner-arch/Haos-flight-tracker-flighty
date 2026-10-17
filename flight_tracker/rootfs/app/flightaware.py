@@ -25,6 +25,30 @@ def ident_url(ident):
     return BASE + ident.upper()
 
 
+def history_url(ident):
+    return BASE + ident.upper() + "/history"
+
+
+def pick_history_link(links, dep_icao, arr_icao, date_str):
+    """From FlightAware's history list for a flight number, the page for this route on this date:
+    …/live/flight/UAL2608/history/20261017/0123Z/KABE/KEWR (the date there is UTC, so the local date
+    or the next UTC day both count)."""
+    from datetime import datetime, timedelta
+    days = set()
+    if date_str:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        days = {d.strftime("%Y%m%d"), (d + timedelta(days=1)).strftime("%Y%m%d")}
+    hits = []
+    for h in links or []:
+        m = re.search(r"/history/(\d{8})/(\d{4})Z/([A-Z0-9]{3,4})/([A-Z0-9]{3,4})", h)
+        if not m or m.group(3) != dep_icao or m.group(4) != arr_icao:
+            continue
+        if days and m.group(1) not in days:
+            continue
+        hits.append((m.group(1) + m.group(2), h.split("#")[0]))
+    return max(hits)[1] if hits else None
+
+
 def id_url(fa_id):
     return BASE + "id/" + fa_id
 
