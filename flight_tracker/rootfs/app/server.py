@@ -610,6 +610,7 @@ def _swim_take(sw, ev):
             sw["on"] = sw.get("on") or _ts(arr_rwy["actual"])
         if arr_rwy.get("estimated") and (td.get("arr") or {}).get("runwayArrivalTime"):
             sw["tfdm_eta"], sw["tfdm_eta_at"] = _ts(arr_rwy["estimated"]), got
+            sw["tfdm_eta_rep"] = _ts(ev.get("at")) or got   # when the tower system worked it out
         return
     airline = _airline_src(ev)
     if ev.get("off") and not airline:
@@ -761,8 +762,12 @@ def swim_overlay(L, f, now):
         t["in"]["actual"] = a["gate_in"]
         src["in"]["actual"] = airline
     td_dep, td_arr = sw.get("tfdm_dep") or {}, sw.get("tfdm_arr") or {}
-    fresh_tfdm = sw.get("tfdm_eta") and now - (sw.get("tfdm_eta_at") or 0) < 15 * 60
-    fresh_faa = sw.get("eta") and now - (sw.get("eta_at") or 0) < 30 * 60
+    # In the air, only estimates worked out after takeoff: the tower's last one from before
+    # departure still assumes the scheduled time (EWR→IAD showed 00:28, then 00:04 a minute later).
+    off_a = t["off"].get("actual") or 0
+    fresh_tfdm = (sw.get("tfdm_eta") and now - (sw.get("tfdm_eta_at") or 0) < 15 * 60
+                  and (sw.get("tfdm_eta_rep") or sw.get("tfdm_eta_at") or 0) >= off_a - 60)
+    fresh_faa = sw.get("eta") and now - (sw.get("eta_at") or 0) < 30 * 60 and (sw.get("eta_at") or 0) >= off_a - 60
     eta_src = None
     if t["off"].get("actual") and not t["on"].get("actual") and (fresh_tfdm or fresh_faa):
         eta, eta_src = (sw["tfdm_eta"], "tower") if fresh_tfdm else (sw["eta"], "FAA")
@@ -773,7 +778,14 @@ def swim_overlay(L, f, now):
         who = f"{L.get('arr')} tower" if eta_src == "tower" else "FAA radar"
         src["on"]["estimated"] = who
         if not t["in"].get("actual"):
-            t["in"]["estimated"] = eta + max(2 * 60, min(45 * 60, gap))
+            new_in = eta + max(2 * 60, min(45 * 60, gap))
+            # hold the shown arrival unless it moves 2+ minutes: the estimates wobble by a minute
+            # every report, and each wobble would be a new line in the log
+            shown = sw.get("in_shown")
+            if shown and abs(new_in - shown) < 120:
+                new_in = shown
+            sw["in_shown"] = new_in
+            t["in"]["estimated"] = new_in
             src["in"]["estimated"] = f"{who} + taxi"
     for side, key, slot in ((td_dep, "offBlockTime", "out"), (td_arr, "inBlockTime", "in")):
         v = _ts(((side.get(key) or {}) if isinstance(side.get(key), dict) else {}).get("actual"))

@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.15.7
+- Arrival estimate in the air uses only estimates worked out after takeoff (the tower's pre-departure one still assumed the schedule).
+- The shown arrival only moves when the estimate changes by 2+ minutes, so the log isn't a new line every minute.
+
 ## 3.15.6
 - Lookup log: transponder checks name the source that actually answered ("EWR surface radar", "N90 approach radar", or adsb.lol when the FAA had nothing).
 
