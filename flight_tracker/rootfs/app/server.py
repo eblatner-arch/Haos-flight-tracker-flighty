@@ -1859,7 +1859,10 @@ def snapshot(L):
         "Scheduled out": tm("out", tz_a, "scheduled"),
         "Estimated out": tm("out", tz_a, "estimated"),
         "Actual out": tm("out", tz_a, "actual"),
+        "Takeoff estimate": tm("off", tz_a, "estimated") if not (t.get("off") or {}).get("actual") else None,
         "Takeoff": tm("off", tz_a, "actual"),
+        "Landing estimate": tm("on", tz_b, "estimated") if not (t.get("on") or {}).get("actual") else None,
+        "Landed": tm("on", tz_b, "actual"),
         "Estimated in": tm("in", tz_b, "estimated"),
         "Arrival gate": gate(d),
         "Bags": d.get("baggage"),
@@ -1888,7 +1891,8 @@ def log_lookup(L, prev, now, sources, seen=None):
     changes = [{"field": k, "from": prev.get(k), "to": v} for k, v in cur.items() if v != prev.get(k) and v is not None]
     ts = (L.get("flight") or {}).get("time_src") or {}
     via = {"Actual out": ("out", "actual"), "Estimated out": ("out", "estimated"), "Takeoff": ("off", "actual"),
-           "Estimated in": ("in", "estimated")}
+           "Takeoff estimate": ("off", "estimated"), "Landing estimate": ("on", "estimated"), "Landed": ("on", "actual"),
+           "Estimated in": ("in", "estimated"), "Actual in": ("in", "actual")}
     for c in changes:
         if c["field"] in via:
             k, kind = via[c["field"]]

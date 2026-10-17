@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.17.2
+- Lookup log: takeoff and landing estimates (and the landing time) are tracked too, so when SWIM moves them the log shows the change and where it came from ("Takeoff estimate 22:53 → 22:57 via SFO tower").
+- Map: the XPDR label sits centered in its button.
+
 ## 3.17.1
 - Map: once the inbound has arrived (or your flight has left the gate), centering frames only your own route; the inbound's line stays, faded.
 - Map: surface traffic is drawn from zoom 12 in, so zoomed out its callsign tags don't pile up over the route.
