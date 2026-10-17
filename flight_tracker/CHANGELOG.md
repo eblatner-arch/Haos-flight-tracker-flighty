@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.9.4
+- History-list lookup: if a route appears twice on the date, it takes the leg closest to now
+
 ## 3.9.3
 - A flight you add that isn't on the flight number's main FlightAware page (a diversion's recovery leg like UA2608 ABE→EWR) is found through FlightAware's history list for the number, which links every leg by route and date (…/UAL2608/history/20261017/0123Z/KABE/KEWR)
 

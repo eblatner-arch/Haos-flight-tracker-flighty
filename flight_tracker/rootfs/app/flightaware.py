@@ -45,8 +45,14 @@ def pick_history_link(links, dep_icao, arr_icao, date_str):
             continue
         if days and m.group(1) not in days:
             continue
-        hits.append((m.group(1) + m.group(2), h.split("#")[0]))
-    return max(hits)[1] if hits else None
+        from datetime import timezone as _tz
+        t = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M").replace(tzinfo=_tz.utc).timestamp()
+        hits.append((t, h.split("#")[0]))
+    if not hits:
+        return None
+    # the same route twice that day (rare): the one closest to now, i.e. the one happening
+    import time as _time
+    return min(hits, key=lambda x: abs(x[0] - _time.time()))[1]
 
 
 def id_url(fa_id):
