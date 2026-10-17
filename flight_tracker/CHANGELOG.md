@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.0
+- FAA SWIM (TFMS) feed, optional: with your SWIFT portal subscription's username, password and queue in the Configuration, the add-on stays connected to the FAA's live flight data, keeps only messages for flights you're watching (and their inbounds), and marks a diversion the moment a flight plan is amended to a new destination. SWIM messages show in the lookup log; Settings → FAA SWIM shows the connection and message rate. Blank = off
+
 ## 3.11.0
 - Flightradar24 and AeroDataBox removed entirely (both block automated readers). Their settings are gone; tails come from ADS-B (your inbound, its earlier legs, your own transponder), your earlier leg on a turn, and AeroAPI; diversions from FlightAware's destination and route
 

@@ -24,6 +24,7 @@ import history
 import rules as rules_mod
 import schedule
 import sources
+import swim
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("flight_tracker")
@@ -465,6 +466,67 @@ def reload_schedule(force=False):
 
 
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
+
+
+def _iata(code):
+    code = (code or "").upper()
+    if not code:
+        return None
+    ap = airports.get(code)
+    return (ap.get("iata") or code).upper() if ap else code
+
+
+def swim_watch(now):
+    """Tell the SWIM reader which callsigns to keep: flights being watched, and their inbounds."""
+    if swim.STATE.get("status") == "off":
+        return
+    keep = set()
+    with LOCK:
+        for L in STATE["legs"].values():
+            if L.get("ident") and watched(L, now):
+                keep.add(L["ident"].upper())
+                inb = L.get("inbound") or {}
+                if inb.get("ident"):
+                    keep.add(inb["ident"].upper())
+    swim.WATCH.clear()
+    swim.WATCH.update(keep)
+
+
+def swim_check(L, f, planned):
+    """The FAA's own messages for this flight (SWIM TFMS): a flight plan or amendment from our
+    departure airport to somewhere other than planned is a diversion. -> {diverted_to, new}"""
+    out = {}
+    if not L.get("ident") or swim.STATE.get("status") == "off":
+        return out
+    dep = _iata(L.get("dep"))
+    so = (f.get("times") or {}).get("out", {}).get("scheduled") or L.get("sched_out") or 0
+    mine = []
+    for ev in swim.events(L["ident"]):
+        if _iata(ev.get("dep")) != dep:
+            continue
+        if ev.get("igtd"):
+            try:
+                t = datetime.fromisoformat(ev["igtd"].replace("Z", "+00:00")).timestamp()
+                if abs(t - so) > 6 * HOUR:
+                    continue
+            except ValueError:
+                pass
+        mine.append(ev)
+    if not mine:
+        return out
+    last = mine[-1]
+    arr = _iata(last.get("arr"))
+    if planned and arr and arr != _iata(planned):
+        out["diverted_to"] = arr
+    seen_at = L.get("swim_seen") or 0
+    fresh = [e for e in mine if (e.get("got") or 0) > seen_at]
+    if fresh:
+        out["new"] = True
+        L["swim_seen"] = max(e.get("got") or 0 for e in fresh)
+        e = fresh[-1]
+        saw(L, "FAA SWIM", None, " ".join(x for x in ((e.get("type") or "message"),
+                                                    f"{_iata(e.get('dep')) or '?'}→{_iata(e.get('arr')) or '?'}") if x))
+    return out
 
 
 def route_end(route):
@@ -1536,7 +1598,10 @@ def update_leg(browser, lid):
                         ap[k] = ref[k]
                 flight[side] = ap
             planned = planned_arr(L)
-            fa.fix_diversion(flight, planned, route_end(flight.get("route")))
+            sw = swim_check(L, flight, planned)
+            if sw.get("new"):
+                used.append("FAA SWIM")
+            fa.fix_diversion(flight, planned, route_end(flight.get("route")) or sw.get("diverted_to"))
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
                 # a diversion keeps the airport you planned as the leg's arrival
@@ -1963,6 +2028,7 @@ def worker():
             inbound_adsb(time.time())
             archive_finished(time.time())
             auto_recovery(time.time())
+            swim_watch(time.time())
             STATE["worker"].update(busy=None, last_cycle=time.time(), error=None)
             if time.time() - last_pub > 60 or due:
                 publish()
@@ -2070,6 +2136,7 @@ def api_state():
             "notify_target": CFG.get("notify_service") or "persistent notification",
             "gemini": bool(CFG.get("gemini_api_key")),
             "aeroapi": aero_on(),
+            "swim": {k: swim.STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
         }
     data["backup"] = backup_brief()
     return data
@@ -2533,6 +2600,7 @@ def main():
     find_ingress()
     threading.Thread(target=worker, daemon=True, name="tracker").start()
     threading.Thread(target=backup_loop, daemon=True, name="backup").start()
+    swim.start(CFG)
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)

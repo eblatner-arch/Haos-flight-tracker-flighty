@@ -1501,6 +1501,11 @@
       ${[...new Set(st.settings.map((x) => x.group || "Tracking"))].map((g, i) =>
         fold(`set-${g}`, g, `<div class="card nlist">${st.settings.filter((x) => (x.group || "Tracking") === g).map(setRow).join("")}</div>`, i === 0)).join("")}
       ${fold("set-backup", "Backup", backupCard(bk), !bk.connected)}
+      ${STATE.swim && STATE.swim.status !== "off" ? fold("set-swim", "FAA SWIM", `<div class="card small">
+        <b>${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.swim.status] || STATE.swim.status)}</b>
+        ${STATE.swim.status === "connected" ? ` · ${nm(STATE.swim.rate || 0)} messages a minute · ${STATE.swim.matched || 0} for your flights` : ""}
+        ${STATE.swim.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.swim.error)}</p>` : ""}
+        <p class="faint" style="margin:8px 0 0">The FAA's live flight plans and amendments (TFMS). A flight plan amended to a new destination marks a diversion right away.</p></div>`) : ""}
       <p class="small faint" style="margin:-4px 4px 14px">Alerts are on the bell page. Schedule file, notify service and API keys are in the add-on's Configuration tab in Home Assistant.</p>
       <div class="card">
         <h3 style="margin:0 0 4px">Notifications</h3>

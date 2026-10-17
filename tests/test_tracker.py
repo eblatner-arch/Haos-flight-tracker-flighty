@@ -1319,3 +1319,37 @@ class DepartureProgramScope(unittest.TestCase):
         inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN-1", out_s=T0 - 2 * H, origin="LAX", dest="SFO", inbound_id=None))
         L["inbound"] = inb
         self.assertEqual(nas(alerts.evaluate(L, CFG, T0 + 60, gdp)), [])     # inbound from LAX: not in scope
+
+
+class Swim(unittest.TestCase):
+    FLOW = """<ns5:tfmDataService xmlns:ns5="urn:us:gov:dot:faa:atm:tfm:tfmdataservice" xmlns:ns12="urn:us:gov:dot:faa:atm:tfm:flowinformation"
+      xmlns:ns9="urn:us:gov:dot:faa:atm:tfm:ficommonmessages2" xmlns:ns7="urn:us:gov:dot:faa:atm:tfm:tfmdatacoreelements"><ns5:fiOutput>
+      <ns12:fiMessage msgType="TMI_FLIGHT_LIST"><ns12:tmiFlightDataList><ns12:flightData><ns9:flight>
+      <ns7:aircraftId>SWA239</ns7:aircraftId><ns7:gufi>KT7832361Q</ns7:gufi><ns7:igtd>2026-10-16T23:25:00Z</ns7:igtd>
+      <ns7:departurePoint><ns7:airport>ATL</ns7:airport></ns7:departurePoint><ns7:arrivalPoint><ns7:airport>MCO</ns7:airport></ns7:arrivalPoint>
+      </ns9:flight></ns12:flightData></ns12:tmiFlightDataList></ns12:fiMessage></ns5:fiOutput></ns5:tfmDataService>"""
+    FLTD = """<ds:tfmDataService xmlns:ds="urn:us:gov:dot:faa:atm:tfm:tfmdataservice" xmlns:fdm="urn:us:gov:dot:faa:atm:tfm:flightdatacommonmessages">
+      <ds:fltdOutput><fdm:fltdMessage acid="UAL2127" depArpt="KLAX" arrArpt="KMDT" msgType="flightPlanAmendmentInformation"
+      sourceTimeStamp="2026-10-16T23:40:00Z"><fdm:amendmentData/></fdm:fltdMessage></ds:fltdOutput></ds:tfmDataService>"""
+
+    def test_parse_flow_and_flight_data(self):
+        import swim
+        ev = swim.parse(self.FLOW)
+        self.assertEqual([(e["acid"], e["dep"], e["arr"], e["igtd"]) for e in ev], [("SWA239", "ATL", "MCO", "2026-10-16T23:25:00Z")])
+        ev = swim.parse(self.FLTD)
+        self.assertEqual([(e["acid"], e["dep"], e["arr"], e["type"]) for e in ev],
+                         [("UAL2127", "KLAX", "KMDT", "flightPlanAmendmentInformation")])
+
+    def test_amendment_marks_diversion(self):
+        import server
+        import swim
+        swim.STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("UAL2127")
+        swim.EVENTS.clear()
+        swim.handle(self.FLTD)
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="LAX", dest="EWR", off_a=T0 + 600))
+        L = {"id": "s1", "ident": "UAL2127", "dep": "LAX", "arr": "EWR", "sched_out": T0}
+        sw = server.swim_check(L, f, "EWR")
+        self.assertEqual((sw.get("diverted_to"), sw.get("new")), ("MDT", True))
+        self.assertFalse(server.swim_check(L, f, "EWR").get("new"))   # logged once
+        swim.STATE["status"] = "off"

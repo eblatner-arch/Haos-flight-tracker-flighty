@@ -50,3 +50,21 @@ configuration:
   home_timezone:
     name: Home time zone
     description: Leave blank to use Home Assistant's. Only used for schedule times without a zone.
+  swim_username:
+    name: FAA SWIM username (optional)
+    description: From your SWIFT portal subscription (portal.swim.faa.gov → Subscriptions → your TFMS subscription → Details), "Connection Username". Blank turns SWIM off.
+  swim_password:
+    name: FAA SWIM password
+    description: That subscription's "Connection Password".
+  swim_queue:
+    name: FAA SWIM queue
+    description: That subscription's "Queue Name", e.g. you.TFMS.747b…​.OUT
+  swim_host:
+    name: FAA SWIM connection URL
+    description: Advanced. Default tcps://ems1.swim.faa.gov:55443.
+  swim_vpn:
+    name: FAA SWIM message VPN
+    description: Advanced. Default TFMS.
+  swim_skip_cert_check:
+    name: Skip SWIM certificate check
+    description: Advanced. Only if the connection fails with a certificate error.

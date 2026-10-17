@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "3.11.0"
+version: "3.12.0"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -37,6 +37,9 @@ options:
   drive_folder: Flight Tracker (Home Assistant)
   enable_viewer: true
   viewer_password: ""
+  swim_username: ""
+  swim_password: ""
+  swim_queue: ""
 schema:
   ics_file_path: str
   airline_icao: str?
@@ -53,5 +56,11 @@ schema:
   drive_folder: str?
   enable_viewer: bool
   viewer_password: password?
+  swim_username: str?
+  swim_password: password?
+  swim_queue: str?
+  swim_host: str?
+  swim_vpn: str?
+  swim_skip_cert_check: bool?
   flight_regex: str?
   home_timezone: str?
