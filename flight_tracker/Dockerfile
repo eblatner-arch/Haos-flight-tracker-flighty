@@ -5,7 +5,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      xvfb x11vnc novnc websockify jq tzdata fonts-liberation \
+      xvfb x11vnc novnc websockify jq tzdata fonts-liberation ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf vnc.html /usr/share/novnc/index.html
 

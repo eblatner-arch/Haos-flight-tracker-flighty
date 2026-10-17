@@ -126,26 +126,53 @@ def _run():
         backoff = min(backoff * 2, 600)
 
 
+def _cert_dir():
+    """A directory with just the ISRG Root X1 certificate under its OpenSSL hash name (what the kit's
+    README builds with c_rehash), falling back to the whole system store."""
+    import os
+    src = "/etc/ssl/certs/ISRG_Root_X1.pem"
+    d = "/tmp/solace-ca"
+    try:
+        if os.path.exists(src):
+            os.makedirs(d, exist_ok=True)
+            for name in ("ISRG_Root_X1.pem", "4042bcee.0"):  # 4042bcee = its subject hash
+                p = os.path.join(d, name)
+                if not os.path.exists(p):
+                    os.symlink(src, p)
+            return d
+    except OSError:
+        pass
+    return "/etc/ssl/certs"
+
+
 def _session():
     """One connection: bind to the queue and read until it drops."""
     from solace.messaging.messaging_service import MessagingService
     from solace.messaging.config.transport_security_strategy import TLS
-    from solace.messaging.config.authentication_strategy import BasicUserNamePassword
+    from solace.messaging.config.retry_strategy import RetryStrategy
     from solace.messaging.resources.queue import Queue
     from solace.messaging.receiver.message_receiver import MessageHandler
 
+    # Set up the way the FAA's own Python JumpStart kit does it.
     host = (_cfg.get("swim_host") or "tcps://ems1.swim.faa.gov:55443").strip()
-    props = {"solace.messaging.transport.host": host,
-             "solace.messaging.service.vpn-name": (_cfg.get("swim_vpn") or "TFMS").strip(),
-             "solace.messaging.transport.reconnection-attempts": "20",
-             "solace.messaging.transport.connection.retries-per-host": "3"}
-    tls = TLS.create().with_certificate_validation(True, False, "/etc/ssl/certs")
     if _cfg.get("swim_skip_cert_check"):
         tls = TLS.create().without_certificate_validation()
+    else:
+        # SCDS presents a Let's Encrypt certificate; Debian's store has its root (ISRG Root X1)
+        # in the hashed-directory form the Solace library expects.
+        tls = TLS.create().with_certificate_validation(True, False, _cert_dir())
+    retry = RetryStrategy.forever_retry(retry_interval=5000)
     STATE.update(status="connecting", error=None)
-    svc = (MessagingService.builder().from_properties(props)
+    svc = (MessagingService.builder()
+           .from_properties({
+               "solace.messaging.transport.host": host,
+               "solace.messaging.service.vpn-name": (_cfg.get("swim_vpn") or "TFMS").strip(),
+               "solace.messaging.authentication.scheme.basic.username": _cfg["swim_username"].strip(),
+               "solace.messaging.authentication.scheme.basic.password": _cfg["swim_password"].strip(),
+           })
+           .with_connection_retry_strategy(retry)
+           .with_reconnection_retry_strategy(retry)
            .with_transport_security_strategy(tls)
-           .with_authentication_strategy(BasicUserNamePassword.of(_cfg["swim_username"].strip(), _cfg["swim_password"].strip()))
            .build())
     svc.connect()
     dropped = threading.Event()

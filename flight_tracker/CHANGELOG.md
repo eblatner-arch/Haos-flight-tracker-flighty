@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.1
+- FAA SWIM connection set up the way the FAA's Python JumpStart kit does it: credentials as connection properties, retry forever, certificate checked against Let's Encrypt's ISRG Root X1
+
 ## 3.12.0
 - FAA SWIM (TFMS) feed, optional: with your SWIFT portal subscription's username, password and queue in the Configuration, the add-on stays connected to the FAA's live flight data, keeps only messages for flights you're watching (and their inbounds), and marks a diversion the moment a flight plan is amended to a new destination. SWIM messages show in the lookup log; Settings → FAA SWIM shows the connection and message rate. Blank = off
 
