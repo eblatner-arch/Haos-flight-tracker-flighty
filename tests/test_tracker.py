@@ -1254,3 +1254,16 @@ class Diversion(unittest.TestCase):
         import history
         rec = history.from_leg(L, "manual")
         self.assertEqual((rec["arr"], rec["diverted_to"]), ("EWR", "MDT"))
+
+
+class RouteDiversion(unittest.TestCase):
+    def test_route_ending_elsewhere(self):
+        import server
+        self.assertEqual(server.route_end("KLAX DCT RIC261040 DCT KMDT"), "MDT")
+        self.assertIsNone(server.route_end("DUFEE ELX HAAKK DOXXY SOSIC KEEHO J584 SLT FQM3"))
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="LAX", dest="EWR", off_a=T0 + 600))
+        fa.fix_diversion(f, "EWR", server.route_end("KLAX DCT RIC261040 DCT KMDT"))
+        self.assertEqual(f.get("diverted_to"), "MDT")
+        g, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="LAX", dest="EWR", off_a=T0 + 600))
+        fa.fix_diversion(g, "EWR", server.route_end("KLAX DCT KEWR"))
+        self.assertIsNone(g.get("diverted_to"))

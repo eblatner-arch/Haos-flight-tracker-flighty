@@ -470,6 +470,19 @@ def reload_schedule(force=False):
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
 
 
+def route_end(route):
+    """The airport a filed route ends at (IATA), when it names one: 'KLAX DCT RIC261040 DCT KMDT' → MDT.
+    Routes that end at an arrival procedure ('… SLT FQM3') give None."""
+    toks = [t for t in re.split(r"\s+", (route or "").strip().upper()) if t and t != "DCT"]
+    if len(toks) < 2:
+        return None
+    last = toks[-1].split("/")[0]
+    if not re.fullmatch(r"[A-Z]{4}", last):
+        return None
+    ap = airports.get(last)
+    return (ap.get("iata") or None) if ap and ap.get("icao") == last else None
+
+
 def planned_arr(L):
     """Where this flight was supposed to go: your calendar's arrival, or what you entered when you
     added it (a followed flight's arrival is otherwise overwritten by wherever it actually goes)."""
@@ -1435,7 +1448,7 @@ def update_leg(browser, lid):
                         ap[k] = ref[k]
                 flight[side] = ap
             planned = planned_arr(L)
-            fa.fix_diversion(flight, planned)
+            fa.fix_diversion(flight, planned, route_end(flight.get("route")))
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
                 # a diversion keeps the airport you planned as the leg's arrival

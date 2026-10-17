@@ -197,7 +197,7 @@ def best_time(times, key):
     return t.get("actual") or t.get("estimated") or t.get("scheduled")
 
 
-def fix_diversion(f, planned_arr=None):
+def fix_diversion(f, planned_arr=None, route_dest=None):
     """A diverted flight shows up two ways: a flight 'cancelled' after it took off (AeroAPI marks the
     original EWR flight that way), or a flight headed somewhere other than where you planned (LAX→MDT
     instead of LAX→EWR). Both mean diverted: keep following it, don't call it cancelled."""
@@ -209,6 +209,12 @@ def fix_diversion(f, planned_arr=None):
         f["cancelled"] = False
     dest = ((f.get("destination") or {}).get("iata") or "").upper()
     planned = (planned_arr or "").upper()
+    # The filed route is amended first when ATC clears a diversion ("KLAX DCT RIC261040 DCT KMDT"):
+    # a route that now ends at another airport counts, even before the destination field changes.
+    if planned and route_dest and route_dest.upper() != planned and (not dest or dest == planned):
+        dest = route_dest.upper()
+        f.setdefault("destination", {})
+        f["route_diversion"] = True
     if planned and dest and dest != planned:
         f["diverted_to"], f["planned_arr"] = dest, planned
     return f

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.8.4
+- Diversions are also caught from the filed route: when ATC amends it to end at another airport ("KLAX DCT RIC261040 DCT KMDT" on a flight planned to EWR), it counts as diverted even before FlightAware changes the destination. Routes that end at an arrival procedure are left alone
+
 ## 3.8.3
 - Diversions: a flight headed somewhere other than its planned arrival (LAX→MDT instead of LAX→EWR), or "cancelled" after it already took off (how AeroAPI marks the original), is a diversion. It shows Diverted with a "Diverted to MDT (planned EWR)" banner, pushes "UA 2127 diverted to MDT" once (no more "cancelled" then "back on"), keeps being followed to the gate, and goes into History as planned EWR, diverted to MDT
 - A flight you added keeps the arrival you entered as its planned airport
