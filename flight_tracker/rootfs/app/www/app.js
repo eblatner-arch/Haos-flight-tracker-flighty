@@ -1505,6 +1505,8 @@
         <b>${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.swim.status] || STATE.swim.status)}</b>
         ${STATE.swim.status === "connected" ? ` · ${nm(STATE.swim.rate || 0)} messages a minute · ${STATE.swim.matched || 0} for your flights` : ""}
         ${STATE.swim.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.swim.error)}</p>` : ""}
+        ${STATE.tfdm && STATE.tfdm.status !== "off" ? `<p style="margin:8px 0 0"><b>TFDM: ${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.tfdm.status] || STATE.tfdm.status)}</b>${STATE.tfdm.status === "connected" ? ` · ${nm(STATE.tfdm.rate || 0)} a minute · ${STATE.tfdm.matched || 0} for your flights` : ""}</p>
+        ${STATE.tfdm.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.tfdm.error)}</p>` : ""}` : ""}
         <p class="faint" style="margin:8px 0 0">The FAA's live flight plans and amendments (TFMS). A flight plan amended to a new destination marks a diversion right away.</p>
         <p style="margin:10px 0 0"><a class="btn" href="api/swim/samples.zip" download>Download sample messages</a></p>
         <p class="faint" style="margin:6px 0 0">A zip with a few messages of each type the feed has sent, and the last ones for your flights, to check they're read right.</p></div>`) : ""}

@@ -68,3 +68,15 @@ configuration:
   swim_skip_cert_check:
     name: Skip SWIM certificate check
     description: Advanced. Only if the connection fails with a certificate error.
+  swim_tfdm_queue:
+    name: FAA SWIM TFDM queue (optional)
+    description: Your TFDM subscription's "Queue Name" (Subscriptions → TFDM → JumpStart tab). Blank leaves TFDM off.
+  swim_tfdm_vpn:
+    name: FAA SWIM TFDM message VPN
+    description: The TFDM subscription's "Message VPN" from its JumpStart tab.
+  swim_tfdm_username:
+    name: FAA SWIM TFDM username
+    description: Only if it differs from the TFMS one.
+  swim_tfdm_password:
+    name: FAA SWIM TFDM password
+    description: Only if it differs from the TFMS one.

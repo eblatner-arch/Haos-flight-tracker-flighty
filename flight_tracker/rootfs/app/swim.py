@@ -28,7 +28,6 @@ import re as _re
 _TYPE_RE = _re.compile(r'msgType="([^"]+)"')
 _SRC_RE = _re.compile(r'sourceFacility="([A-Z0-9]{2,3})"')  # airline-sent (CDM) messages: AAL, SKW, UAL…
 SOURCE_COUNTS = {}
-_thread = None
 _cfg = {}
 
 
@@ -146,6 +145,33 @@ def handle(xml_text):
         del MATCHED_RAW[:-20]
 
 
+TFDM_STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "matched": 0,
+              "last_message": None, "rate": 0.0}
+TFDM_TYPES = {}
+_ROOT_RE = _re.compile(r'<(?![?!])(?:[\w.-]+:)?([\w.-]+)')
+
+
+def handle_tfdm(xml_text):
+    """TFDM (tower surface data): not parsed yet. Count and sample each kind, and keep the raw
+    messages that mention your flights, so the parser can be built from the real feed."""
+    TFDM_STATE["messages"] += 1
+    TFDM_STATE["last_message"] = time.time()
+    head = xml_text[:200000]
+    try:
+        types = _TYPE_RE.findall(head) or _ROOT_RE.findall(head)[:1] or ["unknown"]
+        for t in set(types):
+            TFDM_TYPES[t] = TFDM_TYPES.get(t, 0) + 1
+            lst = SAMPLES.setdefault("TFDM_" + t, [])
+            if len(lst) < 3:
+                lst.append(head)
+    except Exception:
+        pass
+    if WATCH and any(cs in xml_text for cs in WATCH):
+        TFDM_STATE["matched"] += 1
+        MATCHED_RAW.append({"at": time.time(), "xml": head, "feed": "TFDM"})
+        del MATCHED_RAW[:-40]
+
+
 def events(callsign):
     with LOCK:
         return list(EVENTS.get((callsign or "").upper(), []))
@@ -155,27 +181,50 @@ def configured(cfg):
     return all((cfg.get(k) or "").strip() for k in ("swim_username", "swim_password", "swim_queue"))
 
 
+def _feeds(cfg):
+    """The subscriptions to read: TFMS (flight data) and, when its queue is set, TFDM (tower).
+    TFDM uses the TFMS username/password unless its own are given."""
+    out = []
+    if configured(cfg):
+        out.append({"name": "TFMS", "state": STATE, "handle": handle, "queue": cfg["swim_queue"],
+                    "vpn": cfg.get("swim_vpn") or "TFMS", "user": cfg["swim_username"], "password": cfg["swim_password"]})
+    if (cfg.get("swim_tfdm_queue") or "").strip():
+        user = cfg.get("swim_tfdm_username") or cfg.get("swim_username")
+        pw = cfg.get("swim_tfdm_password") or cfg.get("swim_password")
+        if user and pw:
+            out.append({"name": "TFDM", "state": TFDM_STATE, "handle": handle_tfdm, "queue": cfg["swim_tfdm_queue"],
+                        "vpn": cfg.get("swim_tfdm_vpn") or "TFDM", "user": user, "password": pw})
+    return out
+
+
+_threads = {}
+
+
 def start(cfg):
-    global _thread, _cfg
+    global _cfg
     _cfg = cfg
-    if not configured(cfg):
+    feeds = _feeds(cfg)
+    if not any(f["name"] == "TFMS" for f in feeds):
         STATE.update(status="off")
-        return
-    if _thread and _thread.is_alive():
-        return
-    _thread = threading.Thread(target=_run, daemon=True, name="swim")
-    _thread.start()
+    for feed in feeds:
+        t = _threads.get(feed["name"])
+        if t and t.is_alive():
+            continue
+        t = threading.Thread(target=_run, args=(feed,), daemon=True, name="swim-" + feed["name"].lower())
+        _threads[feed["name"]] = t
+        t.start()
 
 
-def _run():
+def _run(feed):
     backoff = 10
+    st = feed["state"]
     while True:
         try:
-            _session()
+            _session(feed)
             backoff = 10
         except Exception as e:
-            STATE.update(status="error", error=str(e).splitlines()[0][:200])
-            log.warning("SWIM: %s; reconnecting in %d s", STATE["error"], backoff)
+            st.update(status="error", error=str(e).splitlines()[0][:200])
+            log.warning("SWIM %s: %s; reconnecting in %d s", feed["name"], st["error"], backoff)
         time.sleep(backoff)
         backoff = min(backoff * 2, 600)
 
@@ -226,8 +275,8 @@ def _cert_dir():
         return "/etc/ssl/certs"
 
 
-def _session():
-    """One connection: bind to the queue and read until it drops."""
+def _session(feed):
+    """One connection: bind to the feed's queue and read until it drops."""
     from solace.messaging.messaging_service import MessagingService
     from solace.messaging.config.transport_security_strategy import TLS
     from solace.messaging.config.retry_strategy import RetryStrategy
@@ -246,19 +295,20 @@ def _session():
     # retrying silently); once connected, reconnecting after a drop never gives up.
     first = RetryStrategy.parametrized_retry(3, 5000)
     retry = RetryStrategy.forever_retry(retry_interval=5000)
-    STATE.update(status="connecting", error=None)
+    STATE_ = feed["state"]
+    STATE_.update(status="connecting", error=None)
     svc = (MessagingService.builder()
            .from_properties({
                "solace.messaging.transport.host": host,
-               "solace.messaging.service.vpn-name": (_cfg.get("swim_vpn") or "TFMS").strip(),
-               "solace.messaging.authentication.scheme.basic.username": _cfg["swim_username"].strip(),
-               "solace.messaging.authentication.scheme.basic.password": _cfg["swim_password"].strip(),
+               "solace.messaging.service.vpn-name": feed["vpn"].strip(),
+               "solace.messaging.authentication.scheme.basic.username": feed["user"].strip(),
+               "solace.messaging.authentication.scheme.basic.password": feed["password"].strip(),
            })
            .with_connection_retry_strategy(first)
            .with_reconnection_retry_strategy(retry)
            .with_transport_security_strategy(tls)
            .build())
-    STATE["attempt_at"] = time.time()
+    STATE_["attempt_at"] = time.time()
     try:
         svc.connect()
     except Exception as e:
@@ -279,14 +329,14 @@ def _session():
         pass
     try:
         receiver = svc.create_persistent_message_receiver_builder().build(
-            Queue.durable_exclusive_queue(_cfg["swim_queue"].strip()))
+            Queue.durable_exclusive_queue(feed["queue"].strip()))
         receiver.start()
     except Exception as e:
         try:
             svc.disconnect()
         except Exception:
             pass
-        raise RuntimeError(f"connected, but the queue didn't open: {str(e)[:250]} (check the SWIM queue name)")
+        raise RuntimeError(f"connected, but the queue didn't open: {str(e)[:250]} (check the {feed['name']} queue name and VPN)")
 
     class H(MessageHandler):
         def on_message(self, msg):
@@ -298,7 +348,7 @@ def _session():
                         import gzip
                         raw = gzip.decompress(raw)
                     body = raw.decode("utf-8", "replace")
-                handle(body)
+                feed["handle"](body)
             except Exception as e:
                 log.debug("SWIM message: %s", e)
             finally:
@@ -307,14 +357,14 @@ def _session():
                 except Exception:
                     pass
     receiver.receive_async(H())
-    STATE.update(status="connected", connected_at=time.time(), error=None)
-    log.info("SWIM connected to %s, queue %s", host, _cfg["swim_queue"])
-    last_n, last_t = STATE["messages"], time.time()
+    STATE_.update(status="connected", connected_at=time.time(), error=None)
+    log.info("SWIM %s connected to %s, queue %s", feed["name"], host, feed["queue"])
+    last_n, last_t = STATE_["messages"], time.time()
     try:
         while not dropped.is_set() and svc.is_connected:
             time.sleep(30)
-            n, t = STATE["messages"], time.time()
-            STATE["rate"] = round((n - last_n) / max(1, t - last_t) * 60, 1)  # per minute
+            n, t = STATE_["messages"], time.time()
+            STATE_["rate"] = round((n - last_n) / max(1, t - last_t) * 60, 1)  # per minute
             last_n, last_t = n, t
     finally:
         try:
@@ -336,10 +386,11 @@ def samples_zip():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.json", json.dumps({"state": STATE, "watching": sorted(WATCH), "types": TYPE_COUNTS, "airline_sent": SOURCE_COUNTS,
+                                               "tfdm": {"state": TFDM_STATE, "types": TFDM_TYPES},
                                                "events": {k: v for k, v in EVENTS.items()}}, indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):
                 z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for i, m in enumerate(MATCHED_RAW, 1):
-            z.writestr(f"your_flights/{i:02d}.xml", m["xml"])
+            z.writestr(f"your_flights/{i:02d}{'_' + m['feed'] if m.get('feed') else ''}.xml", m["xml"])
     return buf.getvalue()

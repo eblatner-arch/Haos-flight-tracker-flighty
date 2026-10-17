@@ -1392,6 +1392,19 @@ class Swim(unittest.TestCase):
         L = {"id": "s3", "ident": "UAL2127", "dep": "MDT", "arr": "EWR", "sched_out": T0}
         self.assertEqual(server.swim_check(L, f, "EWR").get("off"), "2026-10-17T02:29:00Z")
 
+    def test_tfdm_feed(self):
+        import swim
+        feeds = swim._feeds({"swim_username": "u", "swim_password": "p", "swim_queue": "q1",
+                             "swim_tfdm_queue": "q2", "swim_tfdm_vpn": "TFDMVPN"})
+        self.assertEqual([(f["name"], f["queue"], f["vpn"], f["user"]) for f in feeds],
+                         [("TFMS", "q1", "TFMS", "u"), ("TFDM", "q2", "TFDMVPN", "u")])
+        self.assertEqual(len(swim._feeds({"swim_username": "u", "swim_password": "p", "swim_queue": "q1"})), 1)
+        swim.WATCH.clear(); swim.WATCH.add("UAL2127")
+        n = swim.TFDM_STATE["matched"]
+        swim.handle_tfdm('<?xml version="1.0"?><ns2:TfdmFlight xmlns:ns2="x"><callsign>UAL2127</callsign></ns2:TfdmFlight>')
+        self.assertEqual(swim.TFDM_STATE["matched"], n + 1)
+        self.assertIn("TfdmFlight", swim.TFDM_TYPES)
+
     def test_amendment_marks_diversion(self):
         import server
         import swim

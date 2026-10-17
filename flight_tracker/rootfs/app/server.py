@@ -2162,6 +2162,7 @@ def api_state():
             "gemini": bool(CFG.get("gemini_api_key")),
             "aeroapi": aero_on(),
             "swim": {k: swim.STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
+            "tfdm": {k: swim.TFDM_STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
         }
     data["backup"] = backup_brief()
     return data
