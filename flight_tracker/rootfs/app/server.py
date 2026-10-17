@@ -3601,6 +3601,13 @@ def _shutdown(signum, frame):
     """Home Assistant stops the add-on with SIGTERM (updates, restarts): save first."""
     try:
         save_state()
+        # EDCTs and the messages about your flights are written at most every 2 min while running:
+        # write what came in since, or an EDCT that arrived just before an update is lost
+        for save in (swim.save_edcts, swim.save_yours):
+            try:
+                save(force=True)
+            except Exception as e:
+                log.info("SWIM save on stop: %s", e)
         log.info("State saved; stopping")
     finally:
         os._exit(0)

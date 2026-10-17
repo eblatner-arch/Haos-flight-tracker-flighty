@@ -1,4 +1,5 @@
 from unittest import mock
+import time as time_mod
 from datetime import datetime, timezone
 """Run with: python3 -m unittest discover -s tests"""
 
@@ -1934,6 +1935,26 @@ class Swim(unittest.TestCase):
         self.assertTrue(any(n.startswith("your_flights/edct_trail/UAL2677_") and n.endswith("_FADT.xml") for n in names))
         self.assertTrue(any(n.startswith("your_flights/by_type/FADT_") for n in names))
         swim.WATCH.clear(); swim.EDCT_TRAIL.clear(); swim.YOURS_BY_TYPE.clear(); swim.EDCTS.clear(); swim.EVENTS.clear()
+
+    def test_edct_saved_on_stop_inside_the_2_min_throttle(self):
+        """An EDCT that arrives less than 2 min after the last write is still on disk after an update stops
+        the add-on (UA2677's 22:18Z EDCT came at 18:47Z, the 3.21.9 restart followed within a minute)."""
+        import tempfile
+        import swim
+        swim.EDCTS.clear()
+        with tempfile.TemporaryDirectory() as d:
+            swim.EDCT_PATH = os.path.join(d, "e.json")
+            swim._edct_saved[0] = time_mod.time()          # just written
+            swim._remember_edct({"acid": "UAL2677", "dep": "BNA", "igtd": "2026-10-17T20:37:00Z",
+                                 "edct": "2999-01-01T22:18:00Z", "element": "EWR"})
+            swim.save_edcts()                               # throttled: nothing written
+            self.assertFalse(os.path.exists(swim.EDCT_PATH))
+            swim.save_edcts(force=True)                     # what the stop handler does
+            swim.EDCTS.clear()
+            swim.load_edcts(swim.EDCT_PATH)
+            swim.EDCT_PATH = None
+        self.assertEqual(swim.EDCTS["UAL2677"][0]["edct"], "2999-01-01T22:18:00Z")
+        swim.EDCTS.clear()
 
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,

@@ -634,9 +634,10 @@ def _remember_edct(ev):
     _edct_dirty[0] = True
 
 
-def save_edcts():
-    """Drop EDCTs more than 12 h past, then write the rest to disk (only when something changed)."""
-    if not EDCT_PATH or not _edct_dirty[0] or time.time() - _edct_saved[0] < 120:
+def save_edcts(force=False):
+    """Drop EDCTs more than 12 h past, then write the rest to disk (only when something changed;
+    at most every 2 min unless forced, as on shutdown)."""
+    if not EDCT_PATH or not _edct_dirty[0] or (not force and time.time() - _edct_saved[0] < 120):
         return
     _edct_saved[0] = time.time()
     import json
@@ -675,10 +676,10 @@ def load_edcts(path):
         pass
 
 
-def save_yours():
+def save_yours(force=False):
     """The raw messages about your flights (by type, and the EDCT trail) to disk, at most every 2 min,
     dropping trail entries older than 36 h and callsigns no longer watched for that long."""
-    if not YOURS_PATH or not _yours_dirty[0] or time.time() - _yours_saved[0] < 120:
+    if not YOURS_PATH or not _yours_dirty[0] or (not force and time.time() - _yours_saved[0] < 120):
         return
     _yours_saved[0] = time.time()
     import json
