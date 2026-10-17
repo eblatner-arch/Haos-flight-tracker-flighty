@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.9.2
+- AeroDataBox reader waits for the page's search to finish ("Searching…" gone, up to 45 s) before reading and taking its screenshot
+
 ## 3.9.1
 - A flight you add that AeroAPI doesn't have (like a diversion's recovery leg, UA2608 ABE→EWR) is now looked up on FlightAware's page instead of waiting: the page often shows it long before AeroAPI does, and it's free. The "Not found" note says it's checking there
 

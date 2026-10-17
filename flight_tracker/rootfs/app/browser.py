@@ -227,13 +227,22 @@ class Browser:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             try:
-                page.wait_for_load_state("networkidle", timeout=15000)
-            except Exception:
-                pass
-            try:
                 page.get_by_role("button", name=re.compile("accept|agree|got it|consent", re.I)).first.click(timeout=2000)
             except Exception:
                 pass
+            # The page draws its form first, then searches ("Searching…", date "Loading…") and only
+            # then lists the flights: wait for the search to finish (it can take a while).
+            deadline = time.time() + 45
+            while time.time() < deadline:
+                try:
+                    body = page.inner_text("body", timeout=2000)
+                except Exception:
+                    body = ""
+                busy = "Searching" in body or "Loading..." in body or "Loading…" in body
+                if not busy and (payloads or len(body) > 1500):
+                    break
+                page.wait_for_timeout(1000)
+            page.wait_for_timeout(1500)
             # each flight with this number is a collapsed row: open them all
             for sel in ("[aria-expanded='false']", "summary", "button:has-text('Details')", "button:has-text('More')"):
                 try:
