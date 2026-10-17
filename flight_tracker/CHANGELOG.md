@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.17.1
+- Map: once the inbound has arrived (or your flight has left the gate), centering frames only your own route; the inbound's line stays, faded.
+- Map: surface traffic is drawn from zoom 12 in, so zoomed out its callsign tags don't pile up over the route.
+
 ## 3.17.0
 - NAS status woven from two sources: ground stops and ground delay programs come from FAA SWIM the moment they're issued, extended or cancelled (with average/max delay, reason and departure scope), and the flights they touch are checked right away; the NAS status page still supplies delay trends, closures and deicing, plus advisory links. One program keeps one alert whichever source reports it first, and a SWIM cancel isn't undone by an older page read. Each NAS card says where it came from.
 

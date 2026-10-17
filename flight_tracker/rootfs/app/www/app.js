@@ -461,6 +461,7 @@
     if (interactive) {
       oneFingerZoom(map, el);
       map.on("zoomend moveend", () => { layoutCheck(entry); surfaceNow(entry); });
+      map.on("zoomend", () => { if (entry.lastSurface) paintSurface(entry, entry.lastSurface); });
     }
     paintMap(entry, leg, true);
     setTimeout(() => map.invalidateSize(), 50);
@@ -587,6 +588,18 @@
     entry.airport = all.length && d.center ? d.center : null;
     entry.lastSurface = d;
     if (entry.aptBtn) entry.aptBtn.style.display = entry.airport ? "" : "none";
+    if (!SURF.zoomed && entry.interactive && entry.airport && ["taxi_out", "landed"].includes(d.phase)) {
+      const me = all.find((t) => t.mine);
+      entry.map.setView(me ? [me.lat, me.lon] : entry.airport, 15);
+      SURF.zoomed = true;
+    }
+    // zoomed out past the airport, surface traffic is just clutter over the route (and its tags
+    // pile up): draw it from zoom 12 in
+    if (entry.map.getZoom() < 12) {
+      entry.surfaceMine = 0;
+      if (entry.ownMarker) entry.ownMarker.setOpacity(1);
+      return;
+    }
     const mine = tg.some((t) => t.mine);
     entry.surfaceMine = mine ? Date.now() : 0;
     if (entry.ownMarker) entry.ownMarker.setOpacity(mine ? 0 : 1);
@@ -606,11 +619,6 @@
       else if (ids && (t.cs || t.squawk)) m.bindTooltip(t.cs || t.squawk, { direction: "right", offset: [sz / 2, 0], permanent: true, className: "surf-tip surf-id" });
       else m.bindTooltip(label, { direction: "top", offset: [0, -sz / 2], className: "surf-tip" });
       entry.surface.addLayer(m);
-    }
-    if (!SURF.zoomed && entry.interactive && ["taxi_out", "landed"].includes(d.phase)) {
-      const me = tg.find((t) => t.mine);
-      entry.map.setView(me ? [me.lat, me.lon] : entry.airport, 15);
-      SURF.zoomed = true;
     }
   }
 
@@ -658,18 +666,23 @@
     if (leg.live && track.length && ["airborne", "taxi_out", "landed"].includes(leg.phase))
       add(L.polyline([[track[track.length - 1][0], track[track.length - 1][1]], [leg.live.lat, leg.live.lon]], { color: route, weight: 3.5, opacity: 0.95 }));
     const inb = leg.inbound;
+    // The inbound (and the airplane's earlier legs) only frame the map while they still matter:
+    // not yet arrived and your flight not yet off the gate. Afterwards they're drawn faintly and
+    // centering is on your own route.
+    const inbOpen = !!inb && !["arrived", "cancelled", "diverted"].includes(inb.phase) && leg.phase === "scheduled";
+    const ibounds = inbOpen ? bounds : [];
     if (inb) {
       const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
-      if (itr.length > 1) add(L.polyline(itr.map((p) => [p[0], p[1]]), { color: violet, weight: 2.5, opacity: 0.9 }));
-      if (leg.inbound_live && itr.length) add(L.polyline([[itr[itr.length - 1][0], itr[itr.length - 1][1]], [leg.inbound_live.lat, leg.inbound_live.lon]], { color: violet, weight: 2.5, opacity: 0.9 }));
+      if (itr.length > 1) add(L.polyline(itr.map((p) => [p[0], p[1]]), { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
+      if (leg.inbound_live && itr.length) add(L.polyline([[itr[itr.length - 1][0], itr[itr.length - 1][1]], [leg.inbound_live.lat, leg.inbound_live.lon]], { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
       const iw = (inb.waypoints || []).filter((p) => p[0] != null);
       if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       let ip = null, ih = 0;
       if (leg.inbound_live) { ip = [leg.inbound_live.lat, leg.inbound_live.lon]; ih = leg.inbound_live.heading; }
       else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = itr.length > 1 ? bearing(itr[itr.length - 2], ip) : 0; }
-      if (ip) { add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); bounds.push([ip[0], ip[1]]); }
-      if (ia && interactive) { bounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
+      if (ip) { add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); ibounds.push([ip[0], ip[1]]); }
+      if (ia && interactive) { ibounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
     }
     // Earlier legs of the same airplane that still matter (not yet arrived), fainter the further back.
     (leg.chain || []).forEach((c, i) => {
@@ -682,9 +695,9 @@
       if (c.phase === "airborne" && ct.length) {
         const p = ct[ct.length - 1];
         add(planeMarker([p[0], p[1]], ct.length > 1 ? bearing(ct[ct.length - 2], p) : 0, violet, c.display_ident || "Earlier leg"));
-        bounds.push([p[0], p[1]]);
+        ibounds.push([p[0], p[1]]);
       }
-      if (ca) { bounds.push(ca); add(L.marker(ca, { icon: L.divIcon({ className: "", html: `<span class="apt-label faint" style="border-color:${violet}">${esc(c.origin.iata || "")}</span>`, iconSize: null }) })); }
+      if (ca) { ibounds.push(ca); add(L.marker(ca, { icon: L.divIcon({ className: "", html: `<span class="apt-label faint" style="border-color:${violet}">${esc(c.origin.iata || "")}</span>`, iconSize: null }) })); }
     });
     for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
       if (!pos) continue;
