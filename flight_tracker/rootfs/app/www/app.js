@@ -1697,6 +1697,16 @@
       ["Tail from", f.tail_source || (leg.phase === "scheduled" ? "not known yet" : "")],
       ["Aircraft's day", (leg.chain || []).length ? leg.chain.map((c) => `${c.ident} ${c.route} (${c.phase === "scheduled" ? "not flown yet" : c.phase.replace("_", " ")})`).join(" ← ") : ""],
       [f.route_source === "FAA" ? "Route (ATC)" : "Filed route", f.route ? f.route + (sw.route_changed ? ` · amended ${hm(sw.route_changed, tzA)}` : "") : ""],
+      // the fixes on the FAA's own expected path (the dashed line), when no ATC route text came:
+      // flagged when most of them aren't in the route shown above
+      ...(() => {
+        const fx = ((f.swim_route || {}).fixes || []).map((x) => x[2]).filter(Boolean);
+        if (!fx.length || f.route_source === "FAA") return [];
+        const words = new Set((f.route || "").toUpperCase().split(/[\s.]+/));
+        const inner = fx.slice(1, -1), miss = inner.filter((x) => !words.has(x)).length;
+        const differs = f.route && inner.length && miss / inner.length > 0.5;
+        return [[differs ? "FAA's path (differs)" : "FAA's path", fx.join(" ")]];
+      })(),
       ["Previous route", sw.route_prev || ""],
       ["United", sw.airline ? [sw.airline.gate_out && `pushed ${hm(sw.airline.gate_out, tzA)}`, sw.airline.in && `gate arrival est. ${hm(sw.airline.in, tzB)}`,
         sw.airline.gate_in && `at gate ${hm(sw.airline.gate_in, tzB)}`, `updated ${ago(sw.airline.at)}`].filter(Boolean).join(" · ") : ""],

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.21.1
+- Details shows "FAA's path": the fixes on the FAA's own expected trajectory (the dashed line on the map), marked "(differs)" when most of them aren't in the filed route shown above (UA1102 today: FlightAware shows the offshore Y299 filing, the FAA's system has it inland via Q87/Q99).
+
 ## 3.21.0
 - EDCTs from the FAA's FADT: the full slot list of a ground delay program, re-sent with every revision (where the EWR program's EDCTs came, e.g. UA1643 MCO→EWR). Read for every flight, kept like the others.
 - Ground stops and delay programs are attached to a flight only when their time touches it: your flight between its departure and arrival overlapping the program's hours (or your inbound's, for a program at your departure airport). Programs without hours only for flights in the next 12 h. Before, every flight to EWR in the next 60 days showed on the program's map.
