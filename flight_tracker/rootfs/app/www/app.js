@@ -283,7 +283,11 @@
     const ap = [leg.dep_ap, leg.arr_ap].map((a) => a && ll(a) ? { code: a.iata || a.icao, pos: ll(a) } : null)
       .filter((a) => a && a.code && kmBetween(here, a.pos) < 8)[0];
     if (!ap) return;
-    if (entry.layoutFor === ap.code) { if (!map.hasLayer(entry.layout)) entry.layout.addTo(map); return; }
+    if (entry.layoutFor === ap.code) {
+      if (!map.hasLayer(entry.layout)) entry.layout.addTo(map);
+      if (entry.layout.rwyWidth) entry.layout.rwyWidth(map);
+      return;
+    }
     if (!LAYOUTS[ap.code]) {
       LAYOUTS[ap.code] = api(`api/airport/${encodeURIComponent(ap.code)}/layout`).catch(() => { delete LAYOUTS[ap.code]; return null; });
     }
@@ -292,6 +296,7 @@
     if (entry.layout) map.removeLayer(entry.layout);
     entry.layout = paintLayout(d.features).addTo(map);
     entry.layoutFor = ap.code;
+    if (entry.layout.rwyWidth) entry.layout.rwyWidth(map);
   }
   function paintLayout(features) {
     const g = L.layerGroup(), muted = css("--muted"), faint = css("--faint");
@@ -316,6 +321,21 @@
         if (f.name || f.ref) lbl(centroid(f.g), f.name || f.ref, "ap-term");
       }
     }
+    // Runways drawn on top of the basemap, about their real width (45 m) at every zoom, with a
+    // dashed centerline, so they stand out from the taxiways on the dark map.
+    const rwys = [];
+    for (const f of features) {
+      if (f.k !== "runway" || !Array.isArray(f.g[0])) continue;
+      const body = L.polyline(f.g, { color: css("--text"), opacity: 0.22, weight: 8, lineCap: "butt", interactive: false });
+      const cl = L.polyline(f.g, { color: css("--text"), opacity: 0.55, weight: 1, dashArray: "8 8", interactive: false });
+      g.addLayer(body); g.addLayer(cl); rwys.push(body);
+    }
+    g.rwyWidth = (map) => {
+      const z = map.getZoom(), lat = map.getCenter().lat;
+      const mpp = 156543.03 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
+      const w = Math.max(3, Math.min(60, 45 / mpp));
+      rwys.forEach((r) => r.setStyle({ weight: w }));
+    };
     for (const f of features) {
       if (f.k === "runway" && f.ref) lbl(mid(f.g)[0], f.ref.replace(/^0/, "").replace(/\/0/, "/"), "ap-rwy");
       else if (f.k === "taxiway" && f.ref) {

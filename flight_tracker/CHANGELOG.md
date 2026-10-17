@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.11
+- Airport map: runways are drawn lighter, at their real width at every zoom, with a dashed centerline.
+
 ## 3.15.10
 - Surface map: targets the radar labels "UNKN" (seen by radar only, no transponder reply) no longer count as identified, so the XPDR filter hides them and ID doesn't tag them "UNKN".
 
