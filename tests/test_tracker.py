@@ -21,6 +21,16 @@ sources.fetch_live_all = lambda cs: (lambda x: [x] if x else [])(sources.fetch_l
 T0 = 1_760_450_000  # an arbitrary "now"
 H = 3600
 
+def _near_t0(items):
+    """The captured ground stop (Oct 2026) moved to around T0, so the test flights fall inside it."""
+    shift = 1791994740 - T0
+    for i in items:
+        for k in ("start", "end"):
+            if i.get(k):
+                i[k] -= shift
+    return items
+
+
 
 def ev(summary, start, hours=3.0, oid=None):
     return {"oid": oid or summary.replace(" ", "")[:16], "start": start, "end": start + hours * H,
@@ -712,7 +722,7 @@ class Followed(unittest.TestCase):
                                                                        "max": "30 minutes", "trend": "Increasing"}}}]
 
     def test_ground_stop_scope(self):
-        items = sources.parse_events(self.EVENTS)
+        items = _near_t0(sources.parse_events(self.EVENTS))
         gs = [i for i in items if i["kind"] == "gs"][0]
         self.assertEqual((gs["scope"], gs["prob"], gs["key"]), (["ZDC", "ZJX", "ZTL", "ZMA"], "Medium", "EWR|gs|gs1"))
         dl = [i for i in items if i["kind"] == "delay"][0]
@@ -724,14 +734,12 @@ class Followed(unittest.TestCase):
         self.assertEqual([(i["who"], i["from"], i["center"], i["hit"]) for i in imp], [("inbound", "TPA", "ZJX", True)])
         air, _ = fa.flights_from_bootstrap(boot(fa_id="IN", out_s=T0, origin="TPA", dest="EWR", inbound_id=None,
                                                off_a=T0 + 600))
-        imp = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0]["impact"]
-        self.assertEqual([(i["hit"], i["airborne"]) for i in imp], [(False, True)])   # already flying: not held
+        # the inbound is already flying: it can't be held, so the ground stop is nothing to this flight
+        self.assertEqual([n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"], [])
         g = [n for n in alerts.nas_for({"dep": "EWR", "arr": "MCO"}, items) if n["kind"] == "gs"][0]
         self.assertNotIn("held", alerts.nas_text(g, None))   # no "not held" notes
         self.assertFalse(any(p.get("nas") and "delay" in p["text"].lower()
                              for p in alerts.problems({"dep": "EWR", "arr": "MCO", "flight": None}, {}, items)))
-        self.assertNotIn("airborne", alerts.nas_text([n for n in alerts.nas_for(
-            {"dep": "EWR", "arr": "MCO", "inbound": air}, items) if n["kind"] == "gs"][0], None))
         imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["who"], i["hit"]) for i in imp], [("you", False)])   # ZBW isn't in scope: still shown
 
@@ -746,7 +754,7 @@ class Followed(unittest.TestCase):
         L = {"id": "x", "dep": "BOS", "arr": "EWR", "display": "UA 1", "extra": True, "sched_out": T0 + H,
              "sched_in": T0 + 2 * H, "notified": {"watch": True}}
         L["flight"], _ = fa.flights_from_bootstrap(boot(origin="BOS", dest="EWR", out_s=T0 + H))
-        items = sources.parse_events(self.EVENTS)
+        items = _near_t0(sources.parse_events(self.EVENTS))
         keys = [a["title"] for a in alerts.evaluate(L, CFG, T0, items)]
         self.assertIn("EWR: Ground stop", keys)                 # pushes though BOS (ZBW) isn't in scope
         self.assertFalse(any("delay" in k.lower() for k in keys))  # FAA delay trends don't push by default
@@ -755,7 +763,7 @@ class Followed(unittest.TestCase):
         ev = json.loads(json.dumps(self.EVENTS))
         ev[0]["groundStop"]["endTime"] = "2026-10-14T18:30:00Z"
         ev[0]["groundStop"]["includedFacilities"].append("ZBW")
-        a = alerts.evaluate(L, CFG, T0 + 60, sources.parse_events(ev))
+        a = alerts.evaluate(L, CFG, T0 + 60, _near_t0(sources.parse_events(ev)))
         titles = [x["title"] for x in a]
         self.assertIn("EWR: ground stop extended", titles)
         self.assertIn("EWR: ground stop expanded", titles)
@@ -1843,6 +1851,15 @@ class Swim(unittest.TestCase):
             p = swim.parse_pdc(text)
             self.assertEqual((p.get("tail"), p.get("gate"), p.get("cleared_to")), (tail, gate, dest), text)
         self.assertEqual(swim.parse_pdc(cases[4][0])["altitude"], "5000")
+
+    def test_edct_from_fadt_slot_list(self):
+        """The EWR GDP's FADT (captured live, cut short): UA1643 MCO→EWR EDCT 18:39Z, arrival slot 20:34Z."""
+        import swim
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_fadt.xml")) as fh:
+            ev = [e for e in swim.parse_edct(fh.read()) if e["acid"] == "UAL1643"][0]
+        self.assertEqual((ev["dep"], ev["arr"], ev["edct"], ev["cta"], ev["igtd"], ev["element"]),
+                         ("MCO", "EWR", "2026-10-17T18:39:00Z", "2026-10-17T20:34:00Z", "2026-10-17T17:48:00Z", "EWR"))
+        self.assertEqual(swim._ddhhmm("010030", "2026-10-31T23:50:00Z"), "2026-11-01T00:30:00Z")   # month rolls over
 
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,

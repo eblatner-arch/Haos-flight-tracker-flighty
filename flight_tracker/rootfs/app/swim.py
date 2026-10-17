@@ -225,13 +225,49 @@ def _sample(xml_text):
                 lst.append(xml_text[:200000])
 
 
+def _ddhhmm(v, ref):
+    """'171839' (day 17, 18:39 UTC, as the FADT slot list writes times) -> ISO, in the month of ref
+    (the message's own timestamp), or the month next to it when the day says so."""
+    from datetime import datetime, timedelta, timezone as tz
+    if not v or not _re.fullmatch(r"\d{6}", v):
+        return v if v and "T" in v else None
+    try:
+        r = datetime.fromisoformat((ref or "").replace("Z", "+00:00")[:25]) if ref else datetime.now(tz.utc)
+    except ValueError:
+        r = datetime.now(tz.utc)
+    d, h, m = int(v[:2]), int(v[2:4]), int(v[4:])
+    best = None
+    for mo in (-1, 0, 1):
+        y, mm = r.year + (r.month - 1 + mo) // 12, (r.month - 1 + mo) % 12 + 1
+        try:
+            c = datetime(y, mm, d, h, m, tzinfo=tz.utc)
+        except ValueError:
+            continue
+        if best is None or abs(c - r) < abs(best - r):
+            best = c
+    return best.strftime("%Y-%m-%dT%H:%M:%SZ") if best else None
+
+
 def parse_edct(xml_text):
     """EDCTs: a flight's controlled departure (and arrival) time from a ground delay program or
     ground stop, in TFMS slot assignments and program flight lists ->
     [{acid, dep, arr, igtd, type: 'EDCT', edct, cta, element, exempt}]."""
     root = ET.fromstring(xml_text)
     out = []
+    ref = (_re.search(r'sourceTimeStamp="([^"]+)"', xml_text[:3000]) or [None, None])[1]
     for el in root.iter():
+        if _local(el.tag) == "slot":
+            # the FADT: a delay program's whole slot list, re-sent with every revision. Times are
+            # DDHHMM; the airport's departures that are exempt or cancelled have no EDCT.
+            k = {_local(c.tag): (c.text or "").strip() for c in el.iter() if (c.text or "").strip()}
+            acid = (k.get("aircraftId") or "").upper()
+            if not acid or not k.get("controlledDepartureTime") or k.get("exemptFlag") == "true" or k.get("cancelFlag") == "true":
+                continue
+            out.append({"acid": acid, "type": "EDCT", "src": "TFMS", "dep": _apt(k.get("departureAirport")),
+                        "arr": _apt(k.get("arrivalAirport")), "igtd": _ddhhmm(k.get("initialGateDepartureTime"), ref),
+                        "edct": _ddhhmm(k["controlledDepartureTime"], ref), "cta": _ddhhmm(k.get("controlledArrivalTime"), ref),
+                        "element": k.get("controlledElement") or k.get("arrivalAirport"), "exempt": False})
+            continue
         if _local(el.tag) != "flight":
             continue
         kids = {}

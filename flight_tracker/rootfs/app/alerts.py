@@ -131,9 +131,36 @@ def nas_for(leg, nas_items):
     inb_ph = fa.phase(inb, 0) if inb else None
     inb_done = inb_ph in ("arrived", "cancelled", "diverted") if inb else True
     up = ("airborne", "landed")  # a ground stop only holds flights that haven't taken off
+    import time as _time
+    now = _time.time()
+    t = (f.get("times") or {}) if f else {}
+    t_out = (fa.best_time(t, "out") if t else None) or leg.get("sched_out") or 0
+    t_in = (fa.best_time(t, "in") if t else None) or leg.get("sched_in") or t_out
+    it = inb.get("times") or {}
+    i_out = (fa.best_time(it, "out") if it else None) or 0
+    i_in = (fa.best_time(it, "in") if it else None) or 0
+
+    def in_time(n):
+        """Does the program's time touch this flight (or its inbound)? A program's own window when it
+        has one; without one (current conditions) only flights in the next 12 h."""
+        st, en = n.get("start") or 0, n.get("end") or 0
+        if n["airport"] == arr or (n["airport"] in codes and n["airport"] != dep):
+            a, b = t_out, t_in            # your flight, departing toward it
+        elif inb_from and not inb_done and i_in:
+            a, b = i_out or i_in, i_in    # your inbound arriving at your departure airport
+        else:
+            a, b = t_out, t_out
+        if not a:
+            return True                   # no times known yet: can't rule it out
+        if not (st or en):
+            return a - now < 12 * 3600
+        return (not en or a <= en) and (not st or b >= st - 30 * 60)
+
     out = []
     for n in nas_items or []:
         if n["airport"] not in codes:
+            continue
+        if not in_time(n):
             continue
         if n["kind"] == "delay":
             # departure delays matter where you (or nobody) depart; arrival delays where you or your inbound arrive
@@ -155,6 +182,14 @@ def nas_for(leg, nas_items):
                 impact.append({"who": "inbound", "from": inb_from, "center": artcc.center_of(inb_from), "airborne": air,
                                "hit": False if air else artcc.in_scope(n, inb_from)})
         m["impact"] = impact
+        if n["kind"] in ("gs", "gdp"):
+            # it only holds flights still on the ground: once yours (and the inbound it would hold)
+            # are in the air or done, it's nothing to you
+            own_up = fa.phase(f, 0) in ("airborne", "landed", "arrived") if f else False
+            if impact and all(i["airborne"] for i in impact):
+                continue
+            if not impact and n["airport"] == arr and own_up:
+                continue
         out.append(m)
     return out
 
