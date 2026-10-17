@@ -506,6 +506,7 @@ def swim_watch(now):
     swim.WATCH_AIRPORTS.update(aps)
     swim.prune()
     swim.save_edcts()
+    swim.save_yours()
 
 
 SWIM_FAST = set()   # legs whose next update applies SWIM news without loading the FlightAware page
@@ -3624,6 +3625,7 @@ def main():
     swim.ON_NEWS = lambda acid: WAKE.set()
     swim.ON_NAS = lambda ap: (NAS_NEWS.add(ap), WAKE.set())
     swim.load_edcts(os.path.join(DATA_DIR, "swim_edcts.json"))
+    swim.load_yours(os.path.join(DATA_DIR, "swim_yours.json"))
     swim.start(CFG)
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)

@@ -1886,6 +1886,54 @@ class Swim(unittest.TestCase):
         self.assertEqual((ev["dep"], ev["arr"], ev["edct"], ev["cta"], ev["igtd"], ev["element"]),
                          ("MCO", "EWR", "2026-10-17T18:39:00Z", "2026-10-17T20:34:00Z", "2026-10-17T17:48:00Z", "EWR"))
         self.assertEqual(swim._ddhhmm("010030", "2026-10-31T23:50:00Z"), "2026-11-01T00:30:00Z")   # month rolls over
+        # UA2677 BNA→EWR in the same list, read once (not again by the any-shape fallback)
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_fadt.xml")) as fh:
+            evs = [e for e in swim.parse_edct(fh.read()) if e["acid"] == "UAL2677"]
+        self.assertEqual([(e["dep"], e["edct"]) for e in evs], [("BNA", "2026-10-17T22:12:00Z")])
+
+    def test_edct_in_an_unknown_container(self):
+        """A controlled departure time in a shape the slot/flight readers don't know (a substitution or
+        compression update) is still read, from the nearest element naming one callsign; a list naming
+        several flights around one time is left alone."""
+        import swim
+        xml = ('<ds:tfmDataService xmlns:ds="urn:a" xmlns:f="urn:b"><ds:fiOutput>'
+               '<f:fiMessage sourceTimeStamp="2026-10-17T17:47:00Z" msgType="TMI_UPDATE"><f:cdmUpdateData>'
+               '<f:compressionUpdate><f:elementName>EWR</f:elementName><f:flightSlot>'
+               '<f:ids><f:callSign>UAL2677</f:callSign><f:departureAirport>BNA</f:departureAirport>'
+               '<f:arrivalAirport>EWR</f:arrivalAirport></f:ids>'
+               '<f:controlledDepartureTime>172218</f:controlledDepartureTime>'
+               '<f:controlledArrivalTime>180010</f:controlledArrivalTime></f:flightSlot>'
+               '<f:twoFlights><f:callSign>UAL1</f:callSign><f:callSign>UAL2</f:callSign>'
+               '<f:controlledDepartureTime>172300</f:controlledDepartureTime></f:twoFlights>'
+               '</f:compressionUpdate></f:cdmUpdateData></f:fiMessage></ds:fiOutput></ds:tfmDataService>')
+        evs = swim.parse_edct(xml)
+        self.assertEqual([(e["acid"], e["dep"], e["arr"], e["edct"], e["cta"], e["element"]) for e in evs],
+                         [("UAL2677", "BNA", "EWR", "2026-10-17T22:18:00Z", "2026-10-18T00:10:00Z", "EWR")])
+
+    def test_edct_trail_survives_restart(self):
+        """Messages about a watched flight that carry a controlled time are kept per callsign, on disk,
+        and in the samples download, so an add-on update doesn't wipe them."""
+        import tempfile
+        import zipfile
+        import io
+        import swim
+        swim.WATCH.clear(); swim.WATCH.add("UAL2677"); swim.EDCT_TRAIL.clear(); swim.YOURS_BY_TYPE.clear()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_fadt.xml")) as fh:
+            swim.handle(fh.read())
+        swim.handle('<x msgType="trackInformation"><acid>UAL2677</acid></x>')   # nothing about an EDCT
+        self.assertEqual([m["type"] for m in swim.EDCT_TRAIL["UAL2677"]], ["FADT"])
+        with tempfile.TemporaryDirectory() as d:
+            swim.YOURS_PATH = os.path.join(d, "y.json")
+            swim._yours_saved[0] = 0
+            swim.save_yours()
+            swim.EDCT_TRAIL.clear(); swim.YOURS_BY_TYPE.clear()
+            swim.load_yours(swim.YOURS_PATH)
+            swim.YOURS_PATH = None
+        self.assertEqual([m["type"] for m in swim.EDCT_TRAIL["UAL2677"]], ["FADT"])
+        names = zipfile.ZipFile(io.BytesIO(swim.samples_zip())).namelist()
+        self.assertTrue(any(n.startswith("your_flights/edct_trail/UAL2677_") and n.endswith("_FADT.xml") for n in names))
+        self.assertTrue(any(n.startswith("your_flights/by_type/FADT_") for n in names))
+        swim.WATCH.clear(); swim.EDCT_TRAIL.clear(); swim.YOURS_BY_TYPE.clear(); swim.EDCTS.clear(); swim.EVENTS.clear()
 
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,

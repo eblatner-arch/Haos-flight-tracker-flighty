@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.21.10
+- EDCT changes after a program's first slot list: a controlled departure time is now read from any FAA message shape, not only a delay program's full slot list or a flight block. The flight is the nearest part of the message naming exactly one callsign (a list naming several around one time is skipped), and the program's airport is taken from above it when the flight's own part doesn't name it. UA2677 BNA→EWR got its first EWR EDCT (22:12Z) from the 16:58Z slot list; the later moves to 22:16Z and 22:18Z were never picked up, and the restart for 3.21.9 wiped the captured messages that would show what carried them.
+- The messages about your flights (the last 4 of each type) and a new EDCT trail (the last 10 messages per flight that carry a controlled time or slot) are kept on disk, so an update or restart no longer wipes them before the samples are downloaded. In the download as your_flights/edct_trail/<callsign>_<time>_<type>.xml; summary.json lists the trail and how many flights hold an EDCT from each program.
+
 ## 3.21.9
 - No second push for the same ground stop or delay program when it comes back under another key (from the FAA's SWIM feed vs the NAS status page, or rebuilt after a restart): one program per airport and kind seen in the last 2 h is the same program. Extensions and added centers still push.
 

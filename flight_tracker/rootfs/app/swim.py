@@ -25,10 +25,18 @@ SAMPLES = {}         # message type -> a few raw messages, to check the parser a
 MATCHED_RAW = []     # the last raw messages that matched your flights
 PDC_RAW = []         # every datalink clearance message that mentions one of your flights (kept apart)
 YOURS_BY_TYPE = {}   # message type -> the last few raw messages that mention one of your flights
+# callsign -> the last messages that mention it and carry anything about a controlled time (an EDCT, a
+# slot): what the FAA sent around an EDCT change. Kept on disk with YOURS_BY_TYPE, so an add-on
+# update or restart doesn't wipe them before the samples are downloaded.
+EDCT_TRAIL = {}
+YOURS_PATH = None
+_yours_dirty = [False]
+_yours_saved = [0.0]
 TYPE_COUNTS = {}
 import re as _re
 _TYPE_RE = _re.compile(r'msgType="([^"]+)"')
 _SRC_RE = _re.compile(r'sourceFacility="([A-Z0-9]{2,3})"')  # airline-sent (CDM) messages: AAL, SKW, UAL…
+_EDCTISH_RE = _re.compile(r"controlled|edct|slotTime|assignedArrivalSlot|<(?:\w+:)?ctd\b", _re.I)
 SOURCE_COUNTS = {}
 # EDCTs for every flight, not only the ones being watched: the FAA assigns them once, when a ground
 # delay program is issued (often hours before you'd start watching), and doesn't send them again.
@@ -289,6 +297,54 @@ def parse_edct(xml_text):
                     "edct": kids["controlledDepartureTime"], "cta": kids.get("controlledArrivalTime"),
                     "element": kids.get("controlledElement") or kids.get("elementName"),
                     "exempt": kids.get("exemptFlag") not in (None, "-", "N", "false")})
+    seen = {(e["acid"], _ddhhmm(e["edct"], ref)) for e in out}
+    out.extend(e for e in _edct_any_shape(root, ref) if (e["acid"], e["edct"]) not in seen)
+    return out
+
+
+_ACID_TAGS = ("aircraftId", "callSign", "acid", "flightId", "aircraftIdentification")
+
+
+def _edct_any_shape(root, ref):
+    """A controlled departure time in a container the shapes above don't know (a slot substitution or
+    compression list, a per-flight TMI update): the flight is the nearest enclosing element that names
+    exactly one callsign, and its airports, times and controlled element are read from inside it."""
+    parent = {c: p for p in root.iter() for c in p}
+    out = []
+    for cdt in root.iter():
+        if _local(cdt.tag) != "controlledDepartureTime" or not (cdt.text or "").strip():
+            continue
+        box = parent.get(cdt)
+        while box is not None:
+            acids = {(c.text or "").strip().upper() for c in box.iter() if _local(c.tag) in _ACID_TAGS and (c.text or "").strip()}
+            acids |= {c.get("acid").upper() for c in box.iter() if c.get("acid")}
+            if acids:
+                break
+            box = parent.get(box)
+        if box is None or len(acids) != 1:
+            continue   # no callsign, or a list of several flights: can't tell whose time it is
+        k = {}
+        for c in box.iter():
+            n = _local(c.tag)
+            if n not in k and (c.text or "").strip():
+                k[n] = c.text.strip()
+        k["controlledDepartureTime"] = cdt.text.strip()
+        if k.get("exemptFlag") == "true" or k.get("cancelFlag") == "true":
+            continue
+        element = k.get("controlledElement") or k.get("elementName") or k.get("controlElement")
+        up = parent.get(box)
+        while not element and up is not None:   # the program's element is often named once, above its flights
+            element = next(((c.text or "").strip() for c in up if _local(c.tag) in ("controlledElement", "elementName", "controlElement")
+                            and (c.text or "").strip()), None)
+            up = parent.get(up)
+        k["controlledElement"] = element
+        out.append({"acid": acids.pop(), "type": "EDCT", "src": "TFMS",
+                    "dep": _apt(k.get("departureAirport") or k.get("departurePoint") or k.get("airport")),
+                    "arr": _apt(k.get("arrivalAirport") or k.get("arrivalPoint")),
+                    "igtd": _ddhhmm(k.get("igtd") or k.get("initialGateDepartureTime"), ref),
+                    "edct": _ddhhmm(k["controlledDepartureTime"], ref), "cta": _ddhhmm(k.get("controlledArrivalTime"), ref),
+                    "element": k.get("controlledElement") or k.get("elementName") or k.get("controlElement"),
+                    "exempt": False})
     return out
 
 
@@ -402,9 +458,17 @@ def handle(xml_text):
         if hit:
             # what the FAA sends about your flights, every kind of message, for checking (samples download)
             t = (_TYPE_RE.findall(head) or ["unknown"])[0]
-            lst = YOURS_BY_TYPE.setdefault(t, [])
-            lst.append(xml_text[:150000])
-            del lst[:-4]
+            edctish = _EDCTISH_RE.search(xml_text)
+            with LOCK:
+                lst = YOURS_BY_TYPE.setdefault(t, [])
+                lst.append(xml_text[:150000])
+                del lst[:-4]
+                if edctish:
+                    for cs in [c for c in WATCH if c in xml_text]:
+                        trail = EDCT_TRAIL.setdefault(cs, [])
+                        trail.append({"at": time.time(), "type": t, "xml": xml_text[:250000]})
+                        del trail[:-10]
+            _yours_dirty[0] = True
     if "controlledDepartureTime" in xml_text or 'etdType="CONTROLLED"' in xml_text:
         _edct_sample(xml_text)
         try:
@@ -609,6 +673,46 @@ def load_edcts(path):
             EDCTS.update(json.load(f) or {})
     except (OSError, ValueError):
         pass
+
+
+def save_yours():
+    """The raw messages about your flights (by type, and the EDCT trail) to disk, at most every 2 min,
+    dropping trail entries older than 36 h and callsigns no longer watched for that long."""
+    if not YOURS_PATH or not _yours_dirty[0] or time.time() - _yours_saved[0] < 120:
+        return
+    _yours_saved[0] = time.time()
+    import json
+    import os
+    cut = time.time() - 36 * 3600
+    with LOCK:
+        for cs in list(EDCT_TRAIL):
+            EDCT_TRAIL[cs] = [m for m in EDCT_TRAIL[cs] if m.get("at", 0) > cut]
+            if not EDCT_TRAIL[cs]:
+                del EDCT_TRAIL[cs]
+        data = json.dumps({"by_type": YOURS_BY_TYPE, "trail": EDCT_TRAIL})
+        _yours_dirty[0] = False
+    try:
+        tmp = YOURS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(data)
+        os.replace(tmp, YOURS_PATH)
+    except OSError as e:
+        log.info("SWIM messages about your flights not saved: %s", e)
+
+
+def load_yours(path):
+    global YOURS_PATH
+    YOURS_PATH = path
+    import json
+    try:
+        with open(path) as f:
+            d = json.load(f) or {}
+    except (OSError, ValueError):
+        return
+    for t, lst in (d.get("by_type") or {}).items():
+        YOURS_BY_TYPE[t] = (list(lst) + YOURS_BY_TYPE.get(t, []))[-4:]
+    for cs, lst in (d.get("trail") or {}).items():
+        EDCT_TRAIL[cs] = (list(lst) + EDCT_TRAIL.get(cs, []))[-10:]
 
 
 def _keep(ev):
@@ -1203,6 +1307,15 @@ def _body(msg):
     return body or ""
 
 
+def _edct_counts():
+    """How many flights hold an EDCT from each program (EWR: 140 …), to see a program's EDCTs arrive or vanish."""
+    out = {}
+    for lst in list(EDCTS.values()):
+        for el in {_apt(e.get("element")) or "?" for e in lst}:
+            out[el] = out.get(el, 0) + 1
+    return out
+
+
 def samples_zip():
     """Examples of each message type seen, the last messages for your flights, and counts."""
     import io
@@ -1216,7 +1329,10 @@ def samples_zip():
                                                          "airports": sorted(WATCH_AIRPORTS),
                                                          "targets": {k: len(v) for k, v in SURFACE.items()}},
                                                "events": {k: v for k, v in EVENTS.items()},
-                                               "edcts": {"flights": len(EDCTS), "yours": {k: EDCTS[k] for k in WATCH if k in EDCTS}}},
+                                               "edcts": {"flights": len(EDCTS), "yours": {k: EDCTS[k] for k in WATCH if k in EDCTS},
+                                                         "by_program": _edct_counts()},
+                                               "edct_trail": {k: [{"at": m.get("at"), "type": m.get("type")} for m in v]
+                                                              for k, v in list(EDCT_TRAIL.items())}},
                                               indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):
@@ -1229,6 +1345,11 @@ def samples_zip():
         for t, lst in YOURS_BY_TYPE.items():
             for i, x in enumerate(lst, 1):
                 z.writestr(f"your_flights/by_type/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
+        for cs, lst in list(EDCT_TRAIL.items()):
+            for m in list(lst):
+                stamp = time.strftime("%H%M%SZ", time.gmtime(m.get("at") or 0))
+                z.writestr(f"your_flights/edct_trail/{_re.sub(r'[^A-Za-z0-9_]+', '_', cs)}_{stamp}_"
+                           f"{_re.sub(r'[^A-Za-z0-9_]+', '_', m.get('type') or 'unknown')}.xml", m["xml"])
         for i, m in enumerate(PDC_RAW, 1):
             z.writestr(f"your_flights/clearance_{i:02d}.xml", m["xml"])
         for i, x in enumerate(STDDS_RAW, 1):
