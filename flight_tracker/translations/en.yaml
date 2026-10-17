@@ -98,3 +98,9 @@ configuration:
   swim_stdds_password:
     name: FAA SWIM STDDS password
     description: The STDDS subscription's own "Connection Password". Blank uses the TFMS one.
+  map_api_key:
+    name: Map tiles API key (optional)
+    description: Your CARTO (or other tile provider) key. With no tile address below it's added to CARTO's basemap address.
+  map_tile_url:
+    name: Map tile address (optional)
+    description: Advanced. A tile address from your provider, e.g. https://{s}.basemaps.cartocdn.com/{style}/{z}/{x}/{y}{r}.png?api_key={key} ({style} becomes dark_all or light_all, {key} the key above).

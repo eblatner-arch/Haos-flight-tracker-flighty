@@ -2575,6 +2575,7 @@ def api_state():
             "schedule": STATE["schedule"], "worker": STATE["worker"],
             "settings": {k: CFG[k] for k in ("watch_hours", "delay_threshold_minutes", "min_turn_minutes",
                                              "airline_icao", "live_positions")},
+            "map_tiles": {"url": (CFG.get("map_tile_url") or "").strip(), "key": (CFG.get("map_api_key") or "").strip()},
             "notify_target": CFG.get("notify_service") or "persistent notification",
             "gemini": bool(CFG.get("gemini_api_key")),
             "aeroapi": aero_on(),

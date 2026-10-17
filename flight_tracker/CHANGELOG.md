@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.3
+- Map tiles: optional API key and tile address in the Configuration (CARTO or another provider).
+
 ## 3.15.2
 - FAA SWIM: callsigns and airports no longer watched are forgotten after 12 hours, so memory stays flat over months.
 
