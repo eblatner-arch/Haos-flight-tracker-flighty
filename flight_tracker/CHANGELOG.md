@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.19.2
+- A ground stop or delay program the FAA cancels (SWIM) now disappears right away and stays gone: the NAS status page lags several minutes and was bringing it back. A new program at that airport still shows.
+- Fix: back swipe after opening a program map could land on that map again (the map link changed the page address); it's now an in-app step like every other link. The program map draws on canvas, so it no longer stalls while loading.
+
 ## 3.19.1
 - Fix: the ground stop / delay program map broke with "Map container is already initialized" when a live update re-drew the page; the map is now kept across updates.
 

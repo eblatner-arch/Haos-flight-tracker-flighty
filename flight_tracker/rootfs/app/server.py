@@ -2388,8 +2388,14 @@ def merge_nas(page, swim_items, cancelled, page_at, now):
         sw, pg = swim_items.get(k), page_prog.get(k)
         if sw and sw.get("end") and sw["end"] < now - 60:
             sw = None   # program over
-        if not sw and pg and cancelled.get(k, 0) > (page_at or 0):
-            continue    # SWIM cancelled it after the page was read
+        if not sw and pg and cancelled.get(k):
+            # SWIM cancelled it. The NAS page often keeps showing a program for several minutes
+            # after it ends, so the page doesn't bring it back: only a program that started
+            # after the cancel (a new one) counts, and only once 45 minutes have passed do we
+            # trust the page again without question.
+            c = cancelled[k]
+            if now - c < 45 * 60 and not ((pg.get("start") or 0) > c + 60):
+                continue
         if not sw and not pg:
             continue
         m = dict(pg or {})

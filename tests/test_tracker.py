@@ -524,8 +524,12 @@ class NasFromSwim(unittest.TestCase):
         page = [{"airport": "SAN", "kind": "gs", "label": "Ground stop", "key": "SAN|gs|1"}]
         out = server.merge_nas(page, {}, {("SAN", "gs"): T0 + 100}, T0, T0 + 120)
         self.assertEqual(out, [])
-        out = server.merge_nas(page, {}, {("SAN", "gs"): T0 + 100}, T0 + 300, T0 + 320)   # page still shows it later
-        self.assertEqual(len(out), 1)
+        # the page is read again a few minutes later and still lists it: stays gone
+        out = server.merge_nas(page, {}, {("SAN", "gs"): T0 + 100}, T0 + 300, T0 + 320)
+        self.assertEqual(out, [])
+        # a new ground stop that started after the cancel does show
+        new = [{"airport": "SAN", "kind": "gs", "label": "Ground stop", "key": "SAN|gs|2", "start": T0 + 900}]
+        self.assertEqual(len(server.merge_nas(new, {}, {("SAN", "gs"): T0 + 100}, T0 + 1000, T0 + 1000)), 1)
 
 class AirportLayout(unittest.TestCase):
     def test_osm_to_features(self):

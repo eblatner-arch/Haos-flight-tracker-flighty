@@ -1017,7 +1017,7 @@
   document.addEventListener("click", (e) => {
     const c = e.target.closest && e.target.closest("[data-nas]");
     if (!c || e.target.closest("a")) return;
-    location.hash = `#/nas/${encodeURIComponent(c.dataset.nas)}`;
+    go(`#/nas/${encodeURIComponent(c.dataset.nas)}`);   // in-page navigation, like every link (never the URL)
   });
   function wireFolds() {
     $app.querySelectorAll("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => {
@@ -1518,7 +1518,8 @@
       const f = document.createElement("div"); f.id = el.id; f.className = "detail-map"; el.replaceWith(f); el = f;
     }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: true, attributionControl: true, worldCopyJump: true });
+    // canvas: thousands of boundary points draw without stalling the page
+    const map = L.map(el, { renderer: L.canvas({ padding: 0.2 }), zoomControl: true, attributionControl: true, worldCopyJump: true });
     if (map.attributionControl) map.attributionControl.setPrefix("");
     addTiles(map, dark);
     MAPS.nas = { el, map, key, layer: L.layerGroup().addTo(map), bounds: [], interactive: true };
