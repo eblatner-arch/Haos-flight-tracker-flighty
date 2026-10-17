@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.20.11
+- Lookup log: a check where no source saw the tail (adsb.lol not answering) no longer makes the known tail show again on the next check. Each tail shows once; each reason for no tail shows once.
+
 ## 3.20.10
 - Lookup log: a transponder or clearance line shows only when it says something new about that airplane (a different tail, or a different reason for none), whichever source saw it. Checks that add nothing fold into the previous entry's count.
 

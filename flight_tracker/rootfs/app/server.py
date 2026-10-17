@@ -2128,10 +2128,18 @@ def log_lookup(L, prev, now, sources, seen=None):
     keep = []
     for x in seen:
         who = x["src"].split(" · ", 1)[-1]
-        val = [x.get("tail"), re.sub(r"\d+", "#", x.get("note") or "")]
-        if last.get(who) != val:
-            last[who] = val
-            keep.append(x)
+        if x.get("tail"):
+            # a tail: shown when it differs from the last tail seen for this airplane
+            if last.get(who) != x["tail"]:
+                last[who] = x["tail"]
+                keep.append(x)
+        else:
+            # no tail (not transmitting, adsb.lol not answering): shown once per reason, and it
+            # doesn't make the known tail show again on the next sighting
+            note = re.sub(r"\d+", "#", x.get("note") or "")
+            if last.get(who + " ·none") != note:
+                last[who + " ·none"] = note
+                keep.append(x)
     seen = keep
     cur = snapshot(L)
     changes = [{"field": k, "from": prev.get(k), "to": v} for k, v in cur.items() if v != prev.get(k) and v is not None]
