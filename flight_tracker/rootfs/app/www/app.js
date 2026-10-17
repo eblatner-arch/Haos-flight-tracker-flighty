@@ -772,8 +772,10 @@
       const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
       if (itr.length > 1) add(L.polyline(smooth(itr.map((p) => [p[0], p[1]])), { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
       if (leg.inbound_live && itr.length) add(L.polyline([[itr[itr.length - 1][0], itr[itr.length - 1][1]], [leg.inbound_live.lat, leg.inbound_live.lon]], { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
-      const iw = (inb.waypoints || []).filter((p) => p[0] != null);
-      if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
+      // its planned route (dashed) only while it's still to fly: once it has landed its track says it all
+      const iw = (inb.waypoints || []).filter((p) => p[0] != null), iPlan = !["landed", "arrived", "cancelled", "diverted"].includes(inb.phase);
+      if (!iPlan) {}
+      else if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       let ip = null, ih = 0;
       if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
@@ -787,7 +789,8 @@
       const ct = (c.track || []).filter((p) => p[0] != null);
       if (ct.length > 1) add(L.polyline(smooth(ct.map((p) => [p[0], p[1]])), { color: violet, weight: 2, opacity: op }));
       const cw = (c.waypoints || []).filter((p) => p[0] != null);
-      if (cw.length > 1) add(L.polyline(cw, { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
+      if (["landed", "arrived", "cancelled", "diverted"].includes(c.phase)) {}
+      else if (cw.length > 1) add(L.polyline(cw, { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
       else if (ca && cb) add(L.polyline(gcPoints(ca, cb), { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
       if (c.phase === "airborne" && ct.length) {
         const p = ct[ct.length - 1];

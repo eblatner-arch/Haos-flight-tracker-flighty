@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.20.13
+- The inbound's (and earlier legs') dashed planned route is drawn only until that leg lands; after that only the track it actually flew shows.
+
 ## 3.20.12
 - Smoother tracks: below 18,000 ft (or under 250 kt) a track point is kept every 5 s from FAA approach and surface radar (15 s at cruise), so departures and approaches follow the real turns; and the drawn line rounds the corners between points.
 
