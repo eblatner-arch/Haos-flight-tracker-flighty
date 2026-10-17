@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.20.2
+- EDCTs are kept for every flight, not only the ones being watched. The FAA assigns them once, when a ground delay program is issued (UA444 SFO→SAN got its EDCT from the SAN GDP at 06:51 PDT, before it was being watched), and doesn't send them again. Kept on disk for 12 h, so a restart doesn't lose them; a flight you start watching picks up its EDCT at once.
+- EDCTs also read from flight-data messages that carry a controlled departure time.
+- When the departure tower's system shows a flight is held for an EDCT but the time hasn't reached the app, Details shows "EDCT: assigned".
+- The SWIM samples download now includes examples of every message that carries an EDCT.
+
 ## 3.20.1
 - The big map on the Flights screen now moves the airplane every 5 s too (before, only the flight page did; on cellular the Flights screen could sit still for minutes).
 - A position request that hangs on a weak signal is dropped after 8 s instead of stalling the updates.

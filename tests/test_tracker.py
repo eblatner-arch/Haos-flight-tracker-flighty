@@ -1754,6 +1754,25 @@ class Swim(unittest.TestCase):
             server.swim_check(L, f, "PHX")          # nothing new: no second push
         self.assertEqual(len(pushed), 1)
 
+    def test_edct_before_watching_is_kept(self):
+        """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,
+        and survives a restart."""
+        import tempfile
+        import swim
+        swim.WATCH.clear(); swim.EVENTS.clear(); swim.EDCTS.clear()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_edct.xml")) as fh:
+            swim.handle(fh.read())
+        self.assertEqual(swim.events("CTF173")[0]["edct"], "2026-10-17T06:13:00Z")
+        with tempfile.TemporaryDirectory() as d:
+            swim.EDCT_PATH = os.path.join(d, "e.json")
+            with mock.patch.object(swim.time, "time", lambda: datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc).timestamp()):
+                swim.save_edcts()
+            swim.EDCTS.clear()
+            swim.load_edcts(swim.EDCT_PATH)
+            swim.EDCT_PATH = None
+        self.assertEqual(swim.events("CTF173")[0]["edct"], "2026-10-17T06:13:00Z")
+        swim.EDCTS.clear()
+
     def test_amendment_marks_diversion(self):
         import server
         import swim

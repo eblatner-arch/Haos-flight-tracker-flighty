@@ -28,6 +28,12 @@ import re as _re
 _TYPE_RE = _re.compile(r'msgType="([^"]+)"')
 _SRC_RE = _re.compile(r'sourceFacility="([A-Z0-9]{2,3})"')  # airline-sent (CDM) messages: AAL, SKW, UAL…
 SOURCE_COUNTS = {}
+# EDCTs for every flight, not only the ones being watched: the FAA assigns them once, when a ground
+# delay program is issued (often hours before you'd start watching), and doesn't send them again.
+# Small (callsign -> a few slots), kept on disk so a restart doesn't lose them.
+EDCTS = {}
+EDCT_PATH = None
+_edct_dirty = [False]
 _cfg = {}
 
 
@@ -138,6 +144,8 @@ def parse(xml_text):
                     ev["on"] = txt
                 elif n == "etd" and sub.get("etdType") == "ACTUAL" and not ev["off"]:
                     ev["off"] = sub.get("timeValue")
+                elif n == "etd" and sub.get("etdType") == "CONTROLLED" and sub.get("timeValue"):
+                    ev["edct"] = sub.get("timeValue")
                 elif n == "eta" and sub.get("etaType") in ("ESTIMATED", "ACTUAL"):
                     if sub.get("etaType") == "ACTUAL":
                         ev["on"] = ev["on"] or sub.get("timeValue")
@@ -342,22 +350,33 @@ def handle(xml_text):
     except Exception:
         pass
     head = xml_text[:4000]
-    if WATCH and "controlledDepartureTime" in xml_text and any(cs in xml_text for cs in WATCH):
+    if "controlledDepartureTime" in xml_text or 'etdType="CONTROLLED"' in xml_text:
+        _edct_sample(xml_text)
         try:
             for ev in parse_edct(xml_text):
+                ev["got"] = time.time()
+                _remember_edct(ev)
                 if ev["acid"] in WATCH:
-                    ev["got"] = time.time()
-                    _keep(ev)
                     _news(ev, force=True)
                     STATE["matched"] += 1
         except Exception as e:
             log.debug("SWIM EDCT: %s", e)
+    elif "CONTROLLED" in xml_text or "EDCT" in xml_text:
+        _edct_sample(xml_text)
     if "fiMessage" in head and ('msgType="GS"' in head or 'msgType="GDP"' in head or 'msgType="AFP"' in head):
         try:
             _flow(xml_text)
         except Exception as e:
             log.debug("SWIM flow message: %s", e)
         return
+    if 'etdType="CONTROLLED"' in xml_text:
+        try:
+            for ev in parse(xml_text):
+                if ev.get("edct"):
+                    _remember_edct({"acid": ev["acid"], "type": "EDCT", "src": "TFMS", "dep": ev.get("dep"),
+                                    "arr": ev.get("arr"), "igtd": ev.get("igtd"), "edct": ev["edct"], "got": time.time()})
+        except Exception as e:
+            log.debug("SWIM EDCT: %s", e)
     if not WATCH:
         return
     if not any(cs in xml_text for cs in WATCH):  # cheap test before parsing
@@ -468,6 +487,62 @@ def parse_tfdm(xml_text):
                     "type": f"TFDM {mtype or 'message'}", "at": max(stamps) if stamps else None, "src": "TFDM",
                     "tfdm": {"dep": dep, "arr": arr, "state": state, "airport": creator}})
     return out
+
+
+def _edct_sample(xml_text):
+    """Every kind of message that carries an EDCT, a few of each, for checking the parser."""
+    t = (_TYPE_RE.findall(xml_text[:4000]) or ["unknown"])[0]
+    lst = SAMPLES.setdefault(f"edct_{t}", [])
+    if len(lst) < 3:
+        lst.append(xml_text[:200000])
+
+
+def _remember_edct(ev):
+    with LOCK:
+        lst = EDCTS.setdefault(ev["acid"], [])
+        lst[:] = [e for e in lst if (e.get("dep"), e.get("igtd")) != (ev.get("dep"), ev.get("igtd"))] + [ev]
+        del lst[:-4]
+    _edct_dirty[0] = True
+
+
+def save_edcts():
+    """Drop EDCTs more than 12 h past, then write the rest to disk (only when something changed)."""
+    if not EDCT_PATH or not _edct_dirty[0]:
+        return
+    import json
+    from datetime import datetime
+    cut = time.time() - 12 * 3600
+    def ts(x):
+        try:
+            return datetime.fromisoformat(x.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0
+    with LOCK:
+        for acid in list(EDCTS):
+            EDCTS[acid] = [e for e in EDCTS[acid] if ts(e.get("edct") or "") > cut]
+            if not EDCTS[acid]:
+                del EDCTS[acid]
+        data = json.dumps(EDCTS)
+        _edct_dirty[0] = False
+    try:
+        tmp = EDCT_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(data)
+        import os
+        os.replace(tmp, EDCT_PATH)
+    except OSError as e:
+        log.info("SWIM EDCTs not saved: %s", e)
+
+
+def load_edcts(path):
+    global EDCT_PATH
+    EDCT_PATH = path
+    import json
+    try:
+        with open(path) as f:
+            EDCTS.update(json.load(f) or {})
+    except (OSError, ValueError):
+        pass
 
 
 def _keep(ev):
@@ -776,8 +851,9 @@ def prune(max_age=12 * 3600):
 
 
 def events(callsign):
+    cs = (callsign or "").upper()
     with LOCK:
-        return list(EVENTS.get((callsign or "").upper(), []))
+        return list(EDCTS.get(cs, [])) + list(EVENTS.get(cs, []))
 
 
 def configured(cfg):
@@ -1014,7 +1090,9 @@ def samples_zip():
                                                "stdds": {"state": STDDS_STATE, "types": STDDS_TYPES,
                                                          "airports": sorted(WATCH_AIRPORTS),
                                                          "targets": {k: len(v) for k, v in SURFACE.items()}},
-                                               "events": {k: v for k, v in EVENTS.items()}}, indent=1, default=str))
+                                               "events": {k: v for k, v in EVENTS.items()},
+                                               "edcts": {"flights": len(EDCTS), "yours": {k: EDCTS[k] for k in WATCH if k in EDCTS}}},
+                                              indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):
                 z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)

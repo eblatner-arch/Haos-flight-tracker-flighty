@@ -495,11 +495,17 @@ def swim_watch(now):
                     icao = (airports.get(code) or {}).get("icao") if code else None
                     if icao:
                         aps.add(icao.upper())
+    new = keep - swim.WATCH
     swim.WATCH.clear()
     swim.WATCH.update(keep)
+    # a flight you just started watching may already have an EDCT from earlier: apply it now
+    for cs in new:
+        if swim.EDCTS.get(cs):
+            swim.PENDING.add(cs)
     swim.WATCH_AIRPORTS.clear()
     swim.WATCH_AIRPORTS.update(aps)
     swim.prune()
+    swim.save_edcts()
 
 
 SWIM_FAST = set()   # legs whose next update applies SWIM news without loading the FlightAware page
@@ -878,7 +884,9 @@ def swim_overlay(L, f, now):
         "surf_dep": sd or None, "surf_arr": sa or None, "tower_dep": sw.get("tower_dep"),
         "pdc": sw.get("pdc"),
         "edct": {"at": sw.get("edct"), "cta": sw.get("cta"), "prev": sw.get("edct_prev"), "for": sw.get("edct_for")}
-        if sw.get("edct") else None,
+        if sw.get("edct") else
+        # the departure tower's system knows the flight has one even when the time itself hasn't reached us
+        {"at": None, "tower": True} if (sw.get("tfdm_dep") or {}).get("smpExemptionReason") == "EDCT" else None,
     }
     if sw.get("traj"):
         # the FAA's trajectory along the route ATC has on file (updated with every amendment)
@@ -3431,6 +3439,7 @@ def main():
     threading.Thread(target=live_loop, daemon=True, name="live").start()
     swim.ON_NEWS = lambda acid: WAKE.set()
     swim.ON_NAS = lambda ap: (NAS_NEWS.add(ap), WAKE.set())
+    swim.load_edcts(os.path.join(DATA_DIR, "swim_edcts.json"))
     swim.start(CFG)
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)
