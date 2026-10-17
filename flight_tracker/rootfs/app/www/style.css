@@ -479,7 +479,6 @@ details.fold > summary i { width: 8px; height: 8px; border-right: 2px solid var(
 details.fold[open] > summary i { transform: rotate(45deg); }
 .fold-n { font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--faint); font-weight: 600; }
 .hist-seen { font-size: 12.5px; margin-top: 3px; } .hist-seen b { font-family: var(--mono); font-size: 12px; }
-.src.fr24 { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #f59e0b; }
 .hdl small { display: block; font-weight: 500; color: var(--faint); }
 .btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 
@@ -499,4 +498,3 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .ff input[data-typed] { text-transform: uppercase; }
 .ff input[data-typed]::placeholder { text-transform: none; color: var(--faint); }
 .linkbtn { background: none; border: 0; padding: 0; margin-left: 6px; color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-.src.adb { background: color-mix(in srgb, var(--violet, #8b5cf6) 18%, transparent); color: var(--violet, #8b5cf6); }

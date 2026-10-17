@@ -60,8 +60,6 @@ DEFAULTS = {
     "poll_near_minutes": 10,
     "poll_fast_minutes": 3,
     "poll_air_minutes": 10,
-    "fr24_minutes": 0,
-    "adb_minutes": 0,
     "schedule_days": 60,
     "adsb_inbound_minutes": 3,
     "nas_minutes": 5,
@@ -145,8 +143,6 @@ APP_SETTINGS = {
     "poll_near_minutes": ("int", 2, 60, "Within 3 h", "Minutes between FlightAware page checks.", "FlightAware page checks"),
     "poll_fast_minutes": ("int", 1, 30, "Last 45 min, taxi, landing", "Minutes between page checks around departure, in the last 20 min before landing and taxiing in.", "FlightAware page checks"),
     "poll_air_minutes": ("int", 2, 60, "In the air", "Minutes between page checks after takeoff. Tracking stops at the gate.", "FlightAware page checks"),
-    "adb_minutes": ("int", 0, 120, "AeroDataBox diversion check", "Off (0) by default: AeroDataBox's site answers the page reader with \"Verification required\". If turned on: minutes between reads of its page for your flight while it's in the air.", "Tail and position sources"),
-    "fr24_minutes": ("int", 0, 120, "Flightradar24 tail check", "Off (0) by default: Flightradar24 now shows a Cloudflare 'verify you are human' check to the page reader. If you turn it on: minutes between checks for the airline's tail assignment, from the watch window until your inbound leaves its gate (after that the inbound's own transponder is the answer).", "Tail and position sources"),
     "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
     "nas_minutes": ("int", 2, 60, "FAA NAS status", "Minutes between NAS status checks.", "FAA NAS status"),
@@ -160,12 +156,8 @@ def init_app_settings():
         if k not in s:
             s[k] = CFG.get(k, DEFAULTS.get(k))
     flags = STATE.setdefault("flags", {})
-    if not flags.get("adb_off"):
-        s["adb_minutes"] = 0  # AeroDataBox's site asks the page reader for verification
-        flags["adb_off"] = True
-    if not flags.get("fr24_off"):
-        s["fr24_minutes"] = 0  # Flightradar24 started answering the page reader with a captcha
-        flags["fr24_off"] = True
+    for gone in ("fr24_minutes", "adb_minutes"):  # sources removed in 3.11.0
+        s.pop(gone, None)
     CFG.update({k: s[k] for k in APP_SETTINGS})
 
 
@@ -473,53 +465,6 @@ def reload_schedule(force=False):
 
 
 IDENT_RE = re.compile(r"^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])(\d{1,4})[A-Z]?$")
-
-
-def adb_check(browser, L, f, now, planned):
-    """While the flight is in the air, read AeroDataBox's page for it every adb_minutes: its arrival
-    airport changes to the diversion airport before FlightAware shows it. -> L['adb'] or None"""
-    every = float(CFG.get("adb_minutes") or 0)
-    ph = fa.phase(f, now)
-    if not every or browser is None or ph not in ("airborne", "landed") or not planned:
-        return L.get("adb") if ph in ("airborne", "landed") else None
-    prev = L.get("adb") or {}
-    if now - (prev.get("at") or 0) < every * 60:
-        return prev
-    ident = (fr24_ident(L) or "").upper()
-    if not ident:
-        return prev
-    out_s = (f.get("times") or {}).get("out", {}).get("scheduled") or L["sched_out"]
-    day = datetime.fromtimestamp(out_s, alerting.tz_for(L.get("dep"), f.get("origin"))).strftime("%Y-%m-%d")
-    url = sources.ADB_URL.format(ident, day)
-    t0 = time.time()
-    rec = {"at": t0, "leg": L.get("display"), "leg_id": L["id"], "what": "AeroDataBox (diversion check)",
-           "url": url, "shot": f"{L['id']}-adb", "has_shot": True}
-    res = {"at": now}
-    try:
-        page = browser.adb_page(url, rec["shot"])
-        items = sources.parse_adb(page.get("json"))
-        hit = sources.pick_adb(items, L.get("dep"), out_s)
-        res.update(ok=True, flights=len(items), arr=(hit or {}).get("arr"), status=(hit or {}).get("status"),
-                   reg=(hit or {}).get("reg"), eta=(hit or {}).get("in_e"))
-        if not items:  # couldn't find its data: keep a bit of the page text for the log
-            txt = page.get("text") or ""
-            res["text_hint"] = " ".join(txt.split())[:160]
-        if hit and hit.get("arr") and hit["arr"] != planned.upper():
-            res["diverted_to"] = hit["arr"]
-        rec.update(page_data=bool(items), flights=len(items), ms=int((time.time() - t0) * 1000),
-                   found=(f"{hit['dep']}→{hit['arr']} {hit.get('status') or ''}".strip() if hit
-                          else "no flight data read" if not items else "this departure isn't listed"))
-    except Exception as e:
-        res.update(ok=False, error=str(e).splitlines()[0][:200])
-        rec.update(error=res["error"], ms=int((time.time() - t0) * 1000))
-        log.info("%s AeroDataBox: %s", L.get("display"), res["error"])
-    with LOCK:
-        STATE["debug"] = (STATE["debug"] + [rec])[-60:]
-    L["adb"] = res
-    note = (f"to {res['arr']}" + (f" · {res['status']}" if res.get("status") else "")) if res.get("arr") else \
-        (f"error: {res['error']}" if res.get("error") else rec.get("found") or "nothing read")
-    saw(L, "AeroDataBox", res.get("reg"), note)
-    return res
 
 
 def route_end(route):
@@ -1283,75 +1228,6 @@ def walk_chain(browser, L, now):
     return found
 
 
-def fr24_ident(L):
-    m = IDENT_RE.match((L.get("display") or "").replace(" ", "")) or IDENT_RE.match(L.get("ident") or "")
-    if not m:
-        return None
-    code = m.group(1)
-    code = {v: k for k, v in schedule.IATA_TO_ICAO.items()}.get(code, code)
-    return f"{code}{m.group(2)}".lower()
-
-
-def fr24_check(browser, L, f, now):
-    """The airline's tail assignment from Flightradar24's schedule page for this flight number.
-    Free, so it runs every fr24_minutes from the watch window until pushback, and right away when
-    something hints the airplane changed: a different aircraft type on FlightAware, a different
-    inbound, or a different airplane flying into the inbound."""
-    every = float(CFG.get("fr24_minutes") or 0)
-    if not every or rules_mod.kind_of(L) == "friends" or fa.phase(f, now) != "scheduled":
-        return L.get("fr24")
-    ident = fr24_ident(L)
-    if not ident:
-        return L.get("fr24")
-    rot = L.get("rotation") or []
-    seen = {"type": (f.get("aircraft_type") or "").upper() or None, "inb": f.get("inbound_fa_id"),
-            "root": (rot[0] or {}).get("inbound_fa_id") if rot else None}
-    prev = L.get("fr24_seen") or {}
-    why = None
-    if prev:
-        if seen["type"] and prev.get("type") and seen["type"] != prev["type"]:
-            why = f"aircraft type {prev['type']} → {seen['type']} on FlightAware"
-        elif seen["root"] and prev.get("root") and not fa.same_flight(seen["root"], prev["root"]):
-            why = "a different airplane is flying into your inbound"
-        elif seen["inb"] and prev.get("inb") and not fa.same_flight(seen["inb"], prev["inb"]):
-            why = "a different inbound"
-    L["fr24_seen"] = {k: v or prev.get(k) for k, v in seen.items()}
-    last = (L.get("fr24") or {}).get("at") or 0
-    if not why and now - last < every * 60:
-        return L.get("fr24")
-    url = sources.FR24_URL.format(ident)
-    t0 = time.time()
-    rec = {"at": t0, "leg": L.get("display"), "leg_id": L["id"], "what": f"Flightradar24 tail{' (' + why + ')' if why else ''}",
-           "url": url, "shot": f"{L['id']}-fr24"}
-    res = {"at": now, "why": why}
-    try:
-        rows = browser.fr24_rows(url, rec["shot"])
-        items = sources.parse_fr24_rows(rows)
-        tz = alerting.tz_for(L.get("dep"), (f or {}).get("origin"))
-        out_s = (f.get("times") or {}).get("out", {}).get("scheduled") or L["sched_out"]
-        hit = sources.pick_fr24(items, L.get("dep"), L.get("arr"), out_s, tz)
-        res.update(ok=True, rows=len(items), tail=(hit or {}).get("reg"), type=(hit or {}).get("type"), matched=bool(hit))
-        rec.update(page_data=bool(items), flights=len(items), has_shot=True, ms=int((time.time() - t0) * 1000),
-                   found=(f"{hit['dep']}→{hit['arr']} {hit.get('type') or ''} {hit.get('reg') or 'no tail yet'}" if hit
-                          else "this departure isn't listed"))
-    except Exception as e:
-        res.update(ok=False, error=str(e).splitlines()[0][:200])
-        rec.update(error=res["error"], ms=int((time.time() - t0) * 1000))
-        log.info("%s FR24: %s", L.get("display"), res["error"])
-    with LOCK:
-        STATE["debug"] = (STATE["debug"] + [rec])[-60:]
-    old = L.get("fr24") or {}
-    if res.get("ok") and not res.get("tail") and old.get("tail"):
-        res["tail"], res["tail_at"] = old["tail"], old.get("tail_at")  # page no longer shows it; keep the last
-    elif res.get("tail"):
-        res["tail_at"] = old.get("tail_at") if old.get("tail") == res["tail"] else now
-    L["fr24"] = res
-    saw(L, "Flightradar24" + (f" ({why})" if why else ""), res.get("tail") if res.get("ok") and res.get("matched") else None,
-        None if res.get("ok") and res.get("matched") and res.get("tail") else
-        "error" if not res.get("ok") else "no tail listed yet" if res.get("matched") else "this departure isn't listed")
-    return res
-
-
 def own_inbound(L, f):
     """If the flight bringing this airplane is one of your own tracked flights (a turn, e.g.
     EWR-MIA-EWR), that leg. Its tail is the best answer for this one too."""
@@ -1474,12 +1350,12 @@ def own_live(L, f, now):
 def resolve_tail(browser, L, f, now):
     """Which airplane is flying this leg. Trust order: your own flight's transponder; the airplane
     seen on ADS-B flying in (your inbound or an earlier leg of its day); then the newest of
-    Flightradar24's airline assignment, your own earlier leg on a turn and AeroAPI; FlightAware last."""
+    your own earlier leg on a turn and AeroAPI; FlightAware last."""
     info = dict(L.get("tail_info") or {})
     page_tail = f.get("tail") if not f.get("tail_source") else None
     if info.get("kind") == "chain" and not fa.same_flight(info.get("root"), f.get("inbound_fa_id")):
         info = {}  # a different inbound is a different airplane
-    if info.get("kind") in ("page", "aeroapi", "turn", "fr24", "chain"):
+    if info.get("kind") in ("page", "aeroapi", "turn", "chain"):
         info = {}  # re-derived every time
     ph = fa.phase(f, now)
     odd_tail = None
@@ -1496,7 +1372,7 @@ def resolve_tail(browser, L, f, now):
             log.info("%s own ADS-B: %s", L.get("display"), e)
             saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", None,
                 f"error: {(str(e).splitlines() or [type(e).__name__])[0][:120] or type(e).__name__}")
-    # Free signals first: the airplane flying in on ADS-B, Flightradar24's airline assignment,
+    # Free signals first: the airplane flying in on ADS-B
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
     # Once the inbound has left its gate, the airplane can't change without a new inbound number
     # (FlightAware sees that): its own transponder is the answer, and the airline pages can rest.
@@ -1507,12 +1383,11 @@ def resolve_tail(browser, L, f, now):
     chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") != "own" and not (inb_gone and fresh_ai) else None
     if not chain and ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
         chain = {"tail": ai["tail"], "kind": "chain", "at": ai["at"], "root": ai["root"], "source": ai["source"]}
-    fr = (L.get("fr24") or {}) if inb_gone else (fr24_check(browser, L, f, now) or {})
     mine = own_inbound(L, f) if info.get("kind") != "own" else None
     mi = (mine or {}).get("tail_info") or {}
     a = L.get("aero") or {}
     aero_tail = a.get("tail")
-    known = {x.upper() for x in ((chain or {}).get("tail"), fr.get("tail"), mi.get("tail")) if x}
+    known = {x.upper() for x in ((chain or {}).get("tail"), mi.get("tail")) if x}
     observed = info.get("tail") if info.get("kind") == "own" else (odd_tail or page_tail)
     if observed and observed.upper() in known:
         observed = None  # already explained for free; no AeroAPI call needed
@@ -1524,15 +1399,12 @@ def resolve_tail(browser, L, f, now):
     if info.get("kind") != "own":
         # The airplane actually flying your inbound (ADS-B) is the strongest evidence short of your
         # own transponder: that's how a swap without a new inbound number shows up. Otherwise the
-        # newest of Flightradar24's airline assignment, your earlier leg on a turn, and AeroAPI.
+        # newest of your earlier leg on a turn and AeroAPI.
         if chain:
             info = chain
         else:
             cands = []
-            if fr.get("tail"):
-                cands.append((fr.get("tail_at") or fr["at"], {"tail": fr["tail"].upper(), "kind": "fr24", "at": fr.get("tail_at") or fr["at"],
-                                                              "source": "Flightradar24 (airline assignment)"}))
-            if mine and mi.get("tail") and mi.get("kind") in ("own", "aeroapi", "turn", "fr24", "chain"):
+            if mine and mi.get("tail") and mi.get("kind") in ("own", "aeroapi", "turn", "chain"):
                 cands.append((mi.get("at") or 0, {"tail": mi["tail"].upper(), "kind": "turn", "at": mi.get("at") or now,
                                                   "source": f"your {mine.get('display') or 'earlier flight'} ({mi.get('source')})"}))
             if aero_tail:
@@ -1664,10 +1536,7 @@ def update_leg(browser, lid):
                         ap[k] = ref[k]
                 flight[side] = ap
             planned = planned_arr(L)
-            adb = adb_check(browser, L, flight, now, planned)
-            if adb and adb.get("at") == now:
-                used.append("AeroDataBox")
-            fa.fix_diversion(flight, planned, route_end(flight.get("route")) or (adb or {}).get("diverted_to"))
+            fa.fix_diversion(flight, planned, route_end(flight.get("route")))
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
                 # a diversion keeps the airport you planned as the leg's arrival
@@ -1789,9 +1658,8 @@ def update_leg(browser, lid):
             used.append(f"AeroAPI ({(L.get('aero') or {}).get('reason')})")
         ti = L.get("tail_info") or {}
         for x in L.get("_seen") or []:
-            name = "Flightradar24" if x["src"].startswith("Flightradar24") else "adsb.lol"
-            if name not in used:
-                used.append(name)
+            if "adsb.lol" not in used and x["src"].startswith("adsb.lol"):
+                used.append("adsb.lol")
         if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
                                     and d["at"] >= now for d in STATE["debug"][-6:]):
             used.append("FlightAware page (inbound)")

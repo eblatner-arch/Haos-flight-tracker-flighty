@@ -170,45 +170,6 @@ class Browser:
                     raise
                 time.sleep(3)
 
-    FR24_JS = """() => Array.from(document.querySelectorAll("tr")).map(tr => ({
-      text: tr.innerText || "",
-      cells: Array.from(tr.cells || []).map(td => (td.innerText || "").trim()),
-      ts: Array.from(tr.querySelectorAll("[data-timestamp]")).map(e => e.getAttribute("data-timestamp")),
-      rowts: tr.getAttribute("data-timestamp"),
-      regs: Array.from(tr.querySelectorAll('a[href*="/data/aircraft/"]')).map(a => (a.innerText || "").trim())
-    })).filter(r => /\\([A-Z0-9]{3}\\)/.test(r.text))"""
-
-    def fr24_rows(self, url, shot_name):
-        """Rows of a Flightradar24 flight-history page (/data/flights/ua1502): [{text, cells, ts, regs}]."""
-        self._ensure()
-        page = self._ctx.new_page()
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            try:
-                page.get_by_role("button", name=re.compile("accept|agree|got it|consent", re.I)).first.click(timeout=2500)
-            except Exception:
-                pass
-            rows = []
-            for _ in range(8):
-                rows = page.evaluate(self.FR24_JS) or []
-                if rows:
-                    break
-                page.wait_for_timeout(1000)
-            try:
-                page.screenshot(path=os.path.join(self.shot_dir, f"{shot_name}.png"))
-            except Exception:
-                pass
-            if not rows:
-                try:
-                    body = (page.inner_text("body", timeout=2000) or "")[:3000].lower()
-                except Exception:
-                    body = ""
-                if "verify you are human" in body or "security verification" in body or "just a moment" in body:
-                    raise RuntimeError("Flightradar24 asked for a captcha (Cloudflare)")
-            return rows
-        finally:
-            page.close()
-
     def links(self, url, contains):
         """Every link on a page whose address contains `contains` (FlightAware's flight history list)."""
         self._ensure()
@@ -218,67 +179,6 @@ class Browser:
             page.wait_for_timeout(2500)
             return page.evaluate("(c) => Array.from(document.querySelectorAll('a[href]')).map(a => a.href).filter(h => h.includes(c))",
                                  contains) or []
-        finally:
-            page.close()
-
-    def adb_page(self, url, shot_name):
-        """An AeroDataBox flight-number page: every JSON answer the page downloads while it draws
-        (that's where its flight data is), plus the page text after expanding each flight."""
-        self._ensure()
-        page = self._ctx.new_page()
-        payloads = []
-
-        def grab(resp):
-            try:
-                ct = (resp.headers or {}).get("content-type", "")
-                if "json" in ct and len(payloads) < 30:
-                    payloads.append(resp.json())
-            except Exception:
-                pass
-        page.on("response", grab)
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            try:
-                page.get_by_role("button", name=re.compile("accept|agree|got it|consent", re.I)).first.click(timeout=2000)
-            except Exception:
-                pass
-            # The page draws its form first, then searches ("Searching…", date "Loading…") and only
-            # then lists the flights: wait for the search to finish (it can take a while).
-            deadline = time.time() + 45
-            while time.time() < deadline:
-                try:
-                    body = page.inner_text("body", timeout=2000)
-                except Exception:
-                    body = ""
-                busy = "Searching" in body or "Loading..." in body or "Loading…" in body
-                if not busy and (payloads or len(body) > 1500):
-                    break
-                page.wait_for_timeout(1000)
-            page.wait_for_timeout(1500)
-            # each flight with this number is a collapsed row: open them all
-            for sel in ("[aria-expanded='false']", "summary", "button:has-text('Details')", "button:has-text('More')"):
-                try:
-                    for el in page.locator(sel).all()[:12]:
-                        try:
-                            el.click(timeout=1500)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            page.wait_for_timeout(1500)
-            try:
-                page.screenshot(path=os.path.join(self.shot_dir, f"{shot_name}.png"), full_page=True)
-            except Exception:
-                pass
-            try:
-                text = page.inner_text("body", timeout=3000)[:30000]
-            except Exception:
-                text = ""
-            low = text[:3000].lower()
-            if "verification required" in low or "verify you are human" in low or "security verification" in low \
-                    or "just a moment" in low:
-                raise RuntimeError("AeroDataBox asked for verification (it blocks automated readers)")
-            return {"json": payloads, "text": text}
         finally:
             page.close()
 

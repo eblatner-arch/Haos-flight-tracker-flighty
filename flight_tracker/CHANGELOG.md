@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.11.0
+- Flightradar24 and AeroDataBox removed entirely (both block automated readers). Their settings are gone; tails come from ADS-B (your inbound, its earlier legs, your own transponder), your earlier leg on a turn, and AeroAPI; diversions from FlightAware's destination and route
+
 ## 3.10.2
 - A ground stop or ground delay program at your departure airport only pushes when your inbound is known, hasn't taken off, and is inside the program's scope (or the scope can't be told). No inbound known, or an inbound from outside the listed centers, no push (it still shows on the flight's screen)
 
