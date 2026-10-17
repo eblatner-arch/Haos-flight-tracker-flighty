@@ -355,6 +355,26 @@ class Startup(unittest.TestCase):
         self.assertFalse(R["nas_delay"]["on"])
         server.init_rules()                                   # restarting again keeps working
 
+
+class AirportLayout(unittest.TestCase):
+    def test_osm_to_features(self):
+        import server
+        data = {"elements": [
+            {"type": "way", "tags": {"aeroway": "runway", "ref": "04L/22R"},
+             "geometry": [{"lat": 40.67, "lon": -74.18}, {"lat": 40.70, "lon": -74.16}]},
+            {"type": "way", "tags": {"aeroway": "taxilane", "ref": "P"},
+             "geometry": [{"lat": 40.69, "lon": -74.18}, {"lat": 40.691, "lon": -74.179}]},
+            {"type": "way", "tags": {"aeroway": "terminal", "name": "Terminal A"},
+             "geometry": [{"lat": 40.68, "lon": -74.17}, {"lat": 40.681, "lon": -74.17}, {"lat": 40.681, "lon": -74.171}]},
+            {"type": "node", "lat": 40.6801, "lon": -74.1702, "tags": {"aeroway": "gate", "ref": "A12"}},
+            {"type": "node", "lat": 40.6801, "lon": -74.1702, "tags": {"aeroway": "holding_position"}},
+            {"type": "way", "tags": {"aeroway": "windsock"}, "geometry": [{"lat": 1, "lon": 1}, {"lat": 2, "lon": 2}]},
+        ]}
+        f = server._layout_from_osm(data)
+        self.assertEqual([(x["k"], x.get("ref") or x.get("name")) for x in f],
+                         [("runway", "04L/22R"), ("taxiway", "P"), ("terminal", "Terminal A"), ("gate", "A12")])
+        self.assertEqual(f[3]["g"], [40.6801, -74.1702])
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -232,22 +232,90 @@
     return L.marker(pos, { icon, title, zIndexOffset: 1000 });
   }
 
-  // Free basemaps, no API key: Esri's gray canvas, falling back to OpenStreetMap if it won't load.
+  // Free basemaps, no API key: CARTO's OpenStreetMap tiles (kept current: new terminals, taxiways;
+  // detailed to zoom 20), falling back to OpenStreetMap's own if they won't load.
   function addTiles(map, dark) {
-    const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
-    const base = L.tileLayer(esri(dark ? "World_Dark_Gray_Base" : "World_Light_Gray_Base"),
-      { maxZoom: 16, attribution: "Tiles &copy; Esri" }).addTo(map);
-    if (!map.getPane("labels")) { map.createPane("labels"); map.getPane("labels").style.zIndex = 350; map.getPane("labels").style.pointerEvents = "none"; }
-    const labels = L.tileLayer(esri(dark ? "World_Dark_Gray_Reference" : "World_Light_Gray_Reference"),
-      { maxZoom: 16, pane: "labels", opacity: 0.85 }).addTo(map);
+    const base = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`,
+      { maxZoom: 20, subdomains: "abcd", attribution: "&copy; OpenStreetMap contributors &copy; CARTO" }).addTo(map);
     let errors = 0, switched = false;
     base.on("tileerror", () => {
       if (switched || ++errors < 4) return;
       switched = true;
-      map.removeLayer(base); map.removeLayer(labels);
+      map.removeLayer(base);
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        { maxZoom: 16, className: dark ? "osm-dark" : "", attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+        { maxZoom: 20, maxNativeZoom: 19, className: dark ? "osm-dark" : "", attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
     });
+  }
+
+  // Airport layout labels: zoomed in on one of the flight's airports, runways, terminals, taxiways
+  // and gates are labelled (OpenStreetMap data, fetched once per airport by the add-on). Smaller
+  // things appear as you zoom further: runways and terminals from 14, taxiways 15, gates 16.
+  const LAYOUTS = {};
+  function kmBetween(a, b) {
+    const R = Math.PI / 180, x = (b[1] - a[1]) * R * Math.cos((a[0] + b[0]) / 2 * R), y = (b[0] - a[0]) * R;
+    return Math.hypot(x, y) * 6371;
+  }
+  function layoutZoom(entry) {
+    const z = entry.map.getZoom(), c = entry.map.getContainer();
+    for (const n of [15, 16, 17]) c.classList.toggle(`z${n}`, z >= n);
+  }
+  async function layoutCheck(entry) {
+    const map = entry.map, leg = entry.leg;
+    if (!leg) return;
+    layoutZoom(entry);
+    if (map.getZoom() < 14) { if (entry.layout && map.hasLayer(entry.layout)) map.removeLayer(entry.layout); return; }
+    const c = map.getCenter(), here = [c.lat, c.lng];
+    const ap = [leg.dep_ap, leg.arr_ap].map((a) => a && ll(a) ? { code: a.iata || a.icao, pos: ll(a) } : null)
+      .filter((a) => a && a.code && kmBetween(here, a.pos) < 8)[0];
+    if (!ap) return;
+    if (entry.layoutFor === ap.code) { if (!map.hasLayer(entry.layout)) entry.layout.addTo(map); return; }
+    if (!LAYOUTS[ap.code]) {
+      LAYOUTS[ap.code] = api(`api/airport/${encodeURIComponent(ap.code)}/layout`).catch(() => { delete LAYOUTS[ap.code]; return null; });
+    }
+    const d = await LAYOUTS[ap.code];
+    if (!d || !d.features || entry.layoutFor === ap.code) return;
+    if (entry.layout) map.removeLayer(entry.layout);
+    entry.layout = paintLayout(d.features).addTo(map);
+    entry.layoutFor = ap.code;
+  }
+  function paintLayout(features) {
+    const g = L.layerGroup(), muted = css("--muted"), faint = css("--faint");
+    const lbl = (pos, text, cls) => g.addLayer(L.marker(pos, { interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "", iconSize: null, html: `<span class="ap-lbl ${cls}">${esc(text)}</span>` }) }));
+    const mid = (pts) => {
+      let tot = 0; const seg = [];
+      for (let i = 1; i < pts.length; i++) { const d = kmBetween(pts[i - 1], pts[i]); seg.push(d); tot += d; }
+      let half = tot / 2;
+      for (let i = 0; i < seg.length; i++) {
+        if (half <= seg[i]) { const t = seg[i] ? half / seg[i] : 0; return [[pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t], tot]; }
+        half -= seg[i];
+      }
+      return [pts[0], tot];
+    };
+    const centroid = (pts) => [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length];
+    const placed = {};
+    const near = (ref, p, km) => (placed[ref] || []).some((q) => kmBetween(p, q) < km);
+    for (const f of features) {
+      if (f.k === "terminal") {
+        g.addLayer(L.polygon(f.g, { color: muted, weight: 1, opacity: 0.6, fillColor: muted, fillOpacity: 0.12, interactive: false }));
+        if (f.name || f.ref) lbl(centroid(f.g), f.name || f.ref, "ap-term");
+      }
+    }
+    for (const f of features) {
+      if (f.k === "runway" && f.ref) lbl(mid(f.g)[0], f.ref.replace(/^0/, "").replace(/\/0/, "/"), "ap-rwy");
+      else if (f.k === "taxiway" && f.ref) {
+        g.addLayer(L.polyline(f.g, { color: faint, weight: 1, opacity: 0.5, interactive: false }));
+        const [p, len] = mid(f.g);
+        if (len < 0.08 || near(f.ref, p, 0.35)) continue;
+        (placed[f.ref] = placed[f.ref] || []).push(p);
+        lbl(p, f.ref, "ap-twy");
+      } else if ((f.k === "gate" || f.k === "stand") && f.ref && !Array.isArray(f.g[0])) {
+        if (near("gate:" + f.ref, f.g, 0.05)) continue;
+        (placed["gate:" + f.ref] = placed["gate:" + f.ref] || []).push(f.g);
+        lbl(f.g, f.ref, "ap-gate");
+      }
+    }
+    return g;
   }
 
   function drawMap(el, leg, { interactive = true, key = null } = {}) {
@@ -306,7 +374,10 @@
       });
       map.addControl(new Apt());
     }
-    if (interactive) oneFingerZoom(map, el);
+    if (interactive) {
+      oneFingerZoom(map, el);
+      map.on("zoomend moveend", () => layoutCheck(entry));
+    }
     paintMap(entry, leg, true);
     setTimeout(() => map.invalidateSize(), 50);
   }
@@ -401,13 +472,13 @@
     for (const t of tg) {
       const label = [t.cs, t.type].filter(Boolean).join(" · ") || (t.kind === "vehicle" ? "Vehicle" : "Unidentified");
       if (!t.mine && (t.kind === "vehicle" || (!t.cs && !t.type))) {
-        entry.surface.addLayer(L.circleMarker([t.lat, t.lon], { radius: 2.5, color: muted, fillColor: muted, fillOpacity: 0.8, weight: 0 }).bindTooltip(label));
+        entry.surface.addLayer(L.circleMarker([t.lat, t.lon], { radius: 2.5, color: muted, fillColor: muted, fillOpacity: 0.8, weight: 0 }).bindTooltip(label, { className: "surf-tip" }));
         continue;
       }
       const sz = t.mine ? 22 : 15;
       const icon = L.divIcon({ className: "surf-icon", iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
         html: `<div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : muted};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>` });
-      const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 }).bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: !!t.mine });
+      const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 }).bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: !!t.mine, className: "surf-tip" });
       entry.surface.addLayer(m);
     }
     if (!SURF.zoomed && entry.interactive && ["taxi_out", "landed"].includes(d.phase)) {
@@ -419,6 +490,7 @@
 
   function paintMap(entry, leg, fit) {
     const { layer, interactive } = entry;
+    entry.leg = leg;
     layer.clearLayers();
     const add = (x) => x.addTo(layer);
     const route = css("--route"), violet = css("--violet"), muted = css("--faint");

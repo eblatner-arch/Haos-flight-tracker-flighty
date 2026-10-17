@@ -10,6 +10,7 @@ import queue
 import re
 import threading
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -2266,6 +2267,92 @@ def api_surface(lid, now):
             "center": [ap["lat"], ap["lon"]] if ap.get("lat") is not None else None, "targets": targets}
 
 
+# ---------------------------------------------------------------- airport layout
+# Runways, taxiways, terminals and gates from OpenStreetMap (current: EWR's new Terminal A is
+# there), fetched once per airport from the Overpass API and kept for a month, so the surface map
+# can label everything when you zoom in.
+LAYOUT_DIR = os.path.join(DATA_DIR, "airport_layouts")
+LAYOUT_TTL = 30 * 86400
+_layout_lock = threading.Lock()
+OVERPASS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+
+
+def _layout_from_osm(data):
+    """Overpass JSON -> compact features: {k: runway|taxiway|terminal|apron|gate|stand|hold, ref, name, g}.
+    Lines and areas carry [[lat, lon], …]; points a single [lat, lon]."""
+    out = []
+    for el in data.get("elements") or []:
+        tags = el.get("tags") or {}
+        kind = tags.get("aeroway")
+        if el.get("type") == "relation" or not kind:
+            continue
+        kind = {"taxilane": "taxiway", "parking_position": "stand", "holding_position": "hold",
+                "hangar": "terminal"}.get(kind, kind)
+        if kind not in ("runway", "taxiway", "terminal", "apron", "gate", "stand", "hold"):
+            continue
+        ref = tags.get("ref") or tags.get("name:short")
+        name = tags.get("name")
+        if el.get("type") == "node":
+            if el.get("lat") is None or not (ref or name):
+                continue
+            g = [round(el["lat"], 6), round(el["lon"], 6)]
+        else:
+            g = [[round(p["lat"], 6), round(p["lon"], 6)] for p in el.get("geometry") or [] if p]
+            if len(g) < 2:
+                continue
+        f = {"k": kind, "g": g}
+        if ref:
+            f["ref"] = ref
+        if name and name != ref:
+            f["name"] = name
+        out.append(f)
+    return out
+
+
+def airport_layout(code):
+    """The airport's layout (see above), from the cache or fetched now. -> {airport, features} or None."""
+    ap = airports.get(code) or {}
+    icao = (ap.get("icao") or "").upper()
+    if not icao or ap.get("lat") is None:
+        return None
+    path = os.path.join(LAYOUT_DIR, f"{icao}.json")
+    with _layout_lock:
+        try:
+            if time.time() - os.path.getmtime(path) < LAYOUT_TTL:
+                with open(path) as fh:
+                    return json.load(fh)
+        except OSError:
+            pass
+        q = (f'[out:json][timeout:90];('
+             f'way["aeroway"~"^(runway|taxiway|taxilane|terminal|apron)$"](around:5000,{ap["lat"]},{ap["lon"]});'
+             f'node["aeroway"~"^(gate|parking_position|holding_position)$"](around:5000,{ap["lat"]},{ap["lon"]}););'
+             f'out geom;')
+        err = None
+        for url in OVERPASS:
+            try:
+                req = urllib.request.Request(url, data=("data=" + urllib.parse.quote(q)).encode(),
+                                             headers={"User-Agent": f"HA-Flight-Tracker/{VERSION}"})
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    data = json.load(r)
+                feats = _layout_from_osm(data)
+                out = {"airport": ap.get("iata") or code, "icao": icao, "at": time.time(), "features": feats}
+                os.makedirs(LAYOUT_DIR, exist_ok=True)
+                with open(path + ".tmp", "w") as fh:
+                    json.dump(out, fh, separators=(",", ":"))
+                os.replace(path + ".tmp", path)
+                log.info("Airport layout for %s: %d runways, taxiways, terminals and gates from OpenStreetMap",
+                         icao, len(feats))
+                return out
+            except Exception as e:
+                err = e
+        log.warning("Airport layout for %s: %s", icao, err)
+        try:
+            with open(path) as fh:  # an old copy beats none
+                return json.load(fh)
+        except OSError:
+            return None
+
+
 def leg_summary(L, now, nas, full=False):
     f = L.get("flight")
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra", "kind",
@@ -2613,6 +2700,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/alerts":
             with LOCK:
                 return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
+        m = re.match(r"^/api/airport/([A-Za-z0-9]{3,4})/layout$", path)
+        if m:
+            d = airport_layout(m.group(1).upper())
+            return self._send(200, d, cache="private, max-age=86400") if d else self._send(404, {"error": "no layout"})
         m = re.match(r"^/api/surface/([\w-]+)$", path)
         if m:
             return self._send(200, api_surface(m.group(1), time.time()))

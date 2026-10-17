@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.14.1
+- Maps use CARTO's OpenStreetMap tiles: current (EWR's new Terminal A) and detailed down to zoom 20.
+- Zoomed in on one of your flight's airports, the map labels runways and terminals (zoom 14+), taxiways (15+) and gates (16+), from OpenStreetMap, fetched once per airport and kept for a month.
+- Surface traffic labels restyled to match the app.
+
 ## 3.14.0
 - FAA SWIM now takes priority: the FAA's takeoff and landing times, United's own push time and gate-arrival estimate, and in the air the best landing estimate (the tower's at TFDM airports like EWR, else the FAA's).
 - Route: the details show the route ATC has on file (with amendments like a shortcut, and the previous route), replacing FlightAware's copy.
