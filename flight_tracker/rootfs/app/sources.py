@@ -265,6 +265,9 @@ ROUTE_HEADERS = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac
 
 def fetch_route(callsign, lat=0, lon=0):
     """adsb.lol's route for a callsign: ['DFW', 'EWR', 'MCO'] for a flight number that flies two legs."""
+    left = ADSB_PAUSE["until"] - time.time()
+    if left > 0:
+        raise AdsbPaused(f"adsb.lol not answering; asking again in {int(left) + 1} s")
     # adsb.lol answers this one only for requests that look like its own docs page (a bare client
     # gets "201" with an empty body), so send what that page sends
     r = requests.post(ROUTESET_URL, json={"planes": [{"callsign": callsign.upper(), "lat": lat or 0, "lng": lon or 0}]},

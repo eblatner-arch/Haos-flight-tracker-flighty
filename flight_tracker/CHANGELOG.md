@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.20.4
+- The FAA datalink clearance (PDC) is a tail source: it names the airplane (/AN N12345) for your flight at your departure airport, usually 30-60 min before departure. Trusted next after your own transponder; if it differs from what the app had, you get the aircraft swap alert ("from FAA datalink clearance"). A clearance from another day's flight with the same number is ignored. Airports without PDC simply don't add this signal.
+- adsb.lol's route lookup also waits out the pause after adsb.lol stops answering.
+
 ## 3.20.3
 - The airplane points the way it's flying when the position comes from FAA center radar (which sends no heading): the direction is taken from its track.
 - Between the FAA's once-a-minute en-route fixes, the map carries the airplane forward at its speed and heading (up to 2 min), so it moves smoothly without extra lookups.

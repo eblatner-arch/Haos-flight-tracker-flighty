@@ -1754,6 +1754,23 @@ class Swim(unittest.TestCase):
             server.swim_check(L, f, "PHX")          # nothing new: no second push
         self.assertEqual(len(pushed), 1)
 
+    def test_pdc_names_the_airplane(self):
+        """The datalink clearance's /AN tail beats FlightAware's, and a stale one (another day) is ignored."""
+        import server
+        so = T0 + 3600
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="EWR", dest="SFO"))
+        f["tail"] = "N11111"
+        L = {"id": "p1", "ident": "UAL1", "display": "UA 1", "dep": "EWR", "arr": "SFO", "sched_out": so,
+             "swim": {"pdc": {"tail": "N37502", "got": so - 40 * 60}}}
+        with mock.patch.object(server, "live_all", lambda cs, quick=False: []), \
+                mock.patch.object(server, "walk_chain", lambda *a: None), mock.patch.object(server, "aero_on", lambda: False):
+            server.resolve_tail(None, L, f, so - 30 * 60)
+            self.assertEqual((f["tail"], L["tail_info"]["kind"]), ("N37502", "pdc"))
+            L["swim"]["pdc"]["got"] = so - 30 * 3600
+            f["tail"] = "N11111"; f.pop("tail_source", None)
+            server.resolve_tail(None, L, f, so - 30 * 60)
+            self.assertEqual(f["tail"], "N11111")
+
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,
         and survives a restart."""

@@ -1781,6 +1781,22 @@ def walk_chain(browser, L, now):
     return found
 
 
+def pdc_tail(L, f):
+    """The airplane named in your flight's datalink clearance, if one came for this departure."""
+    pd = (L.get("swim") or {}).get("pdc") or {}
+    tail = (pd.get("tail") or "").upper().strip()
+    if not tail:
+        return None
+    if tail[0].isdigit():
+        tail = "N" + tail
+    so = fa.best_time(f.get("times") or {}, "out") or L.get("sched_out") or 0
+    issued = _ts(pd.get("at")) or pd.get("got") or 0
+    # a clearance from a different day's flight with the same number doesn't count
+    if not so or not (so - 4 * HOUR <= issued <= so + 2 * HOUR):
+        return None
+    return {"tail": tail, "kind": "pdc", "at": issued, "source": "FAA datalink clearance"}
+
+
 def own_inbound(L, f):
     """If the flight bringing this airplane is one of your own tracked flights (a turn, e.g.
     EWR-MIA-EWR), that leg. Its tail is the best answer for this one too."""
@@ -1908,7 +1924,7 @@ def resolve_tail(browser, L, f, now):
     page_tail = f.get("tail") if not f.get("tail_source") else None
     if info.get("kind") == "chain" and not fa.same_flight(info.get("root"), f.get("inbound_fa_id")):
         info = {}  # a different inbound is a different airplane
-    if info.get("kind") in ("page", "aeroapi", "turn", "chain"):
+    if info.get("kind") in ("page", "aeroapi", "turn", "chain", "pdc"):
         info = {}  # re-derived every time
     ph = fa.phase(f, now)
     odd_tail = None
@@ -1924,6 +1940,14 @@ def resolve_tail(browser, L, f, now):
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
             saw(L, f"Transponder · your flight {L.get('display') or L['ident']}", None, sources.adsb_error_text(e))
+    # The FAA datalink clearance (PDC) for your flight at your departure airport names the airplane
+    # (/AN N12345), usually 30-60 min before departure: next best after your own transponder.
+    # Not every airport sends PDCs; without one this simply doesn't apply.
+    if info.get("kind") != "own":
+        pt = pdc_tail(L, f)
+        if pt:
+            info = pt
+            saw(L, "FAA datalink clearance (PDC)", pt["tail"], None)
     # Free signals first: the airplane flying in on ADS-B
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
     # Once the inbound has left its gate, the airplane can't change without a new inbound number
@@ -1932,7 +1956,7 @@ def resolve_tail(browser, L, f, now):
     inb_gone = bool(inb.get("times")) and fa.phase(inb, now) in ("taxi_out", "airborne", "landed", "arrived")
     ai = L.get("adsb_inbound") or {}
     fresh_ai = ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id"))
-    chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") != "own" and not (inb_gone and fresh_ai) else None
+    chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") not in ("own", "pdc") and not (inb_gone and fresh_ai) else None
     if not chain and ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
         chain = {"tail": ai["tail"], "kind": "chain", "at": ai["at"], "root": ai["root"], "source": ai["source"]}
     mine = own_inbound(L, f) if info.get("kind") != "own" else None
@@ -1940,7 +1964,7 @@ def resolve_tail(browser, L, f, now):
     a = L.get("aero") or {}
     aero_tail = a.get("tail")
     known = {x.upper() for x in ((chain or {}).get("tail"), mi.get("tail")) if x}
-    observed = info.get("tail") if info.get("kind") == "own" else (odd_tail or page_tail)
+    observed = info.get("tail") if info.get("kind") in ("own", "pdc") else (odd_tail or page_tail)
     if observed and observed.upper() in known:
         observed = None  # already explained for free; no AeroAPI call needed
     if aero_tail and observed and observed.upper() != aero_tail.upper() and aero_on() \
@@ -1948,7 +1972,7 @@ def resolve_tail(browser, L, f, now):
         aero_call(L, now, f"{observed} seen, AeroAPI had {aero_tail}", observed_tail=observed)
         a = L.get("aero") or {}
         aero_tail = a.get("tail")
-    if info.get("kind") != "own":
+    if info.get("kind") not in ("own", "pdc"):
         # The airplane actually flying your inbound (ADS-B) is the strongest evidence short of your
         # own transponder: that's how a swap without a new inbound number shows up. Otherwise the
         # newest of your earlier leg on a turn and AeroAPI.
