@@ -34,6 +34,7 @@ SOURCE_COUNTS = {}
 EDCTS = {}
 EDCT_PATH = None
 _edct_dirty = [False]
+_edct_saved = [0.0]   # written at most every 2 min
 _cfg = {}
 
 
@@ -507,8 +508,9 @@ def _remember_edct(ev):
 
 def save_edcts():
     """Drop EDCTs more than 12 h past, then write the rest to disk (only when something changed)."""
-    if not EDCT_PATH or not _edct_dirty[0]:
+    if not EDCT_PATH or not _edct_dirty[0] or time.time() - _edct_saved[0] < 120:
         return
+    _edct_saved[0] = time.time()
     import json
     from datetime import datetime
     cut = time.time() - 12 * 3600
