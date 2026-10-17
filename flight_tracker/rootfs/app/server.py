@@ -1497,6 +1497,11 @@ def update_rotation(browser, L, now):
     L["rotation"] = rot
 
 
+def live_src(live):
+    """Where a live position came from, for the lookup log: the FAA radar that saw it, else adsb.lol."""
+    return (live or {}).get("src") or "adsb.lol"
+
+
 def live_all(callsign):
     """Airplanes transmitting this callsign now: FAA radar first (approach and surface radar carry
     the transponder address, so the N-number), adsb.lol when the FAA has nothing fresh with an
@@ -1573,8 +1578,8 @@ def walk_chain(browser, L, now):
             except Exception as e:
                 log.info("%s chain ADS-B: %s", L.get("display"), e)
                 live = None
-            saw(L, f"adsb.lol · {'inbound ' if i == 0 else ''}{name} {route}", (live or {}).get("tail"),
-                None if (live or {}).get("tail") else "not seen on ADS-B")
+            saw(L, f"{live_src(live) if live else 'Transponder'} · {'inbound ' if i == 0 else ''}{name} {route}", (live or {}).get("tail"),
+                None if (live or {}).get("tail") else "not seen by FAA radar or ADS-B")
             if live and live.get("tail"):
                 found = {"tail": live["tail"].upper(), "kind": "chain", "at": now,
                          "root": (L.get("flight") or {}).get("inbound_fa_id"),
@@ -1718,14 +1723,14 @@ def resolve_tail(browser, L, f, now):
     if L.get("ident") and (ph == "taxi_out" or (ph == "scheduled" and out_t - now < 90 * 60)):
         try:
             live, why, odd_tail = own_live(L, f, now)
-            saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", (live or {}).get("tail"),
+            saw(L, f"{live_src(live) if live else 'Transponder'} · your flight {L.get('display') or L['ident']}", (live or {}).get("tail"),
                 None if (live or {}).get("tail") else why or "not transmitting yet")
             if live and live.get("tail"):
                 info = {"tail": live["tail"].upper(), "kind": "own", "at": now,
                         "source": "your flight's transponder"}
         except Exception as e:
             log.info("%s own ADS-B: %s", L.get("display"), e)
-            saw(L, f"adsb.lol · your flight {L.get('display') or L['ident']}", None,
+            saw(L, f"Transponder · your flight {L.get('display') or L['ident']}", None,
                 f"error: {(str(e).splitlines() or [type(e).__name__])[0][:120] or type(e).__name__}")
     # Free signals first: the airplane flying in on ADS-B
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
@@ -2043,6 +2048,8 @@ def update_leg(browser, lid):
         for x in L.get("_seen") or []:
             if "adsb.lol" not in used and x["src"].startswith("adsb.lol"):
                 used.append("adsb.lol")
+            elif "FAA radar" not in used and " radar · " in x["src"]:
+                used.append("FAA radar")
         if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
                                     and d["at"] >= now for d in STATE["debug"][-6:]):
             used.append("FlightAware page (inbound)")
@@ -2144,10 +2151,11 @@ def inbound_adsb(now):
                                            "source": f"inbound {inb.get('display_ident') or inb['ident']} {route} in flight"}
             seen = (live or {}).get("tail")
             have = ((cur.get("flight") or {}).get("tail") or "").upper()
-            log_lookup(cur, snapshot(cur), now, ["adsb.lol"],
-                       seen=[{"src": f"adsb.lol · inbound {inb.get('display_ident') or inb['ident']} {route}",
+            who = live_src(live) if live else "adsb.lol"
+            log_lookup(cur, snapshot(cur), now, ["FAA radar" if live and live.get("src") else "adsb.lol"],
+                       seen=[{"src": f"{who if live else 'Transponder'} · inbound {inb.get('display_ident') or inb['ident']} {route}",
                               "tail": (seen or "").upper() or None,
-                              "note": None if seen else (f"error: {err}" if err else "not seen on ADS-B")}])
+                              "note": None if seen else (f"error: {err}" if err else "not seen by FAA radar or ADS-B")}])
             if seen and have and seen.upper() != have:
                 log.info("%s: inbound %s is %s on ADS-B, we had %s; checking now", L.get("display"), inb["ident"], seen, have)
                 REFRESH_Q.put(L["id"])

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.6
+- Lookup log: transponder checks name the source that actually answered ("EWR surface radar", "N90 approach radar", or adsb.lol when the FAA had nothing).
+
 ## 3.15.5
 - Surface map: an ID button shows every aircraft's callsign next to it (squawk when there's no callsign). Remembered on that device.
 
