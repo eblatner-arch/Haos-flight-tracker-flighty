@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.15.0
+- FAA radar first for live positions: approach radar (every ~5 s near airports) and airport surface radar give the position and the airplane itself (its transponder address decodes to the N-number, no lookup). adsb.lol is still used en route, for foreign aircraft and outside the US.
+- Surface radar events on the flight: landing and takeoff to the second with the runway, runway exit, onto/off the ramp. Wheels up/down now come from surface radar first, then the FAA, then the airline.
+- Tower departure clearance time and gate on the details page.
+- United's own gate-arrival time when it reports the flight complete.
+- The surface map leaves out aircraft still in the air on approach.
+- TFDM keep-alive messages are ignored.
+
 ## 3.14.3
 - The lookup log says in plain words who reported what, in local time ("FAA: took off 22:19; United: pushed 21:53; EWR tower: landing est. 22:49").
 - Each time on the flight page says where it came from (FAA, United, EWR tower, FlightAware), and log changes show "via".

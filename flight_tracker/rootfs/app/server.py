@@ -566,6 +566,32 @@ def swim_events_for(L, f):
 def _swim_take(sw, ev):
     """Fold one event into the leg's saved SWIM facts (newest wins, field by field)."""
     got = ev.get("got") or time.time()
+    if ev.get("src") == "STDDS":
+        sf = ev.get("surface")
+        if sf:
+            ap = _iata(sf.get("airport"))
+            side = "dep" if ap and ap == _iata(ev.get("dep")) else "arr"
+            cur = sw.setdefault("surf_" + side, {"airport": ap})
+            for e in sf.get("events") or []:
+                t = _ts(e.get("at"))
+                if not t or not e.get("event"):
+                    continue
+                k = {"on": "landed", "off": "took_off", "spotin": "ramp_in", "spotout": "ramp_out"}.get(e["event"])
+                if k and not cur.get(k):
+                    cur[k] = t
+                    if e.get("runway"):
+                        cur[k + "_rwy"] = e["runway"]
+                if e["event"] == "runwayout" and cur.get("landed") and not cur.get("runway_exit") and t >= cur["landed"]:
+                    cur["runway_exit"] = t
+            if sf.get("status"):
+                cur["status"] = sf["status"]
+            if sf.get("hex"):
+                sw["hex"] = sf["hex"]
+            cur["at"] = got
+        tw = ev.get("tower")
+        if tw:
+            sw["tower_dep"] = {"clearance": _ts(tw.get("clearance")), "gate": tw.get("gate"), "at": got}
+        return
     if ev.get("src") == "TFDM":
         td = ev.get("tfdm") or {}
         for side in ("dep", "arr"):
@@ -671,13 +697,23 @@ def swim_check(L, f, planned):
             if td.get("state"):
                 bits.append(f"tower status {td['state'].replace('_', ' ').lower()}")
             break
+        for x in fresh:
+            for e in (x.get("surface") or {}).get("events") or []:
+                ap_ = _iata((x.get("surface") or {}).get("airport"))
+                tz_ = tza if ap_ == dep else tzb
+                w = {"on": "landed", "off": "took off", "spotin": "on the ramp", "spotout": "left the ramp"}.get(e.get("event"))
+                if w and e.get("at"):
+                    bits.append(f"{ap_} surface radar: {w}{' ' + e['runway'] if e.get('runway') and e['event'] in ('on', 'off') else ''} {hm(e['at'], tz_)}")
+            tw = x.get("tower")
+            if tw and tw.get("clearance"):
+                bits.append(f"{dep} tower: departure clearance {hm(tw['clearance'], tza)}" + (f", gate {tw['gate']}" if tw.get("gate") else ""))
         if any(x.get("route") for x in fresh) and sw.get("route_changed", 0) > seen_at:
             bits.append(f"ATC: new route {sw.get('route')}")
         if any(x.get("diverted") for x in fresh):
             bits.append("FAA: diversion flagged")
         if sw.get("arr") and planned and sw["arr"] != _iata(planned):
             bits.append(f"FAA: now going to {sw['arr']}")
-        saw(L, "FAA SWIM", None, "; ".join(bits) or "update, nothing new")
+        saw(L, "FAA SWIM", None, "; ".join(dict.fromkeys(bits)) or "update, nothing new")
     if not sw.get("seen"):
         L.pop("swim", None)
         return out
@@ -705,14 +741,18 @@ def swim_overlay(L, f, now):
     src = {k: {kind: (base.get(k) or {}).get(kind) or L.get("source") or "FlightAware"
                for kind in ("actual", "estimated") if t[k].get(kind)} for k in fa.TIME_KEYS}
     f["time_src"] = src
-    if sw.get("off"):
-        t["off"]["actual"] = sw["off"]
-        src["off"]["actual"] = "FAA"
-    if sw.get("on"):
-        t["on"]["actual"] = sw["on"]
-        src["on"]["actual"] = "FAA"
     a = sw.get("airline") or {}
     airline = {"UAL": "United", "AAL": "American", "DAL": "Delta"}.get(a.get("src"), a.get("src") or "airline")
+    sd, sa = sw.get("surf_dep") or {}, sw.get("surf_arr") or {}
+    # Wheels up / down, best first: surface radar (to the second), the FAA, the airline's report.
+    for key, cands in (("off", ((sd.get("took_off"), f"{sd.get('airport')} surface radar"), (sw.get("off"), "FAA"),
+                                (a.get("runway_off"), airline))),
+                       ("on", ((sa.get("landed"), f"{sa.get('airport')} surface radar"), (sw.get("on"), "FAA"),
+                               (a.get("runway_on"), airline)))):
+        v, who = next(((v, w) for v, w in cands if v and v <= now + 60), (None, None))
+        if v:
+            t[key]["actual"] = v
+            src[key]["actual"] = who
     if a.get("gate_out") and a["gate_out"] <= now + 60:
         t["out"]["actual"] = a["gate_out"]
         src["out"]["actual"] = airline
@@ -761,6 +801,7 @@ def swim_overlay(L, f, now):
                 "est_on": sw.get("tfdm_eta"), "at": sw.get("tfdm_eta_at"),
                 "taxi": (td_arr.get("arrivalTaxiTime") or {}).get("totalEstimatedTaxiInTime")} if td_arr else None,
         "state": sw.get("tfdm_state"),
+        "surf_dep": sd or None, "surf_arr": sa or None, "tower_dep": sw.get("tower_dep"),
     }
 
 
@@ -1455,12 +1496,28 @@ def update_rotation(browser, L, now):
     L["rotation"] = rot
 
 
+def live_all(callsign):
+    """Airplanes transmitting this callsign now: FAA radar first (approach and surface radar carry
+    the transponder address, so the N-number), adsb.lol when the FAA has nothing fresh with an
+    address (en route, outside the US, or before STDDS is set up)."""
+    s = swim.live_all(callsign) if swim.STATE.get("status") != "off" else []
+    if s and all(a.get("tail") for a in s):
+        return s
+    try:
+        a = sources.fetch_live_all(callsign)
+    except Exception:
+        if s:
+            return s
+        raise
+    return a or s
+
+
 def pick_live(callsign, fl, accept=None):
     """The airplane broadcasting this callsign that is *this* flight. Two can be up at once with the
     same number (yesterday's late one still flying, an earlier leg holding): prefer the one with the
     tail we know, then the one nearest where this flight should be (its last tracked position, or
     its route between the two airports)."""
-    cands = [a for a in sources.fetch_live_all(callsign) if accept is None or accept(a)]
+    cands = [a for a in live_all(callsign) if accept is None or accept(a)]
     if len(cands) <= 1:
         return cands[0] if cands else None
     fl = fl or {}
@@ -1604,7 +1661,7 @@ def own_live(L, f, now):
     as a possible swap instead. -> (aircraft or None, why not, tail worth checking)"""
     ph = fa.phase(f, now)
     pushed = bool(((f.get("times") or {}).get("out") or {}).get("actual")) or ph != "scheduled"
-    cands = sources.fetch_live_all(L["ident"])
+    cands = live_all(L["ident"])
     if not cands:
         return None, "not transmitting yet", None
     dep = L.get("dep")
@@ -2330,7 +2387,12 @@ def api_surface(lid, now):
         ident = (L.get("ident") or "").upper()
     ap = airports.get(code) or {}
     icao = (ap.get("icao") or "").upper()
-    targets = swim.surface(icao)
+    allt = swim.surface(icao)
+    # field elevation from the slow movers (airports in the airports list carry none)
+    slow = sorted(x["alt"] for x in allt if x.get("alt") is not None and (x.get("kt") or 0) < 40)
+    elev = slow[len(slow) // 2] if slow else 0
+    targets = [x for x in allt if x.get("cs") == ident or x.get("alt") is None
+               or x["alt"] <= elev + 500]   # aircraft still in the air on approach aren't "on the surface"
     for x in targets:
         x["mine"] = bool(ident) and x.get("cs") == ident
         x.pop("t", None)

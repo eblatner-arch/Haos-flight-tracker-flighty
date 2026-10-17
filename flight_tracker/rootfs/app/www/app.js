@@ -1358,10 +1358,17 @@
         sw.arr.est_on && `est. landing ${fmt(sw.arr.est_on, tzB, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`,
         sw.arr.taxi && `${Math.round(sw.arr.taxi)} min taxi in`, sw.arr.at && `updated ${ago(sw.arr.at)}`].filter(Boolean).join(" · ") : ""],
       ["Landing estimate from", sw.eta_src === "tower" ? `${leg.arr} tower (TFDM)` : sw.eta_src === "FAA" ? "FAA (TFMS)" : ""],
+      [`${leg.dep} ground`, [sw.tower_dep && sw.tower_dep.clearance && `cleared ${hm(sw.tower_dep.clearance, tzA)}`,
+        sw.tower_dep && sw.tower_dep.gate && `gate ${sw.tower_dep.gate}`, sw.surf_dep && sw.surf_dep.ramp_out && `left ramp ${hm(sw.surf_dep.ramp_out, tzA)}`,
+        sw.surf_dep && sw.surf_dep.took_off && `took off${sw.surf_dep.took_off_rwy ? " " + sw.surf_dep.took_off_rwy : ""} ${fmt(sw.surf_dep.took_off, tzA, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`]
+        .filter(Boolean).join(" · ")],
+      [`${leg.arr} ground`, sw.surf_arr ? [sw.surf_arr.landed && `landed${sw.surf_arr.landed_rwy ? " " + sw.surf_arr.landed_rwy : ""} ${fmt(sw.surf_arr.landed, tzB, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`,
+        sw.surf_arr.runway_exit && `off runway ${hm(sw.surf_arr.runway_exit, tzB)}`, sw.surf_arr.ramp_in && `on ramp ${hm(sw.surf_arr.ramp_in, tzB)}`]
+        .filter(Boolean).join(" · ") : ""],
       ["Filed altitude", f.filed_altitude ? `FL${String(Math.round(f.filed_altitude / (f.filed_altitude > 1000 ? 100 : 1))).padStart(3, "0")}` : ""],
       ["Filed speed", f.filed_speed ? `${Math.round(f.filed_speed)} kt` : ""],
       ["Distance", f.distance_nm ? `${Math.round(f.distance_nm)} nm` : ""],
-      ["Live", leg.live ? `${leg.live.alt_ft ?? "?"} ft · ${leg.live.gs_kt ?? "?"} kt · ${ago(leg.live.at)}` : ""],
+      ["Live", leg.live ? `${leg.live.alt_ft ?? "?"} ft · ${leg.live.gs_kt ?? "?"} kt · ${ago(leg.live.at)} · ${leg.live.src || "adsb.lol"}` : ""],
       ["Data from", leg.source || ""],
       ["Updated", leg.updated ? ago(leg.updated) : "not yet"],
       ["Next check", leg.finished ? "none — tracking stops at takeoff" : leg.watching && leg.next_check ? hm(leg.next_check) : leg.watching ? "soon" : `starts ${STATE.settings.watch_hours} h before departure`],

@@ -53,6 +53,61 @@ def route_text(legacy):
     return " ".join(t for t in _re.split(r"\.+", s) if t and t != "/") or None
 
 
+def _dms_position(el):
+    """TFMS <position> with latitudeDMS/longitudeDMS -> (lat, lon)."""
+    out = {}
+    for c in el.iter():
+        n = _local(c.tag)
+        if n in ("latitudeDMS", "longitudeDMS"):
+            try:
+                v = float(c.get("degrees") or 0) + float(c.get("minutes") or 0) / 60 + float(c.get("seconds") or 0) / 3600
+            except ValueError:
+                return None
+            if c.get("direction") in ("SOUTH", "WEST"):
+                v = -v
+            out["lat" if n == "latitudeDMS" else "lon"] = round(v, 5)
+    return (out["lat"], out["lon"]) if len(out) == 2 else None
+
+
+# US civil registrations map one-to-one onto ICAO addresses A00001–ADF7C7, so a transponder
+# address from FAA radar gives the N-number with no lookup.
+_NCH, _NDG = "ABCDEFGHJKLMNPQRSTUVWXYZ", "0123456789"
+_NS = 1 + len(_NCH) * (1 + len(_NCH))
+_NB4 = 1 + len(_NCH) + len(_NDG)
+_NB3 = len(_NDG) * _NB4 + _NS
+_NB2 = len(_NDG) * _NB3 + _NS
+_NB1 = len(_NDG) * _NB2 + _NS
+
+
+def _nsuffix(o):
+    if o == 0:
+        return ""
+    c = _NCH[(o - 1) // (len(_NCH) + 1)]
+    r = (o - 1) % (len(_NCH) + 1)
+    return c if r == 0 else c + _NCH[r - 1]
+
+
+def n_number(hex_addr):
+    """ICAO 24-bit address -> US registration ('aaf006' -> 'N80347'), None for non-US."""
+    try:
+        i = int(hex_addr, 16) - 0xA00001
+    except (TypeError, ValueError):
+        return None
+    if i < 0 or i > 0xADF7C7 - 0xA00001:
+        return None
+    out, r = "N" + str(i // _NB1 + 1), i % _NB1
+    for b in (_NB2, _NB3):
+        if r < _NS:
+            return out + _nsuffix(r)
+        r -= _NS
+        out, r = out + str(r // b), r % b
+    if r < _NS:
+        return out + _nsuffix(r)
+    r -= _NS
+    out, r = out + str(r // _NB4), r % _NB4
+    return out if r == 0 else out + (_NCH + _NDG)[r - 1]
+
+
 def parse(xml_text):
     """Flight-data messages in one TFMS payload -> [{acid, dep, arr, type, at, igtd, gufi, off, on, eta, diverted,
     src, trigger, status, airline}]. airline = {out, off, on, in} as the airline itself filed them (CDM).
@@ -96,6 +151,16 @@ def parse(xml_text):
                     ev["route"] = sub.get("legacyFormat")
                 elif n == "remarksKeywords" and txt:
                     ev["remarks"] = txt
+                elif n == "position" and ev["type"] == "trackInformation":
+                    pos = _dms_position(sub)
+                    if pos:
+                        ev["pos"] = pos
+                elif n == "speed" and ev["type"] == "trackInformation" and txt.isdigit():
+                    ev["gs"] = int(txt)
+                elif n == "simpleAltitude" and ev["type"] == "trackInformation" and txt:
+                    m = _re.match(r"(\d+)", txt)
+                    if m:
+                        ev["alt"] = int(m.group(1)) * 100
                 elif n == "flightStatus" and txt:
                     ev["status"] = txt
                 elif n == "diversionIndicator" and txt and txt != "NO_DIVERSION":
@@ -155,6 +220,10 @@ def handle(xml_text):
             hit = True
             ev["got"] = time.time()
             _keep(ev)
+            if ev.get("pos"):
+                _live(ev["acid"], "TFMS:" + (ev.get("gufi") or ev.get("dep") or ""), {
+                    "lat": ev["pos"][0], "lon": ev["pos"][1], "alt_ft": ev.get("alt"), "gs_kt": ev.get("gs"),
+                    "src": "FAA center radar", "max_age": 100})
             if ev.get("trigger") != "UPDATE_DEPARTURE_TIMEOUT":
                 _news(ev)
             STATE["matched"] += 1
@@ -260,10 +329,10 @@ def _keep(ev):
         del lst[:-KEEP]
 
 
-def _news(ev):
+def _news(ev, force=False):
     """Takeoff, landing, a diversion flag or a new destination: worth refreshing the flight now."""
     t = ev.get("tfdm") or {}
-    if (ev.get("off") or ev.get("on") or ev.get("diverted") or t.get("state")
+    if (force or ev.get("off") or ev.get("on") or ev.get("diverted") or t.get("state")
             or ev.get("type") in ("departureInformation", "arrivalInformation")
             or ((t.get("dep") or {}).get("offBlockTime") or {}).get("actual")
             or ((t.get("dep") or {}).get("runwayDepartureTime") or {}).get("actual")
@@ -281,6 +350,8 @@ def handle_tfdm(xml_text):
     delays, estimated takeoff and landing times for your flights. Everything is counted and sampled."""
     TFDM_STATE["messages"] += 1
     TFDM_STATE["last_message"] = time.time()
+    if not xml_text.strip():
+        return  # keep-alive (a single space)
     head = xml_text[:200000]
     try:
         types = _TYPE_RE.findall(head[:3000]) or _ROOT_RE.findall(head[:400])[:1] or ["unknown"]
@@ -353,6 +424,10 @@ def parse_surface(xml_text):
                 r["kind"] = v.lower()
             elif n == "mode3ACode":
                 r["squawk"] = v
+            elif n == "altitude":
+                r["alt"] = _num(v)
+            elif n == "acAddress":
+                r["hex"] = v.lower()
         if r.get("track"):
             out.append(r)
     return airport, out
@@ -371,6 +446,14 @@ def handle_stdds(xml_text):
             lst.append(xml_text[:200000])
     except Exception:
         pass
+    root = (_ROOT_RE.findall(xml_text[:400]) or [""])[0]
+    if WATCH and root in ("TATrackAndFlightPlan", "SurfaceMovementEventMessage", "TowerDepartureEventMessage") \
+            and any(cs in xml_text for cs in WATCH):
+        try:
+            _stdds_flight(root, xml_text)
+        except Exception as e:
+            log.debug("STDDS %s: %s", root, e)
+        return
     if not WATCH_AIRPORTS or not any(ap in xml_text for ap in WATCH_AIRPORTS):
         return
     airport, reps = parse_surface(xml_text)
@@ -385,10 +468,110 @@ def handle_stdds(xml_text):
             tracks[r["track"]] = cur
         for k in [k for k, v in tracks.items() if now - v["t"] > 30]:
             del tracks[k]
+        for r in reps:
+            cur = tracks[r["track"]]
+            if cur.get("cs") in WATCH:
+                _live(cur["cs"], f"ASDE:{airport}:{r['track']}", {
+                    "lat": cur.get("lat"), "lon": cur.get("lon"), "alt_ft": cur.get("alt"), "gs_kt": cur.get("kt"),
+                    "heading": cur.get("hdg"), "hex": cur.get("hex"), "type": cur.get("type"),
+                    "ground": True, "src": f"{airport} surface radar", "max_age": 20}, lock=False)
     STDDS_STATE["matched"] += 1
     if any(cs in xml_text for cs in WATCH):
         STDDS_RAW.append(xml_text[:200000])
         del STDDS_RAW[:-10]
+
+
+def _txt(el, name):
+    c = next((x for x in el.iter() if _local(x.tag) == name), None)
+    return (c.text or "").strip() if c is not None and c.text else None
+
+
+def _stdds_flight(kind, xml_text):
+    """STDDS messages about your flights: approach radar positions (with the transponder address,
+    so the N-number), surface events (landed, runway exit, ramp in/out, takeoff) and the tower's
+    departure clearance."""
+    root = ET.fromstring(xml_text)
+    now = time.time()
+    if kind == "TATrackAndFlightPlan":
+        src = _txt(root, "src") or "approach"
+        for rec in root.iter():
+            if _local(rec.tag) != "record":
+                continue
+            acid = (_txt(rec, "acid") or "").upper()
+            if acid not in WATCH:
+                continue
+            lat, lon = _num(_txt(rec, "lat")), _num(_txt(rec, "lon"))
+            if lat is None or lon is None:
+                continue
+            vx, vy = _num(_txt(rec, "vx")) or 0, _num(_txt(rec, "vy")) or 0
+            import math
+            hexa = (_txt(rec, "acAddress") or "").lower() or None
+            _live(acid, f"TAIS:{src}:{_txt(rec, 'trackNum')}", {
+                "lat": lat, "lon": lon, "alt_ft": _num(_txt(rec, "reportedAltitude")),
+                "gs_kt": round(math.hypot(vx, vy)) if (vx or vy) else None,
+                "heading": round(math.degrees(math.atan2(vx, vy)) % 360) if (vx or vy) else None,
+                "hex": hexa, "type": _txt(rec, "acType"), "squawk": _txt(rec, "reportedBeaconCode"),
+                "src": f"{src} approach radar", "max_age": 20})
+            STDDS_STATE["matched"] += 1
+        return
+    acid = (_txt(root, "callsign") or _txt(root, "aircraftID") or "").upper()
+    if acid not in WATCH:
+        return
+    ev = {"acid": acid, "src": "STDDS", "got": now, "type": kind,
+          "dep": _apt(_txt(root, "departureAirport")), "arr": _apt(_txt(root, "destinationAirport")), "igtd": None}
+    if kind == "SurfaceMovementEventMessage":
+        ev["surface"] = {
+            "airport": _apt(_txt(root, "airport")), "status": _txt(root, "status"), "hex": (_txt(root, "acAddress") or "").lower() or None,
+            "events": [{"event": _txt(r, "event"), "runway": _txt(r, "runway"), "at": _txt(r, "at")}
+                       for r in root.iter() if _local(r.tag) == "eventRecord"]
+                      + [{"event": _txt(root, "event"), "runway": None, "at": _txt(root, "time")}]}
+    else:
+        ev["tower"] = {"airport": _apt(_txt(root, "departureAirport")), "clearance": _txt(root, "clearanceDeliveryTime"),
+                       "gate": _txt(root, "parkingGate"), "at": _txt(root, "eventTime")}
+    _keep(ev)
+    if any(e.get("event") in ("on", "off") for e in (ev.get("surface") or {}).get("events", [])):
+        _news(ev, force=True)
+    STDDS_STATE["matched"] += 1
+    MATCHED_RAW.append({"at": now, "xml": xml_text[:200000], "feed": "STDDS"})
+    del MATCHED_RAW[:-40]
+
+
+LIVE = {}   # callsign -> source key -> latest position from FAA radar (center, approach, surface)
+
+
+def _live(acid, key, rec, lock=True):
+    rec = {k: v for k, v in rec.items() if v is not None}
+    if rec.get("lat") is None or rec.get("lon") is None:
+        return
+    rec["at"] = time.time()
+    if rec.get("hex"):
+        rec["tail"] = n_number(rec["hex"])
+    if lock:
+        with LOCK:
+            LIVE.setdefault(acid, {})[key] = rec
+    else:
+        LIVE.setdefault(acid, {})[key] = rec
+
+
+def live_all(callsign):
+    """Fresh FAA radar positions for this callsign, in adsb.lol's shape ({lat, lon, alt_ft, gs_kt,
+    heading, ground, tail, hex, at, src}). Several sources can see one airplane: the freshest per
+    airplane (by transponder address, else within 3 nm) is kept."""
+    now = time.time()
+    with LOCK:
+        recs = [dict(r) for r in (LIVE.get((callsign or "").upper()) or {}).values()
+                if now - r["at"] <= r.get("max_age", 30)]
+    recs.sort(key=lambda r: (0 if r.get("hex") else 1, -r["at"]))
+    out = []
+    for r in recs:
+        dup = next((o for o in out if (r.get("hex") and o.get("hex") == r["hex"]) or
+                    (abs(o["lat"] - r["lat"]) < 0.05 and abs(o["lon"] - r["lon"]) < 0.06)), None)
+        if dup:
+            continue
+        r.setdefault("ground", False)
+        r.pop("max_age", None)
+        out.append(r)
+    return out
 
 
 def surface(airport, max_age=15):

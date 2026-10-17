@@ -356,6 +356,74 @@ class Startup(unittest.TestCase):
         server.init_rules()                                   # restarting again keeps working
 
 
+
+class Stdds(unittest.TestCase):
+    """Real STDDS messages captured from the live feed."""
+    def setUp(self):
+        import swim
+        swim.STATE["status"] = "connected"
+        swim.EVENTS.clear(); swim.LIVE.clear(); swim.WATCH.clear()
+        self.here = os.path.dirname(os.path.abspath(__file__))
+
+    def feed(self, name):
+        import swim
+        with open(os.path.join(self.here, name)) as fh:
+            swim.handle_stdds(fh.read())
+
+    def test_n_number(self):
+        import swim
+        self.assertEqual([swim.n_number(h) for h in ("aaf006", "a00001", "adf7c7", "4ca123")],
+                         ["N80347", "N1", "N99999", None])
+
+    def test_approach_radar_position_with_tail(self):
+        import swim
+        swim.WATCH.add("N80347")
+        self.feed("stdds_tais.xml")
+        live = swim.live_all("N80347")
+        self.assertEqual(len(live), 1)
+        a = live[0]
+        self.assertEqual((a["tail"], a["hex"], a["alt_ft"], a["type"]), ("N80347", "aaf006", 2300, "C172"))
+        self.assertAlmostEqual(a["lat"], 45.51658)
+        self.assertIn("approach radar", a["src"])
+
+    def test_surface_events_land_on_the_flight(self):
+        import server
+        import swim
+        swim.WATCH.add("DAL517")
+        self.feed("stdds_smes_event.xml")
+        so = datetime(2026, 10, 16, 21, 10, tzinfo=timezone.utc).timestamp()
+        now = datetime(2026, 10, 17, 2, 50, tzinfo=timezone.utc).timestamp()
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="ATL", dest="SFO", off_a=so + 900))
+        L = {"id": "d1", "ident": "DAL517", "dep": "ATL", "arr": "SFO", "sched_out": so}
+        server.swim_check(L, f, "SFO")
+        server.swim_overlay(L, f, now)
+        z = lambda iso: datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+        self.assertEqual(f["times"]["on"]["actual"], z("2026-10-17T02:46:54.639Z"))
+        self.assertEqual(f["time_src"]["on"]["actual"], "SFO surface radar")
+        sa = f["swim"]["surf_arr"]
+        self.assertEqual((sa["landed_rwy"], sa["runway_exit"], sa["status"]),
+                         ("10L/28R", z("2026-10-17T02:47:41.646Z"), "onramp"))
+        self.assertIn("DAL517", swim.PENDING)
+
+    def test_tower_departure_clearance(self):
+        import server
+        import swim
+        swim.WATCH.add("SWA3238")
+        self.feed("stdds_tdes.xml")
+        so = datetime(2026, 10, 17, 3, 0, tzinfo=timezone.utc).timestamp()
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="MDW", dest="MKE"))
+        L = {"id": "d2", "ident": "SWA3238", "dep": "MDW", "arr": "MKE", "sched_out": so}
+        server.swim_check(L, f, "MKE")
+        server.swim_overlay(L, f, so)
+        self.assertEqual(f["swim"]["tower_dep"]["gate"], "A16")
+
+    def test_surface_positions_real(self):
+        import swim
+        swim.WATCH_AIRPORTS.clear(); swim.WATCH_AIRPORTS.add("KSEA")
+        swim.SURFACE.clear()
+        self.feed("stdds_asdex.xml")
+        self.assertGreater(len(swim.surface("KSEA")), 1)
+
 class AirportLayout(unittest.TestCase):
     def test_osm_to_features(self):
         import server
