@@ -630,24 +630,54 @@ def swim_check(L, f, planned):
     if fresh:
         out["new"] = True
         sw["seen"] = L["swim_seen"] = max(e.get("got") or 0 for e in fresh)
-        e = next((x for x in reversed(fresh) if x.get("src") != "TFDM"), fresh[-1])
-        bits = [e.get("type") or "message", f"{_iata(e.get('dep')) or '?'}→{_iata(e.get('arr')) or '?'}"]
-        for k, lbl in (("off", "off"), ("on", "on"), ("eta", "ETA")):
-            v = next((x.get(k) for x in reversed(fresh) if x.get(k) and not _airline_src(x)), None)
-            if v:
-                bits.append(f"{lbl} {v[11:16]}Z")
+        # In plain words, local times: who said what.
+        tza = alerting.tz_for(L.get("dep"), f.get("origin") or {})
+        tzb = alerting.tz_for(L.get("arr"), f.get("destination") or {})
+        hm = lambda iso, tz: alerting.hhmm(_ts(iso), tz) if _ts(iso) else "?"
+        dep, arr_ = _iata(L.get("dep")), _iata(L.get("arr"))
+        bits = []
+        faa = [x for x in fresh if not _airline_src(x) and x.get("src") != "TFDM"]
+        v = next((x["off"] for x in reversed(faa) if x.get("off")), None)
+        if v:
+            bits.append(f"FAA: took off {hm(v, tza)}")
+        v = next((x["on"] for x in reversed(faa) if x.get("on")), None)
+        if v:
+            bits.append(f"FAA: landed {hm(v, tzb)}")
+        v = next((x["eta"] for x in reversed(faa) if x.get("eta")), None)
+        if v and not any(x.get("on") for x in faa):
+            bits.append(f"FAA radar: landing est. {hm(v, tzb)}")
         al = next((x for x in reversed(fresh) if x.get("airline") and _airline_src(x)), None)
         if al:
-            a = al["airline"]
-            bits.append(f"{al['src']}: " + " ".join(f"{lbl} {a[k][11:16]}Z" for k, lbl in (
-                ("gate_out", "pushed"), ("runway_off", "off"), ("in", "gate est"), ("gate_in", "in")) if a.get(k)))
+            a_ = al["airline"]
+            name = {"UAL": "United", "AAL": "American", "DAL": "Delta", "SWA": "Southwest"}.get(al["src"], al["src"])
+            parts = [f"{lbl} {hm(a_[k], tz)}" for k, lbl, tz in (("gate_out", "pushed", tza), ("runway_off", "took off", tza),
+                                                             ("in", "gate arrival est.", tzb), ("gate_in", "at gate", tzb)) if a_.get(k)]
+            if parts:
+                bits.append(f"{name}: " + ", ".join(parts))
+        for x in reversed(fresh):
+            if x.get("src") != "TFDM":
+                continue
+            td = x.get("tfdm") or {}
+            ea = ((td.get("arr") or {}).get("runwayArrivalTime") or {})
+            ed = ((td.get("dep") or {}).get("runwayDepartureTime") or {})
+            if ea.get("actual"):
+                bits.append(f"{arr_} tower: landed {hm(ea['actual'], tzb)}")
+            elif ea.get("estimated"):
+                bits.append(f"{arr_} tower: landing est. {hm(ea['estimated'], tzb)}")
+            if ed.get("actual"):
+                bits.append(f"{dep} tower: took off {hm(ed['actual'], tza)}")
+            elif ed.get("estimated"):
+                bits.append(f"{dep} tower: takeoff est. {hm(ed['estimated'], tza)}")
+            if td.get("state"):
+                bits.append(f"tower status {td['state'].replace('_', ' ').lower()}")
+            break
         if any(x.get("route") for x in fresh) and sw.get("route_changed", 0) > seen_at:
-            bits.append("new route")
-        if any(x.get("src") == "TFDM" for x in fresh):
-            bits.append("tower data")
+            bits.append(f"ATC: new route {sw.get('route')}")
         if any(x.get("diverted") for x in fresh):
-            bits.append("diversion flagged")
-        saw(L, "FAA SWIM", None, " ".join(bits))
+            bits.append("FAA: diversion flagged")
+        if sw.get("arr") and planned and sw["arr"] != _iata(planned):
+            bits.append(f"FAA: now going to {sw['arr']}")
+        saw(L, "FAA SWIM", None, "; ".join(bits) or "update, nothing new")
     if not sw.get("seen"):
         L.pop("swim", None)
         return out
@@ -671,15 +701,24 @@ def swim_overlay(L, f, now):
     t = f.setdefault("times", {})
     for k in fa.TIME_KEYS:
         t.setdefault(k, {"scheduled": None, "estimated": None, "actual": None})
+    base = f.get("time_src") or {}
+    src = {k: {kind: (base.get(k) or {}).get(kind) or L.get("source") or "FlightAware"
+               for kind in ("actual", "estimated") if t[k].get(kind)} for k in fa.TIME_KEYS}
+    f["time_src"] = src
     if sw.get("off"):
         t["off"]["actual"] = sw["off"]
+        src["off"]["actual"] = "FAA"
     if sw.get("on"):
         t["on"]["actual"] = sw["on"]
+        src["on"]["actual"] = "FAA"
     a = sw.get("airline") or {}
+    airline = {"UAL": "United", "AAL": "American", "DAL": "Delta"}.get(a.get("src"), a.get("src") or "airline")
     if a.get("gate_out") and a["gate_out"] <= now + 60:
         t["out"]["actual"] = a["gate_out"]
+        src["out"]["actual"] = airline
     if a.get("gate_in") and a["gate_in"] <= now + 60:
         t["in"]["actual"] = a["gate_in"]
+        src["in"]["actual"] = airline
     td_dep, td_arr = sw.get("tfdm_dep") or {}, sw.get("tfdm_arr") or {}
     fresh_tfdm = sw.get("tfdm_eta") and now - (sw.get("tfdm_eta_at") or 0) < 15 * 60
     fresh_faa = sw.get("eta") and now - (sw.get("eta_at") or 0) < 30 * 60
@@ -690,15 +729,20 @@ def swim_overlay(L, f, now):
         taxi = ((td_arr.get("arrivalTaxiTime") or {}).get("totalEstimatedTaxiInTime") or 0) * 60
         gap = (in_e - on_e) if on_e and in_e else taxi or 8 * 60
         t["on"]["estimated"] = eta
+        who = f"{L.get('arr')} tower" if eta_src == "tower" else "FAA radar"
+        src["on"]["estimated"] = who
         if not t["in"].get("actual"):
             t["in"]["estimated"] = eta + max(2 * 60, min(45 * 60, gap))
+            src["in"]["estimated"] = f"{who} + taxi"
     for side, key, slot in ((td_dep, "offBlockTime", "out"), (td_arr, "inBlockTime", "in")):
         v = _ts(((side.get(key) or {}) if isinstance(side.get(key), dict) else {}).get("actual"))
         if v and v <= now + 60 and not t[slot].get("actual"):
             t[slot]["actual"] = v
+            src[slot]["actual"] = "tower"
     est_off = (td_dep.get("runwayDepartureTime") or {}).get("estimated")
     if est_off and not t["off"].get("actual"):
         t["off"]["estimated"] = _ts(est_off)
+        src["off"]["estimated"] = f"{L.get('dep')} tower"
     if sw.get("route"):
         if f.get("route_source") != "FAA":
             f["route_flightaware"] = f.get("route")
@@ -1725,6 +1769,19 @@ def log_lookup(L, prev, now, sources, seen=None):
     seen = seen if seen is not None else L.pop("_seen", None) or []
     cur = snapshot(L)
     changes = [{"field": k, "from": prev.get(k), "to": v} for k, v in cur.items() if v != prev.get(k) and v is not None]
+    ts = (L.get("flight") or {}).get("time_src") or {}
+    via = {"Actual out": ("out", "actual"), "Estimated out": ("out", "estimated"), "Takeoff": ("off", "actual"),
+           "Estimated in": ("in", "estimated")}
+    for c in changes:
+        if c["field"] in via:
+            k, kind = via[c["field"]]
+            c["via"] = (ts.get(k) or {}).get(kind)
+        elif c["field"] == "Status":
+            t = (L.get("flight") or {}).get("times") or {}
+            for k in ("in", "on", "off", "out"):
+                if (t.get(k) or {}).get("actual"):
+                    c["via"] = f"{(ts.get(k) or {}).get('actual') or 'FlightAware'} ({ {'in': 'at gate', 'on': 'landing', 'off': 'takeoff', 'out': 'push'}[k]} time)"
+                    break
     if L.get("tail_source") is None and (L.get("flight") or {}).get("tail_source"):
         for c in changes:
             if c["field"] == "Tail":

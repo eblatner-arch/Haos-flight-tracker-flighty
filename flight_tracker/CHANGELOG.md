@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.14.3
+- The lookup log says in plain words who reported what, in local time ("FAA: took off 22:19; United: pushed 21:53; EWR tower: landing est. 22:49").
+- Each time on the flight page says where it came from (FAA, United, EWR tower, FlightAware), and log changes show "via".
+
 ## 3.14.2
 - SWIM news (takeoff, landing, diversion, a tower state change) now updates the flight within seconds without waiting for a FlightAware page load; the page follows 20 s later.
 - Tower (TFDM) actual off-block and in-block times are used when present.
