@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.0.0
+- New look, modeled on Flighty. Every flight screen is a full-screen map with a sheet over it that you scroll up.
+- My Flights: the map shows every route in the next two weeks, the night side of the earth, and the airplane you're on. Each row shows a countdown ("3 Days", "In Air"), the cities, and departure and arrival times in red when late. Connections between your flights show the sit ("1h 12m at FLL").
+- Flight page: a colored status line ("Landing in 43m · arrives at gate 1h 12m late"), big times with the old time struck out, and yellow gate and baggage badges. Below that: Good to Know (weather in words with the flight category, FAA status at each airport, time zone change, your record on the route), the inbound aircraft as a timeline, a detailed timetable (gate, taxi, takeoff, flight, landing, taxi in, gate in), and the aircraft. The old details, METARs, alerts, lookup log and screenshot are in sections below. Speed and altitude float over the map in flight.
+- Passport (was History): a globe of everything you've flown (drag to spin), passport, delay and aircraft cards, and the list sortable by date, from, to, airline or aircraft. Past flights open on the same sheet as live ones.
+- Maps: satellite imagery by default (Dark map in Settings or with the map button), weather radar button, and airport labels with the city.
+- Floating tab bar: My Flights, Alerts, Passport, and Search. Settings is the round button with your initial. Settings now has 24-hour time (12-hour is the default), map style, radar, and "Check all flights now".
+- System font (SF Pro on iPhone), always dark.
+
 ## Flighty fork
 - Forked from Flight Tracker 3.22.3 as a separate add-on: slug `flight_tracker_flighty`, image `ghcr.io/eblatner-arch/flight-tracker-flighty`, panel "Flighty". Entities are `sensor.flight_tracker_flighty_*` / `binary_sensor.flight_tracker_flighty_problem`, the browser viewer is on port 6081, screenshots go to `/share/flight_tracker_flighty/`, and the Drive backup folder is "Flight Tracker Flighty (Home Assistant)", so it runs alongside the original without clashing.
 

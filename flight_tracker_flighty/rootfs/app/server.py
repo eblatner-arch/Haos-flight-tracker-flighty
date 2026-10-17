@@ -3236,9 +3236,16 @@ def api_history(q):
     sel = [r for r in recs if not year or (r.get("date") or "").startswith(year)]
     sel.sort(key=lambda r: (r.get("date") or "", ((r.get("times") or {}).get("out") or {}).get("s") or 0), reverse=True)
     lk = history.links(recs)
+    # city names and positions for every airport in the list (the Passport globe and "Miami to Newark")
+    aps = {}
+    for r in sel:
+        for c in (r.get("dep"), r.get("arr"), r.get("diverted_to")):
+            if c and c not in aps:
+                a = airports.get(c)
+                aps[c] = {k: a.get(k) for k in ("city", "name", "lat", "lon")} if a else {}
     return {"year": year, "years": sorted({(r.get("date") or "")[:4] for r in recs if r.get("date")}, reverse=True),
             "total": len(recs), "flighty_count": sum(1 for r in recs if r.get("source") == "flighty"),
-            "stats": history.stats(sel, lk), "flights": [history.summary(r, lk) for r in sel]}
+            "stats": history.stats(sel, lk), "flights": [history.summary(r, lk) for r in sel], "airports": aps}
 
 
 def api_history_flight(fid):

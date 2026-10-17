@@ -79,7 +79,7 @@
     try { return new Intl.DateTimeFormat(undefined, { timeZone: tz || undefined, ...opts }).format(new Date(ts * 1000)); }
     catch { return new Intl.DateTimeFormat(undefined, opts).format(new Date(ts * 1000)); }
   }
-  const hm = (ts, tz) => fmt(ts, tz, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const hm = (ts, tz) => fmt(ts, tz, CLOCK24 ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : { hour: "numeric", minute: "2-digit", hour12: true });
   const tzAbbr = (ts, tz) => {
     if (!ts) return "";
     try {
@@ -124,7 +124,7 @@
   function gateMapDrag(e) {
     const p = e.touches ? e.touches[0] : e;
     if (!p) return;
-    const edge = e.touches && p.clientX <= EDGE && document.querySelector("#app > .back");
+    const edge = e.touches && p.clientX <= EDGE && document.querySelector("#app a.back");
     for (const m of Object.values(MAPS)) {
       if (!m.interactive || !m.map.dragging) continue;
       const r = m.el.getBoundingClientRect();
@@ -135,54 +135,59 @@
   }
   for (const ev of ["touchstart", "pointerdown", "mousedown"]) document.addEventListener(ev, gateMapDrag, { capture: true, passive: true });
 
-  // Swipe in from the left edge to go back (to wherever the page's "‹" link points), like iOS.
+  // Swipe in from the left edge to go back (to wherever the page's "‹" or ✕ link points), like iOS.
+  // On map pages the sheet slides away and the map stays put.
   let sw = null;
+  const swipeEl = () => document.body.classList.contains("sheetmode") ? ($root.querySelector(".sheet") || $root) : $root;
+  const unstyle = (el) => { el.style.transition = ""; el.style.transform = ""; el.style.opacity = ""; el.style.willChange = ""; };
   document.addEventListener("touchstart", (e) => {
     const t = e.touches[0];
-    const back = document.querySelector("#app > .back");
-    sw = e.touches.length === 1 && back && t.clientX <= EDGE ? { x: t.clientX, y: t.clientY, dx: 0, back, horiz: null } : null;
+    const back = document.querySelector("#app a.back");
+    sw = e.touches.length === 1 && back && t.clientX <= EDGE ? { x: t.clientX, y: t.clientY, dx: 0, back, horiz: null, el: swipeEl() } : null;
   }, { capture: true, passive: true });
   document.addEventListener("touchmove", (e) => {
     if (!sw) return;
     const t = e.touches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y;
     if (sw.horiz === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) sw.horiz = Math.abs(dx) > Math.abs(dy);
-    if (!sw.horiz) { if (sw.horiz === false) { $root.style.transform = ""; sw = null; } return; }
+    if (!sw.horiz) { if (sw.horiz === false) { unstyle(sw.el); sw = null; } return; }
     if (e.cancelable) e.preventDefault();  // keep the page from scrolling sideways while swiping
     sw.dx = Math.max(0, dx);
     if (sw.raf) return;
     sw.raf = requestAnimationFrame(() => {  // one paint per frame, following the finger 1:1
       if (!sw) return;
       sw.raf = 0;
-      $root.style.transition = "none";
-      $root.style.willChange = "transform";
-      $root.style.transform = `translate3d(${sw.dx}px,0,0)`;
-      $root.style.opacity = String(1 - Math.min(0.35, sw.dx / 900));
+      sw.el.style.transition = "none";
+      sw.el.style.willChange = "transform";
+      sw.el.style.transform = `translate3d(${sw.dx}px,0,0)`;
+      sw.el.style.opacity = String(1 - Math.min(0.35, sw.dx / 900));
     });
   }, { capture: true, passive: false });
   document.addEventListener("touchend", () => {
     if (!sw) return;
-    const go_ = sw.horiz && sw.dx > Math.min(110, window.innerWidth * 0.28), href = sw.back.getAttribute("href");
+    const go_ = sw.horiz && sw.dx > Math.min(110, window.innerWidth * 0.28), href = sw.back.getAttribute("href"), el = sw.el;
     if (sw.raf) cancelAnimationFrame(sw.raf);
     sw = null;
     if (!go_) {
-      $root.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s";
-      $root.style.transform = ""; $root.style.opacity = "";
+      el.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s";
+      el.style.transform = ""; el.style.opacity = "";
       return;
     }
     // slide the page off, then show the one underneath sliding in from a little to the left
-    $root.style.transition = "transform .16s ease-out, opacity .16s ease-out";
-    $root.style.transform = `translate3d(${window.innerWidth}px,0,0)`; $root.style.opacity = "0.6";
+    el.style.transition = "transform .16s ease-out, opacity .16s ease-out";
+    el.style.transform = `translate3d(${window.innerWidth}px,0,0)`; el.style.opacity = "0.6";
     setTimeout(async () => {
+      unstyle(el);
       $root.style.transition = "none";
       $root.style.transform = "translate3d(-24px,0,0)"; $root.style.opacity = "0";
       await Promise.race([goBack(href), new Promise((r) => setTimeout(r, 1500))]);
       requestAnimationFrame(() => {
         $root.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s";
         $root.style.transform = ""; $root.style.opacity = ""; $root.style.willChange = "";
+        const s2 = $root.querySelector(".sheet"); if (s2) unstyle(s2);
       });
     }, 150);
   }, { capture: true, passive: true });
-  document.addEventListener("touchcancel", () => { sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
+  document.addEventListener("touchcancel", () => { if (sw) unstyle(sw.el); sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
   async function api(path, opts) {
     // GETs revalidate (the add-on answers "not changed" with a tiny 304); changes always go through
@@ -288,12 +293,22 @@
     return L.marker(pos, { icon, title, zIndexOffset: 1000 });
   }
 
-  // Basemaps: CARTO's OpenStreetMap tiles (kept current: new terminals, taxiways; detailed to zoom 20).
+  // Basemaps: satellite imagery with place names (Flighty's look, the default), or CARTO's dark
+  // OpenStreetMap map. Switched with the map button; the choice is remembered on this phone.
   function addTiles(map, dark) {
+    (map._ftTiles || []).forEach((l) => map.removeLayer(l));
+    map._ftTiles = [];
+    if (mapStyle() === "satellite") {
+      map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 19, className: "sat-tiles",
+        attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics" }).addTo(map));
+      map._ftTiles.push(L.tileLayer(ESRI_LBL, { maxZoom: 20, maxNativeZoom: 19, pane: pane(map, "labels", 390) }).addTo(map));
+      return;
+    }
     // CARTO now watermarks tiles fetched without its free key. With your key (add-on Configuration)
     // tiles come from its keyed address (?key=…); a tile address of your own wins: {style} becomes
     // dark_all or light_all, {key} your key. If tiles keep failing it steps down: keyless CARTO,
     // then Esri's gray map (OpenStreetMap's own servers refuse apps like this one).
+    dark = true;
     const mt = (STATE && STATE.map_tiles) || {};
     const style = dark ? "dark_all" : "light_all";
     const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
@@ -309,6 +324,7 @@
       const [url, opts] = chain[i];
       errors = 0; loaded = 0;
       layer = L.tileLayer(url, opts).addTo(map);
+      map._ftTiles = [layer];
       layer.on("tileload", () => { loaded++; });
       layer.on("tileerror", () => {
         // a few bad tiles happen; give up on a source only when it loads nothing
@@ -415,7 +431,7 @@
     return g;
   }
 
-  function drawMap(el, leg, { interactive = true, key = null } = {}) {
+  function drawMap(el, leg, { interactive = true, key = null, paint = null, controls = "full" } = {}) {
     if (!el) return;
     if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
     key = key || el.id;
@@ -429,34 +445,39 @@
     if (have) {
       if (have.el !== el) el.replaceWith(have.el);
       usedMaps.add(key);
-      paintMap(have, leg, false);
+      have.paint(have, leg, false);
       setTimeout(() => have.map.invalidateSize(), 30);
       return;
     }
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = true;
+    const full = el.classList.contains("mapbg");
     el.dataset.cls = el.className;
     // padding 0: the route layer is exactly the map's size instead of 10% larger
-    const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: interactive, attributionControl: true, dragging: interactive,
-      scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false });
+    const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: interactive && !full, attributionControl: !full, dragging: interactive,
+      scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false, worldCopyJump: true });
     if (map.attributionControl) map.attributionControl.setPrefix("");   // no "Leaflet" flag; the map credits stay
+    if (full) map.addControl(L.control.attribution({ position: "topleft", prefix: "" }));
     addTiles(map, dark);
-    const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive };
-    entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, { padding: [28, 28], maxZoom: 9 }) : map.setView([39.5, -98.35], 3);
+    const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive, full, paint: paint || paintMap };
+    entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, fitOpts(el, paint ? 7 : 9)) : map.setView([39.5, -98.35], 3);
     MAPS[key] = entry;
     usedMaps.add(key);
     if (interactive && L.Control) {
+      addStack(map);
       const Btn = L.Control.extend({
         options: { position: "topright" },
         onAdd() {
           const b = L.DomUtil.create("button", "map-center");
           b.type = "button"; b.title = "Center on route"; b.setAttribute("aria-label", "Center on route");
-          b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A8.99 8.99 0 0 0 13 3.06V1h-2v2.06A8.99 8.99 0 0 0 3.06 11H1v2h2.06A8.99 8.99 0 0 0 11 20.94V23h2v-2.06A8.99 8.99 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>';
+          b.innerHTML = IC.locate;
           L.DomEvent.disableClickPropagation(b);
           L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); entry.center(); });
           return b;
         },
       });
       map.addControl(new Btn());
+    }
+    if (interactive && L.Control && controls === "full") {
       // Jump to the departure or arrival airport, zoomed in enough to see the surface traffic.
       const TAKEOFF = '<svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 1.82 3.16.77 1.33 1.6-.43 5.31-1.42 4.35-1.16L21 11.49c.81-.23 1.28-1.05 1.07-1.85z"/></svg>';
       const LANDING = '<svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm7.18-5.73 4.35 1.16 5.31 1.42c.8.21 1.62-.26 1.84-1.06.21-.8-.26-1.62-1.06-1.84l-5.31-1.42-2.76-9.02L10.12 2v8.28L5.15 8.95l-.93-2.32-1.45-.39v5.17l1.6.43 5.31 1.43z"/></svg>';
@@ -520,7 +541,7 @@
       map.on("zoomend moveend", () => { layoutCheck(entry); surfaceNow(entry); });
       map.on("zoomend", () => { if (entry.lastSurface) paintSurface(entry, entry.lastSurface); });
     }
-    paintMap(entry, leg, true);
+    entry.paint(entry, leg, true);
     setTimeout(() => map.invalidateSize(), 50);
   }
 
@@ -614,7 +635,12 @@
           if (cur.flight) { cur.flight.track = cur.flight.track || []; add(cur.flight.track, d.track); }
           if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
           const m = MAPS[key];
-          if (moved && m) paintMap(m, withChain(cur), false);
+          if (moved && m) {
+            if (m.paint === paintHome) paintHome(m, { ...m.home, focus: withChain(cur) }, false);
+            else paintMap(m, withChain(cur), false);
+          }
+          const te = document.getElementById("telem");
+          if (te && cur.live && key === `leg-${id}`) te.innerHTML = telem(cur.live);
           // between fixes, carry the airplane forward along its heading
           const fresh = (lv, trk) => { const l = (trk || []).filter((p) => p && p[0] != null).pop(); return !(l && (l[4] || 0) > (lv.at || 0) + 5); };
           if (m && m.ownMarker && cur.live && cur.phase === "airborne" && fresh(cur.live, cur.flight && cur.flight.track)) { const a = aheadOf(cur.live, m.ownHdg || 0, Date.now()); if (a) m.ownMarker.setLatLng(a); }
@@ -728,6 +754,7 @@
     const { layer, interactive } = entry;
     entry.leg = leg;
     layer.clearLayers();
+    if (entry.full) addNight(entry);
     const add = (x) => x.addTo(layer);
     entry.inbMarker = null;
     const route = css("--route"), violet = css("--violet"), muted = css("--faint");
@@ -764,10 +791,14 @@
       g.forEach((p) => bounds.push(p));
     }
     const track = (f.track || []).filter((p) => p[0] != null);
-    if (track.length > 1) add(L.polyline(smooth(track.map((p) => [p[0], p[1]])), { color: route, weight: 3.5, opacity: 0.95 }));
+    if (track.length > 1) {
+      const sm = smooth(track.map((p) => [p[0], p[1]]));
+      add(L.polyline(sm, { color: "#04122e", weight: 7.5, opacity: 0.45 }));
+      add(L.polyline(sm, { color: route, weight: 4, opacity: 1 }));
+    }
     // the airplane's live position is fresher than the drawn track: join them so it sits on its line
     if (leg.live && track.length && ["airborne", "taxi_out", "landed"].includes(leg.phase))
-      add(L.polyline([[track[track.length - 1][0], track[track.length - 1][1]], [leg.live.lat, leg.live.lon]], { color: route, weight: 3.5, opacity: 0.95 }));
+      add(L.polyline([[track[track.length - 1][0], track[track.length - 1][1]], [leg.live.lat, leg.live.lon]], { color: route, weight: 4, opacity: 1 }));
     const inb = leg.inbound;
     // The inbound (and the airplane's earlier legs) only frame the map while they still matter:
     // not yet arrived and your flight not yet off the gate. Afterwards they're drawn faintly and
@@ -787,7 +818,7 @@
       if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
       else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
       if (ip) { entry.inbMarker = add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); entry.inbHdg = ih; ibounds.push([ip[0], ip[1]]); }
-      if (ia && interactive) { ibounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
+      if (ia && interactive && inbOpen) { ibounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
     }
     // Earlier legs of the same airplane that still matter (not yet arrived), fainter the further back.
     (leg.chain || []).forEach((c, i) => {
@@ -808,8 +839,8 @@
     for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
       if (!pos) continue;
       bounds.push(pos);
-      add(L.circleMarker(pos, { radius: 4, color: route, fillColor: route, fillOpacity: 1, weight: 0 }));
-      add(L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label">${esc(ap.iata || "")}</span>`, iconSize: null, iconAnchor: [-6, 8] }) }));
+      add(L.circleMarker(pos, { radius: 5.5, color: "#fff", weight: 2, fillColor: route, fillOpacity: 1 }));
+      add(L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label city">${interactive && cityOf(ap) ? `<span>${esc(cityOf(ap))}</span>` : ""}<b>${esc(ap.iata || "")}</b></span>`, iconSize: null, iconAnchor: [-9, 11] }) }));
     }
     let pos = null, hdg = 0;
     if (leg.live) { pos = newestPos(leg.live, track); hdg = headingOf(leg.live, track); }
@@ -818,7 +849,7 @@
     } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
     // on the airport surface radar, that (more exact) target is your airplane: don't draw it twice
     entry.ownMarker = pos && !(entry.surfaceMine && Date.now() - entry.surfaceMine < 10000)
-      ? add(planeMarker([pos[0], pos[1]], hdg, route, leg.display)) : null;
+      ? add(planeMarker([pos[0], pos[1]], hdg, "#fff", leg.display)) : null;
     entry.ownHdg = hdg;
     entry.bounds = bounds;
     if (fit || !interactive) entry.center();
@@ -927,7 +958,7 @@
     n = Math.max(0, Math.min(n, rot.length - 1));
     const h = rot[n];
     destroyMaps();
-    if (!h) { $app.innerHTML = `<a class="back" href="#/leg/${id}">‹ ${esc(leg.display || "Flight")}</a><div class="card empty"><b>No inbound linked yet</b>FlightAware hasn't linked the flight bringing your aircraft.</div>`; return; }
+    if (!h) { $app.innerHTML = `<div class="mapbg" id="ac-map"></div><div class="sheet-gap"></div><section class="sheet">${sheetHead("No inbound linked yet", esc(flno(leg)), `#/leg/${id}`)}<div class="card empty"><b>No inbound linked yet</b>FlightAware hasn't linked the flight bringing your aircraft.</div></section>`; return; }
     const t = h.times || { out: {}, off: {}, on: {}, in: {} };
     const o = h.origin || {}, d = h.destination || {};
     const tzA = o.tz, tzB = d.tz;
@@ -945,9 +976,12 @@
       .concat(rot.map((r, i) => `<a class="rot-step ${i === n ? "on" : ""} ph-${slug(r.phase)}" href="#/aircraft/${id}/${i}"><b>${esc(r.display_ident || r.ident || "?")}</b><span>${esc((r.origin || {}).iata || "?")}→${esc((r.destination || {}).iata || "?")}</span><i>${esc(r.status)}</i></a>`))
       .join('<span class="rot-arrow">‹</span>');
     $app.innerHTML = `
-      <a class="back" href="${n === 0 ? `#/leg/${id}` : `#/aircraft/${id}/${n - 1}`}">‹ ${n === 0 ? esc(leg.display || "Your flight") : "Later leg"}</a>
-      <div class="rot-strip">${strip}</div>
-      <div class="detail-map" id="ac-map"></div>
+      <div class="mapbg" id="ac-map"></div>
+      <div class="sheet-gap d"></div>
+      <section class="sheet detail">
+      ${sheetHead(`${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}`, `${esc(h.display_ident || h.ident || "")} • ${n === 0 ? "Your inbound" : `${n + 1} legs back`}`,
+        n === 0 ? `#/leg/${id}` : `#/aircraft/${id}/${n - 1}`, alBadge(airlineCode({ display: h.display_ident || h.ident, airline: leg.airline }), "lg"))}
+      <div class="rot-strip" style="margin-top:10px">${strip}</div>
       <div class="card">
         <div class="hero-top"><div class="flightno">${esc(h.display_ident || h.ident || "")}<span class="tag">${n === 0 ? "YOUR INBOUND" : `${n + 1} LEGS BACK`}</span></div><span class="pill ${slug(h.status)}">${esc(h.status)}</span></div>
         <div class="route">
@@ -973,7 +1007,7 @@
         : more ? `<a class="card rot-next" href="#/aircraft/${id}/${n + 1}"><span class="small muted">Before this, the airplane flies</span><b>${esc(rot[n + 1].display_ident || "")} ${esc((rot[n + 1].origin || {}).iata || "")}→${esc((rot[n + 1].destination || {}).iata || "")}</b><span class="pill ${slug(rot[n + 1].status)}">${esc(rot[n + 1].status)}</span></a>`
         : `<div class="card small muted">${h.inbound_fa_id ? "The earlier leg will appear on the next check." : "FlightAware hasn't linked the leg before this one yet."}</div>`}
       <p class="small faint" style="margin:4px 4px 10px">${h.fetched ? `Data from FlightAware, fetched ${ago(h.fetched)}${finished ? "" : " · refreshes every 10 min"}` : "Data from FlightAware with your flight's last check"}</p>
-      ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}`;
+      ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}</section>`;
     const earlier = h.phase === "scheduled" ? chainFrom(rot, n + 1) : [];
     drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
       chain: [], live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
@@ -1007,40 +1041,6 @@
         ${chips(leg)}
         ${countdown(leg)}
       </div>
-    </a>`;
-  }
-
-  // Flighty-style flight card for the timeline.
-  function row(leg) {
-    const f = leg.flight || null, tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
-    const t = f ? f.times : { out: {}, in: {} };
-    const out = best(t, "out") || leg.sched_out, inn = best(t, "in") || leg.sched_in;
-    const outS = (t.out && t.out.scheduled) || leg.sched_out, inS = (t.in && t.in.scheduled) || leg.sched_in;
-    const late = (a, b) => a && b && Math.abs(a - b) >= 300;
-    const known = leg.extra ? !!f : true;
-    const timeCell = (ts, sched, tz, right) => `<div class="fc-ap ${right ? "right" : ""}">
-        <div class="fc-time ${late(ts, sched) ? (ts > sched ? "late" : "early") : ""}">${known ? hm(ts, tz) : "—"}</div>
-        <div class="fc-sub">${late(ts, sched) ? `<s>${hm(sched, tz)}</s> ` : ""}${known ? tzAbbr(ts, tz) : ""}</div></div>`;
-    const now = Date.now() / 1000;
-    let foot = [];
-    if (f && f.origin && f.origin.gate) foot.push(`Gate ${esc(f.origin.terminal ? f.origin.terminal + f.origin.gate.replace(f.origin.terminal, "") : f.origin.gate)}`);
-    if (f && f.tail) foot.push(esc(f.tail));
-    if (leg.note && !f) foot.push(`<span class="faint">${esc(leg.note)}</span>`);
-    if (!leg.finished && leg.phase === "scheduled" && out > now && out - now < 86400) foot.push(`<b>in ${dur(out - now)}</b>`);
-    if (leg.problems.length) foot.push(`<span class="warnmark">${esc(leg.problems[0].text)}</span>`);
-    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + kindTag(leg)
-      + ((leg.source || "").includes("Gemini") ? '<span class="tag gem">GEMINI</span>' : "");
-    return `<a class="fcard s-${slug(leg.status)} ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
-      <div class="fc-top"><span class="fc-no">${esc(leg.display || leg.ident || "")}</span>${tags}<span class="fc-date">${esc(dayLabel(out, tzA))}</span>${statusPill(leg)}</div>
-      <div class="fc-route">
-        <div class="fc-ap"><div class="fc-code">${esc(leg.dep || "···")}</div></div>
-        <div class="fc-line"><i></i><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><i></i></div>
-        <div class="fc-ap right"><div class="fc-code">${esc(leg.arr || "···")}</div></div>
-        ${timeCell(out, outS, tzA)}
-        <div class="fc-dur">${known && inn > out ? dur(inn - out) : ""}</div>
-        ${timeCell(inn, inS, tzB, true)}
-      </div>
-      ${foot.length ? `<div class="fc-foot">${foot.join(" · ")}</div>` : ""}
     </a>`;
   }
 
@@ -1112,7 +1112,7 @@
     return `<div class="card">${list.slice(0, 15).map((a) => `<div class="alert">
       <span class="dot ${a.level}"></span>
       <div><div class="ttl">${esc(a.title)}</div><div class="msg">${esc(a.message)}</div></div>
-      <div class="at">${fmt(a.at, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}<br>${fmt(a.at, undefined, { day: "numeric", month: "short" })}</div>
+      <div class="at">${hm(a.at)}<br>${fmt(a.at, undefined, { day: "numeric", month: "short" })}</div>
     </div>`).join("")}</div>`;
   }
 
@@ -1141,8 +1141,10 @@
   const delayCls = (m) => m == null ? "" : m >= 15 ? "late" : m <= -5 ? "early" : "";
   function histTabs(cur, year) {
     const y = year ? `/${year}` : "";
-    return `<div class="tabs">${[["flights", "Flights", `#/history${y}`], ["stats", "Stats", `#/history/stats${y}`], ["find", "Search", `#/history/find${year ? `?year=${year}` : ""}`], ["alerts", "Alerts", "#/history/alerts"]]
-      .map(([k, l, href]) => `<a class="tab ${cur === k ? "on" : ""}" href="${href}">${l}</a>`).join("")}</div>`;
+    if (cur === "stats") return `<a class="back plain" href="#/history${y}">‹ Passport</a><h1 class="ptitle">Flight Stats</h1>`;
+    if (cur === "find") return `<h1 class="ptitle">Search</h1>`;
+    if (cur === "alerts") return `<div class="ptitle-row"><h1 class="ptitle">Alerts</h1><a class="round" href="#/notify" aria-label="Notification settings">${IC.gear}</a></div>`;
+    return "";
   }
   function yearChips(cur, years, base) {
     return `<div class="chips-row">${["", ...years].map((y) => `<a class="ychip ${y === cur ? "on" : ""}" href="${base}${y ? "/" + y : ""}">${y || "All"}</a>`).join("")}</div>`;
@@ -1204,23 +1206,27 @@
   async function historyView(year) {
     destroyMaps();
     const d = await api(`api/history${year ? `?year=${year}` : ""}`);
-    let h = histTabs("flights", year) + yearChips(year || "", d.years, "#/history");
+    let h = `<div class="globe-bg" id="globe"></div><div class="sheet-gap pass"></div><section class="sheet">
+      <div class="sheet-head"><h1>Passport</h1><div class="sh-btns">${avatar()}</div></div>
+      <div class="ypills">${["", ...d.years].map((y) => `<a class="yp ${y === (year || "") ? "on" : ""}" href="#/history${y ? "/" + y : ""}">${y || "All-Time"}</a>`).join("")}</div>`;
     if (!d.flights.length) h += `<div class="card empty"><b>No flights yet</b>Your Calendar and Manual flights are saved here when they finish.</div>` + importCard(true);
-    else {
-      const st = d.stats;
-      h += `<div class="tiles">${[["Flights", st.flights], ["Distance", nm(st.distance_nm) + " nm"], ["In the air", nm(st.air_hours) + " h"], ["On time", st.on_time_pct == null ? "—" : st.on_time_pct + "%"]]
-        .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>`;
-      let month = "";
-      for (const f of d.flights) {
-        const out = f.times.out && (f.times.out.a || f.times.out.s);
-        const mo = fmt(out, f.dep_tz, { month: "long", year: "numeric" });
-        if (mo !== month) { if (month) h += "</div>"; h += `<h2 class="section">${esc(mo)}</h2><div class="card hlist">`; month = mo; }
-        h += histRow(f);
-      }
-      h += "</div>" + importCard(false, { flighty: d.flighty_count });
-    }
+    else h += passCards(d, year) + `<div id="pass-list">${passList(d)}</div><div style="height:18px"></div>` + importCard(false, { flighty: d.flighty_count });
+    h += `</section>`;
     $app.innerHTML = h;
     wireImport();
+    const pl = document.getElementById("pass-list");
+    if (pl) pl.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-psort]"), all = e.target.closest("[data-pall]");
+      if (b) {
+        const k = b.dataset.psort;
+        PASS_SORT = PASS_SORT.k === k ? { k, dir: -(PASS_SORT.dir || -1) } : { k, dir: -1 };
+        setPref("ft-pass-sort", JSON.stringify(PASS_SORT));
+        pl.innerHTML = passList(d);
+      } else if (all) { PASS_ALL = true; pl.innerHTML = passList(d); }
+    });
+    const gd = globeData(d);
+    globeLibs().then(() => drawGlobe(document.getElementById("globe"), gd))
+      .catch(() => { const g = document.getElementById("globe"); if (g) g.innerHTML = '<p class="small faint" style="text-align:center;margin-top:30vh">Globe couldn\'t load</p>'; });
   }
 
   function bars(rows, fmtv, link) {
@@ -1471,7 +1477,7 @@
         const dd = fmt(a.at, undefined, { weekday: "short", day: "numeric", month: "short" });
         if (dd !== day) { if (day) out += "</div>"; out += `<h2 class="section">${esc(relDay(a.at) || dd)}</h2><div class="card">`; day = dd; }
         out += `<div class="alert"><span class="dot ${a.level}"></span><div><div class="ttl">${esc(a.title)}</div><div class="msg">${esc(a.message)}</div></div>
-          <div class="at">${fmt(a.at, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}</div></div>`;
+          <div class="at">${hm(a.at)}</div></div>`;
       }
       document.getElementById("a-list").innerHTML = list.length ? out + "</div>" : `<div class="card empty small muted">Nothing${q ? " matches" : " yet"}.</div>`;
     };
@@ -1483,53 +1489,46 @@
     destroyMaps();
     let f;
     try { f = await api(`api/history/${encodeURIComponent(id)}`); } catch { go("#/history"); return; }
-    const t = f.times || {}, tzA = f.dep_tz, tzB = f.arr_tz;
+    const t = f.times || {};
     const cont = !!f.continuation_of;  // its "schedule" is the original flight's: show actual times only
-    const cell = (lbl, x, tz) => {
-      const a = x && x.a, s_ = cont ? null : x && x.s, dlt = a && s_ ? (a - s_) / 60 : null;
-      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${delayCls(dlt)}">${hm(a || s_, tz)}</div><div class="s">${a ? "actual" : "scheduled"}${dlt != null && Math.abs(dlt) >= 1 ? ` · sched ${hm(s_, tz)}` : ""}</div></div>`;
-    };
+    const conv = (x) => x ? { scheduled: cont ? null : x.s, actual: x.a, estimated: null } : {};
+    const P = { id: f.id, dep: f.dep, arr: f.diverted_to || f.arr, dep_ap: f.dep_ap || {}, arr_ap: f.arr_ap || {}, phase: f.cancelled ? "cancelled" : "arrived",
+      finished: true, sched_out: (t.out || {}).s, sched_in: (t.in || {}).s, display: f.display, ident: f.ident, airline: f.airline, nas: [], problems: [],
+      flight: { times: { out: conv(t.out), off: conv(t.off), on: conv(t.on), in: conv(t.in) }, distance_nm: f.distance_nm, aircraft_name: f.aircraft, aircraft_type: f.type, tail: f.tail,
+        origin: { gate: f.dep_gate, terminal: f.dep_terminal }, destination: { gate: f.arr_gate, terminal: f.arr_terminal } } };
+    if (!P.dep_ap.tz) P.dep_ap.tz = f.dep_tz;
+    if (!P.arr_ap.tz) P.arr_ap.tz = f.arr_tz;
     const rs = f.route_stats || {};
+    const am = f.arr_delay;
+    const head = f.cancelled ? "Cancelled" : f.diverted_to ? `Diverted to ${f.diverted_to}` : am == null ? "Completed" : `Arrived ${lateLower(am)}`;
+    const cls = f.cancelled || f.diverted_to ? "red" : am == null ? "" : tone(am);
+    const sub = [f.diverted_to ? `Planned to ${f.arr}.` : "", f.continued_by ? `Reached ${f.final_ap || f.arr} at ${hm(f.final_arrival, f.arr_tz)}${am != null ? `, ${fdur(am * 60)} after the original schedule` : ""}.` : "",
+      cont ? "Continuation of a diverted flight; its lateness is counted on that flight." : ""].filter(Boolean).join(" ");
     $app.innerHTML = `
-      <a class="back" href="#/history">‹ History</a>
-      <div class="detail-map" id="hist-map"></div>
-      <div class="card">
-        <div class="hero-top"><div class="flightno">${esc(f.display || f.ident || "")}${f.diverted_to ? '<span class="tag warn">DIVERTED</span>' : ""}</div>
-          <span class="small muted">${esc(fmt((t.out && (t.out.a || t.out.s)), tzA, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))}</span></div>
-        <div class="route">
-          <div class="ap"><div class="code">${esc(f.dep)}</div><div class="city">${esc((f.dep_ap || {}).city || "")}</div></div>
-          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${f.block_min ? dur(f.block_min * 60) : ""}</span></div>
-          <div class="ap right"><div class="code">${esc(f.diverted_to || f.arr)}</div><div class="city">${esc((f.arr_ap || {}).city || "")}</div></div>
-        </div>
-        ${f.diverted_to ? `<p class="small" style="color:var(--amber)">Planned to ${esc(f.arr)}, diverted to ${esc(f.diverted_to)}.${f.continued_by
-          ? ` Reached ${esc(f.final_ap || f.arr)} at ${esc(hm(f.final_arrival, tzB))}${f.arr_delay != null ? `, ${esc(dur(f.arr_delay * 60))} after the original schedule` : ""} · <a href="#/hist/${encodeURIComponent(f.continued_by)}" style="color:var(--accent)">${esc(f.continued_by_label || "continuation")} ›</a>` : ""}</p>` : ""}
-        ${cont ? `<p class="small muted">Continuation of the diverted <a href="#/hist/${encodeURIComponent(f.continuation_of)}" style="color:var(--accent)">${esc(f.continuation_of_label || "flight")} ›</a>. Its lateness is counted on that flight, against the original schedule.</p>` : ""}
-        <div class="grid4" style="margin-top:14px">
-          ${cell(`Gate out · ${tzAbbr(t.out && (t.out.a || t.out.s), tzA)}`, t.out, tzA)}
-          ${cell(`Gate in · ${tzAbbr(t.in && (t.in.a || t.in.s), tzB)}`, t.in, tzB)}
-          ${cell("Takeoff", t.off, tzA)}
-          ${cell("Landing", t.on, tzB)}
-        </div>
-        <div class="chips">
-          ${f.dep_gate ? `<div class="chip"><div class="k">${esc(f.dep)} gate</div><div class="v">${esc(f.dep_gate)}</div></div>` : ""}
-          ${f.arr_gate ? `<div class="chip"><div class="k">${esc(f.diverted_to || f.arr)} gate</div><div class="v">${esc(f.arr_gate)}</div></div>` : ""}
-          ${f.aircraft || f.tail ? `<div class="chip"><div class="k">Aircraft</div><div class="v">${esc([f.type || f.aircraft, f.tail].filter(Boolean).join(" · "))}</div></div>` : ""}
-          ${f.diverted_to ? `<div class="chip changed"><div class="k">Arrival</div><div class="v">Diverted${f.continued_by && f.arr_delay != null ? ` · ${esc(dur(f.arr_delay * 60))} late into ${esc(f.final_ap || f.arr)}` : ""}</div></div>` : ""}
-          ${f.arr_delay != null && !f.diverted_to ? `<div class="chip ${f.arr_delay >= 15 ? "changed" : ""}"><div class="k">Arrival</div><div class="v">${f.arr_delay >= 1 ? Math.round(f.arr_delay) + " min late" : f.arr_delay <= -1 ? Math.round(-f.arr_delay) + " min early" : "on time"}</div></div>` : ""}
-        </div>
-      </div>
-      <div class="card"><div class="kv">
-        <div class="k">Distance</div><div>${nm(f.distance_nm)} nm</div>
-        <div class="k">In the air</div><div>${f.air_min ? dur(f.air_min * 60) : "—"}</div>
-        ${f.aircraft ? `<div class="k">Aircraft</div><div>${esc(f.aircraft)}</div>` : ""}
-        ${f.tail ? `<div class="k">This tail</div><div>${f.tail_count} flight${f.tail_count === 1 ? "" : "s"} with you</div>` : ""}
-        <div class="k">This route</div><div>${rs.flights} flight${rs.flights === 1 ? "" : "s"}${rs.on_time_pct != null ? ` · ${rs.on_time_pct}% on time · ${avgArr(rs.avg_arr_delay)}` : ""}</div>
-        ${f.route ? `<div class="k">Filed route</div><div class="mono small">${esc(f.route)}</div>` : ""}
-        <div class="k">Source</div><div>${f.source === "flighty" ? "Flighty import" : "Tracked here"}${f.has_track ? " · flown track saved" : ""}</div>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">${!f.has_track && bfToken(f) ? `<button class="btn" id="h-bf">Copy for track backfill</button>` : ""}<button class="btn" id="h-del">Delete from History</button></div>
-      ${!f.has_track && bfToken(f) ? `<p class="small faint" style="margin:8px 0 0">No flown track yet. Copy, then in GitHub run Backfill tracks with this pasted in the flights box, and import its tracks download here.</p>` : ""}</div>`;
-    drawMap(document.getElementById("hist-map"), { dep_ap: f.dep_ap || {}, arr_ap: f.arr_ap || {}, flight: { track: f.track || [], waypoints: [], times: {} }, phase: "arrived", inbound: null, chain: [], live: null, display: f.display },
+      <div class="mapbg" id="hist-map"></div>
+      <div class="sheet-gap d"></div>
+      <section class="sheet detail">
+        ${sheetHead(`${esc(cityOf(P.dep_ap, f.dep))} to ${esc(cityOf(P.arr_ap, P.arr))}`,
+          `${esc(flno(f))} • ${esc(fmt((t.out && (t.out.a || t.out.s)), f.dep_tz, { weekday: "short", day: "numeric", month: "short", year: "numeric" }).toUpperCase())}`, "#/history", alBadge(airlineCode(f), "lg"))}
+        <div class="sbanner ${cls}"><div class="sb-h">${esc(head)}</div>${sub ? `<div class="sb-s">${esc(sub)}</div>` : ""}</div>
+        ${f.continued_by ? `<p class="small" style="margin:10px 0 0"><a href="#/hist/${encodeURIComponent(f.continued_by)}" style="color:var(--accent)">${esc(f.continued_by_label || "Continuation")} ›</a></p>` : ""}
+        ${cont ? `<p class="small" style="margin:10px 0 0"><a href="#/hist/${encodeURIComponent(f.continuation_of)}" style="color:var(--accent)">${esc(f.continuation_of_label || "Original flight")} ›</a></p>` : ""}
+        ${endpoint(P, "dep", { past: true })}
+        ${midLine(P)}
+        ${endpoint(P, "arr", { past: true })}
+        ${timetable(P)}
+        ${aircraftF({ ...P, tail_count: f.tail_count })}
+        <div class="gk-card"><div class="kv">
+          <div class="k">Distance</div><div>${nm(f.distance_nm)} nm · ${nm((f.distance_nm || 0) * 1.15078)} mi</div>
+          <div class="k">In the air</div><div>${f.air_min ? fdur(f.air_min * 60) : "—"}</div>
+          <div class="k">This route</div><div>${rs.flights} flight${rs.flights === 1 ? "" : "s"}${rs.on_time_pct != null ? ` · ${rs.on_time_pct}% on time · ${avgArr(rs.avg_arr_delay)}` : ""}</div>
+          ${f.route ? `<div class="k">Filed route</div><div class="mono small">${esc(f.route)}</div>` : ""}
+          <div class="k">Source</div><div>${f.source === "flighty" ? "Flighty import" : "Tracked here"}${f.has_track ? " · flown track saved" : ""}</div>
+        </div></div>
+        <div class="actions">${!f.has_track && bfToken(f) ? `<button class="btn" id="h-bf">Copy for track backfill</button>` : ""}<button class="btn danger" id="h-del">Delete from History</button></div>
+        ${!f.has_track && bfToken(f) ? `<p class="small faint" style="margin:8px 0 0">No flown track yet. Copy, then in GitHub run Backfill tracks with this pasted in the flights box, and import its tracks download here.</p>` : ""}
+      </section>`;
+    drawMap(document.getElementById("hist-map"), { dep_ap: P.dep_ap, arr_ap: P.arr_ap, flight: { track: f.track || [], waypoints: [], times: {} }, phase: "arrived", inbound: null, chain: [], live: null, display: f.display },
       { key: `hist-${f.id}` });
     const hb = document.getElementById("h-bf");
     if (hb) hb.onclick = async () => { hb.textContent = (await copyText(bfToken(f))) ? "Copied" : "Couldn't copy"; };
@@ -1540,60 +1539,761 @@
     };
   }
 
+  // ================================================================================================
+  // Flighty-style UI: full-screen map with a sheet over it, flight rows, the flight page's sheet,
+  // and the Passport globe.
+  // ================================================================================================
+  const IC = {
+    dep: '<svg viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    arr: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 9v8H9" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    bag: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M9 2.5h6a1 1 0 0 1 1 1V6h1.5A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5H17v1.5h-2V20H9v1.5H7V20h-.5A2.5 2.5 0 0 1 4 17.5v-9A2.5 2.5 0 0 1 6.5 6H8V3.5a1 1 0 0 1 1-1zm1 3.5h4V4.5h-4z"/></svg>',
+    x: '<svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
+    plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg>',
+    takeoff: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M2.5 19h19v2h-19zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 1.82 3.16.77 1.33 1.6-.43 5.31-1.42 4.35-1.16L21 11.49c.81-.23 1.28-1.05 1.07-1.85z"/></svg>',
+    land: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M2.5 19h19v2h-19zm7.18-5.73 4.35 1.16 5.31 1.42c.8.21 1.62-.26 1.84-1.06.21-.8-.26-1.62-1.06-1.84l-5.31-1.42-2.76-9.02L10.12 2v8.28L5.15 8.95l-.93-2.32-1.45-.39v5.17l1.6.43 5.31 1.43z"/></svg>',
+    check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    chev: '<svg viewBox="0 0 24 24"><path d="M9 5.5l6.5 6.5L9 18.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    map: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 6.2 8.6 4l6.8 2.4L21 4.2v13.6L15.4 20l-6.8-2.4L3 19.8zm6.2.1v9.9l5.6 2v-9.9z"/></svg>',
+    cloud: '<svg viewBox="0 0 24 24"><path d="M7.2 18.5h9.6a4 4 0 0 0 .6-7.95 5.8 5.8 0 0 0-11.1 1.5A3.25 3.25 0 0 0 7.2 18.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
+    locate: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M20.9 3.1 3.6 10.3c-.8.3-.7 1.5.1 1.7l6.7 1.6 1.6 6.7c.2.8 1.4.9 1.7.1l7.2-17.3z"/></svg>',
+    gear: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.84a.5.5 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.67 8.48a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.61.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.49.42h3.84c.24 0 .45-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>',
+    speed: '<svg viewBox="0 0 24 24"><path d="M4.5 16a8 8 0 1 1 15 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M12 14l4-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    alt: '<svg viewBox="0 0 24 24"><path d="M5 4h14M8 8h8M10 12h4M5 20h14M12 12v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    warn: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 3 1.8 20.5h20.4zm-1 6h2v6h-2zm0 7.5h2v2h-2z"/></svg>',
+  };
+  const WX_IC = {
+    sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="#ffc53d"/><g stroke="#ffc53d" stroke-width="2" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>',
+    moon: '<svg viewBox="0 0 24 24"><path fill="#ffd36b" d="M20 14.6A8.5 8.5 0 0 1 9.4 4a8.5 8.5 0 1 0 10.6 10.6z"/></svg>',
+    cloud: '<svg viewBox="0 0 24 24"><path fill="#cfd6e4" d="M7 19h10.5a4.5 4.5 0 0 0 .7-8.95A6.5 6.5 0 0 0 5.8 11.7 3.7 3.7 0 0 0 7 19z"/></svg>',
+    part: '<svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.6" fill="#ffc53d"/><path fill="#d9dfeb" d="M9.5 20h8.3a3.6 3.6 0 0 0 .5-7.15 5.2 5.2 0 0 0-9.9 1.4A3 3 0 0 0 9.5 20z"/></svg>',
+    partn: '<svg viewBox="0 0 24 24"><path fill="#ffd36b" d="M13 8.2A5 5 0 0 1 6.6 2.4a5 5 0 1 0 6.4 5.8z"/><path fill="#d9dfeb" d="M9.5 20h8.3a3.6 3.6 0 0 0 .5-7.15 5.2 5.2 0 0 0-9.9 1.4A3 3 0 0 0 9.5 20z"/></svg>',
+    rain: '<svg viewBox="0 0 24 24"><path fill="#cfd6e4" d="M7 15h10.5a4.2 4.2 0 0 0 .7-8.35A6 6 0 0 0 5.8 8 3.5 3.5 0 0 0 7 15z"/><path d="M8 18l-1 2.5M12 18l-1 2.5M16 18l-1 2.5" stroke="#5aa9ff" stroke-width="2" stroke-linecap="round"/></svg>',
+    snow: '<svg viewBox="0 0 24 24"><path fill="#cfd6e4" d="M7 15h10.5a4.2 4.2 0 0 0 .7-8.35A6 6 0 0 0 5.8 8 3.5 3.5 0 0 0 7 15z"/><g fill="#fff"><circle cx="8" cy="19" r="1.2"/><circle cx="12" cy="20.5" r="1.2"/><circle cx="16" cy="19" r="1.2"/></g></svg>',
+    storm: '<svg viewBox="0 0 24 24"><path fill="#aeb6c6" d="M7 14h10.5a4.2 4.2 0 0 0 .7-8.35A6 6 0 0 0 5.8 7 3.5 3.5 0 0 0 7 14z"/><path fill="#ffc53d" d="M12.5 13 9 18.5h3l-1 4.5 4.5-6.5h-3l1.5-3.5z"/></svg>',
+    fog: '<svg viewBox="0 0 24 24"><path d="M4 9h16M3 13h18M5 17h14" stroke="#cfd6e4" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  };
+
+  let CLOCK24 = false;
+  try { CLOCK24 = localStorage.getItem("ft-24h") === "1"; } catch {}
+  const pref = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } };
+  const setPref = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+  // "1h 16m", "43m", "3d 4h" (Flighty's way, no padding)
+  function fdur(sec) {
+    if (sec == null || !isFinite(sec)) return "";
+    let m = Math.round(Math.abs(sec) / 60);
+    const d = Math.floor(m / 1440); m -= d * 1440;
+    const h = Math.floor(m / 60); m -= h * 60;
+    return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+  }
+  const ALC = { UAL: "UA", AAL: "AA", DAL: "DL", SWA: "WN", JBU: "B6", ASA: "AS", NKS: "NK", FFT: "F9", SKW: "OO", RPA: "YX",
+    ENY: "MQ", GJS: "G7", ASH: "YV", AWI: "ZW", PDT: "PT", EDV: "9E", JIA: "OH", ACA: "AC", WJA: "WS", BAW: "BA", DLH: "LH",
+    AFR: "AF", KLM: "KL", UPS: "5X", FDX: "FX", AAY: "G4", SCX: "SY", HAL: "HA", VXP: "XP", MXY: "MX" };
+  function airlineCode(x) {
+    const a = (x.airline || "").toUpperCase();
+    if (a.length === 2) return a;
+    if (ALC[a]) return ALC[a];
+    const d = String(x.display || x.ident || "").replace(/\s/g, "").match(/^([A-Z0-9]{2})(?=\d)/i);
+    if (d) return d[1].toUpperCase();
+    const i = String(x.ident || "").match(/^([A-Z]{3})\d/i);
+    return i && ALC[i[1].toUpperCase()] ? ALC[i[1].toUpperCase()] : (a.slice(0, 2) || "✈");
+  }
+  const AL_COLOR = { UA: "#0b2a6f", AA: "#3b4d5f", DL: "#8a1a2c", WN: "#2a49a6", B6: "#0b2f6b", AS: "#0b3a5c", NK: "#8a7b00", F9: "#1d5c3a" };
+  function alColor(code) {
+    if (AL_COLOR[code]) return AL_COLOR[code];
+    let h = 0; for (const c of String(code)) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return `hsl(${h} 42% 30%)`;
+  }
+  const alBadge = (code, cls) => `<span class="al-badge ${cls || ""}" style="background:${alColor(code)}">${esc(code)}</span>`;
+  const flno = (x) => {
+    const s = String(x.display || x.ident || "").trim();
+    const m = s.match(/^([A-Z0-9]{2,3}?)\s*(\d+[A-Z]?)$/i);
+    return m ? `${m[1].toUpperCase()} ${m[2]}` : s;
+  };
+  function cityOf(ap, code) {
+    ap = ap || {};
+    if (ap.city) return ap.city;
+    const n = String(ap.name || "").replace(/\b(International|Intl\.?|Regional|Municipal|Airport|Field|Int'l)\b/gi, "").replace(/\s+/g, " ").trim();
+    return n || code || ap.iata || "";
+  }
+  const apShort = (ap, code) => {
+    const n = (ap && ap.name) || "";
+    return n ? n.replace(/International/i, "Intl.").replace(/\s*Airport$/i, "").trim() : cityOf(ap, code);
+  };
+  function dayNum(ts, tz) {
+    let s;
+    try { s = new Intl.DateTimeFormat("en-CA", { timeZone: tz || undefined, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000)); }
+    catch { s = new Date(ts * 1000).toISOString().slice(0, 10); }
+    const [y, m, d] = s.split("-").map(Number);
+    return Math.round(Date.UTC(y, m - 1, d) / 86400000);
+  }
+  function tzOff(ts, tz) {
+    try {
+      const v = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" }).formatToParts(new Date(ts * 1000))
+        .find((x) => x.type === "timeZoneName").value;
+      const m = v.match(/GMT([+-])(\d+)(?::(\d+))?/);
+      return m ? (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3] || "0", 10)) : 0;
+    } catch { return null; }
+  }
+  // The flight's times, best known: actual, else estimated, else scheduled.
+  function tms(leg) {
+    const f = leg.flight || null, t = (f && f.times) || {};
+    const g = (k) => t[k] || {};
+    const v = (k) => g(k).actual || g(k).estimated || g(k).scheduled || null;
+    return {
+      out: v("out") || leg.sched_out, outS: g("out").scheduled || leg.sched_out, outA: g("out").actual, outKnown: !!(g("out").actual || g("out").estimated),
+      inn: v("in") || leg.sched_in, inS: g("in").scheduled || leg.sched_in, inA: g("in").actual, inKnown: !!(g("in").actual || g("in").estimated),
+      off: v("off"), offA: g("off").actual, on: v("on"), onA: g("on").actual,
+    };
+  }
+  const minsLate = (a, s) => a && s ? Math.round((a - s) / 60) : 0;
+  const tone = (m, known = true) => !known ? "" : m >= 15 ? "red" : m >= 5 ? "amber" : "green";
+  const lateWord = (m, known = true) => !known ? "Scheduled" : Math.abs(m) < 5 ? "On Time" : m > 0 ? `${fdur(m * 60)} Late` : `${fdur(-m * 60)} Early`;
+  const lateLower = (m) => Math.abs(m) < 5 ? "on time" : m > 0 ? `${fdur(m * 60)} late` : `${fdur(-m * 60)} early`;
+  const lateTone = (t) => t === "red" || t === "amber" ? t : "";
+
+  // ---------- the flight list ----------
+  function whenCol(leg) {
+    const T = tms(leg), now = Date.now() / 1000, ph = leg.phase;
+    const ic = (svg, lbl, cls) => `<div class="fw ${cls || ""}"><span class="fw-ic">${svg}</span><span class="fw-l">${lbl}</span></div>`;
+    if (ph === "airborne") return ic(IC.land, "In Air", "air");
+    if (ph === "taxi_out") return ic(IC.takeoff, "Taxiing", "air");
+    if (ph === "landed") return ic(IC.land, "Landed", "air");
+    if (ph === "cancelled") return ic(IC.x, "Cancelled", "bad");
+    if (ph === "diverted") return ic(IC.warn, "Diverted", "bad");
+    if (leg.finished || ph === "arrived") return ic(IC.check, "Arrived", "done");
+    const s = T.out - now;
+    const num = (n, unit) => `<div class="fw"><b>${n}</b><span class="fw-l">${unit}${n === 1 ? "" : "s"}</span></div>`;
+    if (s <= 0) return ic(IC.takeoff, "Boarding");
+    if (s < 3600) return num(Math.max(1, Math.round(s / 60)), "Min");
+    if (s < 18 * 3600) return num(Math.round(s / 3600), "Hour");
+    return num(Math.max(1, dayNum(T.out, leg.dep_ap.tz) - dayNum(now, leg.dep_ap.tz)), "Day");
+  }
+  function rowStatus(leg) {
+    const T = tms(leg), now = Date.now() / 1000, ph = leg.phase;
+    const am = minsLate(T.inn, T.inS), dm = minsLate(T.out, T.outS);
+    if (ph === "airborne") { const at = T.on || T.inn; return [at > now ? `Landing in ${fdur(at - now)}` : "Landing now", lateTone(tone(am, T.inKnown))]; }
+    if (ph === "taxi_out") return ["Taxiing out", lateTone(tone(dm))];
+    if (ph === "landed") return [T.inn > now ? `At gate in ${fdur(T.inn - now)}` : "Landed", lateTone(tone(am))];
+    if (ph === "arrived") return [`Arrived ${lateLower(am)}`, tone(am)];
+    if (ph === "cancelled") return ["Cancelled", "red"];
+    if (ph === "diverted") return [`Diverted to ${leg.arr}`, "red"];
+    if (notFound(leg)) return [leg.status || "Not found", "amber"];
+    if (T.out > now && T.out - now < 12 * 3600) return [`Departs in ${fdur(T.out - now)}`, dm >= 5 ? tone(dm) : ""];
+    return [fmt(T.out, leg.dep_ap.tz, { weekday: "short", month: "short", day: "numeric" }), dm >= 5 ? tone(dm) : "date"];
+  }
+  function row(leg) {
+    const T = tms(leg), tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz, known = !notFound(leg);
+    const [st, stc] = rowStatus(leg);
+    const dt = lateTone(tone(minsLate(T.out, T.outS), T.outKnown)), at = lateTone(tone(minsLate(T.inn, T.inS), T.inKnown));
+    const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + kindTag(leg) + ((leg.source || "").includes("Gemini") ? '<span class="tag gem">GEMINI</span>' : "");
+    const warn = (leg.problems || []).filter((p) => !p.nas)[0];
+    return `<a class="frow ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
+      ${whenCol(leg)}
+      <div class="fr-main">
+        <div class="fr-top">${alBadge(airlineCode(leg))}<span class="fr-no">${esc(flno(leg))}</span>${tags}<span class="fr-st ${stc}">${esc(st)}</span></div>
+        <div class="fr-cities">${esc(cityOf(leg.dep_ap, leg.dep))} to ${esc(cityOf(leg.arr_ap, leg.arr))}</div>
+        <div class="fr-times">
+          <span class="ft"><i class="ti ${dt}">${IC.dep}</i>${esc(leg.dep || "···")} <b class="${dt}">${known ? hm(T.out, tzA) : "—"}</b></span>
+          <span class="ft"><i class="ti ${at}">${IC.arr}</i>${esc(leg.arr || "···")} <b class="${at}">${known ? hm(T.inn, tzB) : "—"}</b></span>
+        </div>
+        ${warn && !leg.finished ? `<div class="fr-warn ${esc(warn.level)}">${esc(warn.text)}</div>` : ""}
+      </div></a>`;
+  }
+  // "1h 12m at FLL" between two legs that connect
+  function layover(a, b) {
+    if (!a || !b || !a.arr || a.arr !== b.dep || a.extra || b.extra) return "";
+    const gap = tms(b).out - tms(a).inn;
+    if (!(gap > 0 && gap < 14 * 3600)) return "";
+    const tight = gap < ((STATE.settings || {}).min_turn_minutes || 30) * 60;
+    return `<div class="layover ${tight ? "tight" : ""}"><b>${fdur(gap)}</b> at ${esc(b.dep)}</div>`;
+  }
+  function avatar() {
+    const m = String(STATE.notify_target || "").match(/mobile_app_([a-z])/i);
+    return `<a class="round avatar" href="#/tools" aria-label="Settings">${m ? esc(m[1].toUpperCase()) : IC.gear}</a>`;
+  }
+
+  // ---------- maps: satellite, radar, night ----------
+  const ESRI_IMG = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+  const ESRI_LBL = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
+  const mapStyle = () => pref("ft-mapstyle", "satellite");
+  const radarOn = () => pref("ft-radar", "0") === "1";
+  function pane(map, name, z) {
+    if (!map.getPane(name)) { const p = map.createPane(name); p.style.zIndex = z; p.style.pointerEvents = "none"; }
+    return name;
+  }
+  let RADAR = null;
+  async function setRadar(map, on) {
+    if (map._ftRadar) { map.removeLayer(map._ftRadar); map._ftRadar = null; }
+    if (!on) return;
+    try {
+      if (!RADAR || Date.now() - RADAR.at > 300000) {
+        const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
+        const fr = d.radar.past[d.radar.past.length - 1];
+        RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
+      }
+      if (map._ftRadar) map.removeLayer(map._ftRadar);
+      map._ftRadar = L.tileLayer(RADAR.url, { opacity: 0.6, maxNativeZoom: 7, maxZoom: 20, pane: pane(map, "radar", 380), attribution: "Radar &copy; RainViewer" }).addTo(map);
+    } catch {}
+  }
+  const allLeaflet = () => Object.values(MAPS).map((m) => m.map).filter(Boolean);
+  function addStack(map) {
+    const Stack = L.Control.extend({
+      options: { position: "topright" },
+      onAdd() {
+        const d = L.DomUtil.create("div", "map-stack");
+        d.innerHTML = `<button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button>`;
+        L.DomEvent.disableClickPropagation(d);
+        d.querySelector('[data-a="style"]').onclick = () => {
+          setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite");
+          for (const m of allLeaflet()) addTiles(m, true);
+        };
+        d.querySelector('[data-a="radar"]').onclick = () => {
+          const on = !radarOn();
+          setPref("ft-radar", on ? "1" : "0");
+          document.querySelectorAll('.map-stack [data-a="radar"]').forEach((b) => b.classList.toggle("on", on));
+          for (const m of allLeaflet()) setRadar(m, on);
+        };
+        return d;
+      },
+    });
+    map.addControl(new Stack());
+    if (radarOn()) setRadar(map, true);
+  }
+  // Where the sun is overhead (and the numbers the night-side outline needs).
+  function subsolar(date) {
+    const rad = Math.PI / 180, n = date.getTime() / 86400000 + 2440587.5 - 2451545.0;
+    const Lm = (280.46 + 0.9856474 * n) % 360, g = ((357.528 + 0.9856003 * n) % 360) * rad;
+    const lam = (Lm + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * rad, eps = (23.4393 - 0.0000004 * n) * rad;
+    const alpha = Math.atan2(Math.cos(eps) * Math.sin(lam), Math.cos(lam)) / rad;
+    const delta = Math.asin(Math.sin(eps) * Math.sin(lam)) / rad;
+    const gmst = ((18.697374558 + 24.06570982441908 * n) % 24 + 24) % 24;
+    const lon = ((alpha - gmst * 15) % 360 + 540) % 360 - 180;
+    return { lat: delta, lon, alpha, delta, gmst };
+  }
+  function nightPoly(date) {
+    const s = subsolar(date), rad = Math.PI / 180, pts = [];
+    for (let lng = -540; lng <= 540; lng += 2) {
+      const ha = (s.gmst * 15 + lng - s.alpha) * rad;
+      pts.push([Math.atan(-Math.cos(ha) / Math.tan(s.delta * rad)) / rad, lng]);
+    }
+    const pole = s.delta < 0 ? 90 : -90;
+    return [[pole, -540], ...pts, [pole, 540]];
+  }
+  function addNight(entry) {
+    const map = entry.map;
+    if (entry.night) map.removeLayer(entry.night);
+    entry.night = L.polygon(nightPoly(new Date()), { stroke: false, fillColor: "#020615", fillOpacity: 0.42, interactive: false, pane: pane(map, "night", 360) }).addTo(map);
+  }
+  const planeBadge = (pos, hdg, title) => L.marker(pos, { title, zIndexOffset: 1000, icon: L.divIcon({ className: "pbadge-wrap", iconSize: [34, 34], iconAnchor: [17, 17],
+    html: `<div class="pbadge"><div style="transform:rotate(${hdg || 0}deg)">${PLANE}</div></div>` }) });
+  // Padding that keeps a full-screen map's routes in the part the sheet doesn't cover.
+  function fitOpts(el, maxZoom) {
+    if (el && el.classList && el.classList.contains("mapbg")) {
+      const H = window.innerHeight, g = document.querySelector(".sheet-gap");
+      const gap = g ? g.getBoundingClientRect().height : H * 0.45;
+      return { paddingTopLeft: [40, 70], paddingBottomRight: [150, Math.max(40, Math.min(H - 160, H - gap + 30))], maxZoom };
+    }
+    return { padding: [28, 28], maxZoom };
+  }
+
+  // My Flights map: every upcoming route as an arc, airports as dots, airplanes in the air.
+  function paintHome(entry, data, fit) {
+    const { layer, map } = entry;
+    entry.home = data;
+    entry.leg = data.focus || null;
+    layer.clearLayers();
+    addNight(entry);
+    const add = (x) => x.addTo(layer);
+    const route = css("--route");
+    const bounds = [], seen = new Set(), aps = new Map();
+    for (const l of data.legs) {
+      const A = ll(l.dep_ap), B = ll(l.arr_ap);
+      if (!A || !B) continue;
+      const k = [l.dep, l.arr].sort().join("-");
+      if (!seen.has(k)) { seen.add(k); add(L.polyline(gcPoints(A, B), { color: route, weight: 2.6, opacity: 0.9, interactive: false })); }
+      aps.set(l.dep, A); aps.set(l.arr, B);
+      bounds.push(A, B);
+    }
+    for (const p of aps.values()) add(L.circleMarker(p, { radius: 5, color: "#fff", weight: 2, fillColor: route, fillOpacity: 1, interactive: false }));
+    entry.ownMarker = null;
+    const f = data.focus;
+    for (const l of data.legs) {
+      if (!["airborne", "taxi_out"].includes(l.phase)) continue;
+      if (f && f.id === l.id) continue;
+      const p = l.flight && l.flight.last_position, B = ll(l.arr_ap);
+      if (p && p[0] != null) add(planeBadge([p[0], p[1]], B ? bearing([p[0], p[1]], B) : 0, l.display));
+    }
+    if (f && ["airborne", "taxi_out", "landed"].includes(f.phase)) {
+      const track = ((f.flight || {}).track || []).filter((p) => p[0] != null);
+      if (track.length > 1) {
+        const pts = smooth(track.map((p) => [p[0], p[1]]));
+        add(L.polyline(pts, { color: "#04122e", weight: 7, opacity: 0.45, interactive: false }));
+        add(L.polyline(pts, { color: route, weight: 4, opacity: 1, interactive: false }));
+      }
+      let pos = null, hdg = 0;
+      if (f.live) { pos = newestPos(f.live, track); hdg = headingOf(f.live, track); }
+      else if (track.length) { pos = track[track.length - 1]; hdg = headingOf(null, track); }
+      if (pos) { entry.ownMarker = add(planeBadge([pos[0], pos[1]], hdg, f.display)); entry.ownHdg = hdg; }
+    }
+    entry.bounds = bounds;
+    if (fit) entry.center();
+  }
+
+  // ---------- the flight page ----------
+  function telem(lv) {
+    if (!lv || lv.gs_kt == null) return "";
+    return `<span class="te">${IC.speed}<b>${Math.round(lv.gs_kt * 1.15078).toLocaleString()}</b><small>MPH</small></span>
+      <span class="te">${IC.alt}<b>${lv.alt_ft != null ? Math.round(lv.alt_ft).toLocaleString() : "—"}</b><small>FT</small></span>`;
+  }
+  function sheetHead(title, sub, back, badge) {
+    return `<div class="d-head">${badge || ""}<div class="d-title">${sub ? `<div class="d-sub">${sub}</div>` : ""}<div class="d-cities">${title}</div></div>
+      <a class="back xbtn" href="${back}" aria-label="Close">${IC.x}</a></div>`;
+  }
+  // The colored line under the header: what's happening now, in Flighty's words.
+  function statusBanner(leg) {
+    const T = tms(leg), now = Date.now() / 1000, ph = leg.phase;
+    const am = minsLate(T.inn, T.inS), dm = minsLate(T.out, T.outS);
+    let head = "", sub = "", cls = "";
+    if (ph === "airborne") {
+      const at = T.on || T.inn;
+      head = at > now ? `Landing in ${fdur(at - now)}` : "Landing now";
+      sub = `Arrives at gate ${lateLower(am)}.`; cls = tone(am, T.inKnown);
+    } else if (ph === "taxi_out") {
+      head = "Taxiing to the runway";
+      sub = `Pushed back ${T.outA ? fdur(now - T.outA) + " ago" : ""}${T.off ? ` · takeoff ~${hm(T.off, leg.dep_ap.tz)}` : ""}. Arrives ${lateLower(am)}.`;
+      cls = tone(am, T.inKnown);
+    } else if (ph === "landed") {
+      head = T.inn > now ? `At the gate in ${fdur(T.inn - now)}` : "Landed";
+      sub = `Taxiing to the gate · arrives ${lateLower(am)}.`; cls = tone(am);
+    } else if (ph === "arrived") {
+      head = `Arrived ${lateLower(am)}`;
+      sub = T.inA ? `At the gate ${fdur(now - T.inA)} ago.` : ""; cls = tone(am);
+    } else if (ph === "cancelled") { head = "Cancelled"; cls = "red"; }
+    else if (ph === "diverted") { head = `Diverted to ${leg.arr}`; sub = leg.planned_arr ? `Planned to ${leg.planned_arr}.` : ""; cls = "red"; }
+    else if (notFound(leg)) { head = leg.status || "Not found"; sub = leg.note || ""; cls = "amber"; }
+    else {
+      head = T.out > now ? `Departs in ${fdur(T.out - now)}` : "Departing";
+      sub = !T.outKnown ? "Scheduled." : dm >= 5 ? `Departs ${fdur(dm * 60)} late${am >= 5 ? `, arrives ${lateLower(am)}` : ""}.` : `On time${am >= 5 ? `, arrives ${lateLower(am)}` : ""}.`;
+      cls = T.outKnown ? tone(Math.max(dm, am)) : "";
+    }
+    // the FAA's delay trend at an airport you're headed into
+    const trend = (leg.nas || []).find((n) => n.kind === "delay" && (n.airport === leg.arr || (ph === "scheduled" && n.airport === leg.dep)));
+    if (trend) sub += ` ${trend.airport}: ${trend.label}${trend.detail ? ` (${trend.detail})` : ""}.`;
+    return `<div class="sbanner ${cls}"><div class="sb-h">${esc(head)}</div>${sub.trim() ? `<div class="sb-s">${esc(sub.trim())}</div>` : ""}</div>`;
+  }
+  // One end of the flight: airport, big time, how late, gate and bags.
+  function endpoint(leg, side, opts) {
+    opts = opts || {};
+    const f = leg.flight || { times: {} }, dep = side === "dep", now = Date.now() / 1000;
+    const ap = (dep ? leg.dep_ap : leg.arr_ap) || {}, code = dep ? leg.dep : leg.arr;
+    const fa_ = (dep ? f.origin : f.destination) || {};
+    const t = (f.times || {})[dep ? "out" : "in"] || {};
+    const sched = t.scheduled || (dep ? leg.sched_out : leg.sched_in);
+    const shown = t.actual || t.estimated || sched;
+    const known = !!(t.actual || t.estimated);
+    const m = minsLate(shown, sched), tn = tone(m, known);
+    const nf = notFound(leg);
+    let rel = "";
+    if (opts.past) rel = shown ? fmt(shown, ap.tz, { weekday: "short", month: "short", day: "numeric" }) : "";
+    else if (shown) rel = shown > now ? `${dep ? "Departs" : "Arrives"} in ${fdur(shown - now)}` : `${fdur(now - shown)} ago`;
+    const tzs = shown ? tzAbbr(shown, ap.tz) : "";
+    const gate = fa_.gate, term = fa_.terminal;
+    return `<div class="ep">
+      <div class="ep-ap"><i class="ep-ic">${dep ? IC.dep : IC.arr}</i><b>${esc(code || "")}</b><span>•</span>${esc(apShort(ap, code))}</div>
+      <div class="ep-row">
+        <div class="ep-time">
+          <div class="ep-tl"><span class="ep-big ${lateTone(tn)}">${nf ? "—" : hm(shown, ap.tz)}</span>${!nf && sched && Math.abs(m) >= 1 ? `<s>${hm(sched, ap.tz)}</s>` : ""}</div>
+          <div class="ep-sub">${nf ? "Not found" : `<span class="${tn}">${lateWord(m, known)}</span>${rel ? ` • ${esc(rel)}` : ""}${tzs ? ` <span class="ep-tz">${esc(tzs)}</span>` : ""}`}</div>
+        </div>
+        <div class="ep-gates">
+          <div class="ep-badges">${!dep && fa_.baggage ? `<span class="gb">${IC.bag}${esc(fa_.baggage)}</span>` : ""}<span class="gb ${gate ? "" : "none"}">${dep ? IC.dep : IC.arr}${esc(gate || "—")}</span></div>
+          <div class="ep-term">${term ? `Terminal <b>${esc(term)}</b>` : gate ? "" : "Gate not set"}</div>
+        </div>
+      </div></div>`;
+  }
+  function midLine(leg) {
+    const T = tms(leg), f = leg.flight || {}, now = Date.now() / 1000;
+    const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
+    const nm_ = f.distance_nm || (A && B ? kmBetween(A, B) / 1.852 : null);
+    const block = T.inn && T.out ? T.inn - T.out : null;
+    let pct = null;
+    if (leg.phase === "airborne" && T.offA && (T.on || T.inn)) pct = Math.max(0, Math.min(1, (now - T.offA) / ((T.on || T.inn) - T.offA)));
+    else if (["landed", "arrived"].includes(leg.phase)) pct = 1;
+    return `<div class="ep-mid"><span>${IC.clock}${[block ? fdur(block) : "", nm_ ? `${Math.round(nm_ * 1.15078).toLocaleString()} mi` : ""].filter(Boolean).join(" • ")}</span>
+      <i class="ep-line">${pct != null ? `<b style="width:${pct * 100}%"></b><em style="left:${pct * 100}%">${PLANE}</em>` : ""}</i></div>`;
+  }
+  // METAR, in words: 61°F and clear
+  function wxSummary(w) {
+    if (!w || !w.raw) return null;
+    const body = (" " + w.raw + " ").split(" RMK ")[0];
+    const tm = body.match(/\s(M?\d{2})\/(M?\d{2})?\s/);
+    const c = tm ? parseInt(tm[1].replace("M", "-"), 10) : null;
+    const toks = body.trim().split(/\s+/).filter((t) => /^(-|\+|VC)?(MI|PR|BC|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|SQ)*$/.test(t)
+      && /(TS|DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|HZ|SQ)/.test(t));
+    const has = (re) => toks.some((t) => re.test(t));
+    let cond = "clear", kind = "clear";
+    if (has(/TS/)) { cond = "thunderstorms"; kind = "storm"; }
+    else if (has(/SN|SG|PL|IC/)) { cond = has(/^-/) ? "light snow" : "snow"; kind = "snow"; }
+    else if (has(/RA|DZ/)) { cond = has(/DZ/) ? "drizzle" : has(/^-/) ? "light rain" : has(/^\+/) ? "heavy rain" : "rain"; kind = "rain"; }
+    else if (has(/FG/)) { cond = "fog"; kind = "fog"; }
+    else if (has(/BR|HZ|FU/)) { cond = has(/BR/) ? "mist" : "haze"; kind = "fog"; }
+    else if (/\sOVC\d/.test(body)) { cond = "overcast"; kind = "cloud"; }
+    else if (/\sBKN\d/.test(body)) { cond = "mostly cloudy"; kind = "cloud"; }
+    else if (/\sSCT\d/.test(body)) { cond = "partly cloudy"; kind = "part"; }
+    else if (/\sFEW\d/.test(body)) { cond = "few clouds"; kind = "part"; }
+    return { f: c == null ? null : Math.round(c * 9 / 5 + 32), cond, kind };
+  }
+  function wxIcon(kind, tz) {
+    let h = 12;
+    try { h = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" }).format(new Date()), 10); } catch {}
+    const night = h < 6 || h >= 19;
+    if (kind === "clear") return night ? WX_IC.moon : WX_IC.sun;
+    if (kind === "part") return night ? WX_IC.partn : WX_IC.part;
+    return WX_IC[kind] || WX_IC.cloud;
+  }
+  function goodToKnow(leg) {
+    const cards = [];
+    const wxFor = (code, ap) => {
+      const e = Object.entries(leg.wx || {}).find(([c]) => c === code || c === ap.icao || c === ap.iata || c.slice(-3) === code);
+      return e ? e[1] : null;
+    };
+    for (const [code, ap] of [[leg.dep, leg.dep_ap], [leg.arr, leg.arr_ap]]) {
+      const w = wxFor(code, ap || {}), s = wxSummary(w);
+      if (!s) continue;
+      cards.push(`<div class="gk"><span class="gk-ic">${wxIcon(s.kind, (ap || {}).tz)}</span><div class="gk-t"><b>Current ${esc(code)} Weather</b>
+        <span>${s.f != null ? `${s.f}°F and ` : ""}${esc(s.cond)}</span></div>${w.category ? `<span class="cat ${esc(w.category)}">${esc(w.category)}</span>` : ""}</div>`);
+    }
+    // FAA status at each airport
+    const nasBy = {};
+    for (const n of leg.nas || []) (nasBy[n.airport] = nasBy[n.airport] || []).push(n);
+    for (const code of [leg.dep, leg.arr]) {
+      const items = nasBy[code];
+      if (!items || !items.length) continue;
+      const major = items.some((n) => MAJOR.includes(n.kind));
+      cards.push(`<div class="gk gk-nas"><div class="gk-row"><b>${esc(code)} ${IC.chev}</b><span class="${major ? "red" : "amber"}">${major ? esc(items.find((n) => MAJOR.includes(n.kind)).label) : "Minor Issues"}</span></div>
+        ${items.map((n) => `<div class="gk-item"><span class="gk-ic sm">${n.dir === "dep" ? IC.takeoff : IC.land}</span><div class="gk-t"><b>${esc(n.label)}</b><span>${esc([n.detail, n.reason].filter(Boolean).join(" · "))}</span></div></div>`).join("")}</div>`);
+    }
+    if (!Object.keys(nasBy).length && leg.watching) cards.push(`<div class="gk"><span class="gk-ic">${WX_IC.sun.replace(/#ffc53d/g, "#30d158")}</span><div class="gk-t"><b>No FAA delays</b><span>No ground stops, delay programs or closures at ${esc(leg.dep)} or ${esc(leg.arr)}.</span></div></div>`);
+    // timezone change
+    const T = tms(leg);
+    if (T.inn && leg.dep_ap.tz && leg.arr_ap.tz) {
+      const d = tzOff(T.inn, leg.arr_ap.tz), o = tzOff(T.inn, leg.dep_ap.tz);
+      if (d != null && o != null && d !== o) {
+        const h = (d - o) / 60, hs = `${h > 0 ? "+" : "−"}${Math.abs(h)} Hour${Math.abs(h) === 1 ? "" : "s"}`;
+        cards.push(`<div class="gk"><span class="gk-ic tzc">${esc(hs.split(" ")[0])}</span><div class="gk-t"><b>${hs} Timezone Change</b>
+          <span>${hm(T.inn, leg.arr_ap.tz)} arrival is ${hm(T.inn, leg.dep_ap.tz)} ${esc(cityOf(leg.dep_ap, leg.dep))} time</span></div></div>`);
+      }
+    }
+    const rs = leg.route_stats;
+    if (rs && rs.flights) cards.push(`<div class="gk"><span class="gk-ic tzc">${rs.flights}×</span><div class="gk-t"><b>You've flown ${esc(leg.dep)}–${esc(leg.arr)} ${rs.flights} time${rs.flights === 1 ? "" : "s"}</b>
+      <span>${rs.on_time_pct != null ? `${rs.on_time_pct}% on time · ${esc(avgArr(rs.avg_arr_delay))}` : "No delay record yet"}</span></div></div>`);
+    return cards.length ? `<h2 class="gk-h">Good to Know</h2>${cards.join("")}` : "";
+  }
+  // The airplane bringing you in, and the legs before it, as a timeline.
+  function inboundF(leg) {
+    const rot = (leg.rotation || []).length ? leg.rotation : leg.inbound ? [leg.inbound] : [];
+    if (!rot.length) return "";
+    const i0 = rot[0], it = i0.times || {}, tz = leg.dep_ap.tz;
+    const ph = i0.phase || (it.in && it.in.actual ? "arrived" : "scheduled");
+    const inE = best(it, "in"), inS = (it.in || {}).scheduled, am = minsLate(inE, inS);
+    const from = cityOf(i0.origin, (i0.origin || {}).iata);
+    let pill, ptn, line;
+    if (ph === "arrived") { pill = `Arrived ${lateLower(am)}`; ptn = tone(am); line = `The inbound aircraft arrived ${lateLower(am)}.`; }
+    else if (["airborne", "landed", "taxi_out"].includes(ph)) {
+      pill = ph === "taxi_out" ? "Departing" : ph === "landed" ? "Landed" : `En route · ${lateLower(am)}`; ptn = tone(am);
+      line = `Your aircraft is ${ph === "taxi_out" ? "leaving" : "flying in from"} ${esc(from)}${inE ? `, at the gate ~${hm(inE, tz)}` : ""}.`;
+    } else if (ph === "cancelled" || ph === "diverted") { pill = ph === "cancelled" ? "Cancelled" : "Diverted"; ptn = "red"; line = `The inbound flight was ${ph}.`; }
+    else { pill = "Not departed"; ptn = tone(minsLate(best(it, "out"), (it.out || {}).scheduled), !!((it.out || {}).estimated || (it.out || {}).actual)); line = `Your aircraft is due from ${esc(from)}${inE ? ` at ${hm(inE, tz)}` : ""}.`; }
+    const T = tms(leg), dm = minsLate(T.out, T.outS);
+    const me = leg.phase === "scheduled" ? `Departs ${lateLower(dm)}` : `Departed ${lateLower(dm)}`;
+    const turn = leg.turn, minTurn = (STATE.settings || {}).min_turn_minutes || 30;
+    const tcls = turn == null ? "" : turn < 0 ? "bad" : turn < minTurn ? "tight" : "";
+    const landed = !!((it.in || {}).actual);
+    const tpct = landed ? 100 : turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
+    let tl = `<a class="tl-row me" href="#/leg/${leg.id}"><span class="tl-up">${IC.dep}</span><b>This Flight</b><span class="${lateTone(tone(dm, T.outKnown))}">${esc(me)}</span></a>`;
+    rot.slice(0, 3).forEach((r, i) => {
+      const o = r.origin || {}, d = r.destination || {}, rt = r.times || {};
+      const rin = best(rt, "in"), rm = minsLate(rin, (rt.in || {}).scheduled), rk = !!((rt.in || {}).actual || (rt.in || {}).estimated);
+      const sub = r.phase === "arrived" ? `Arrived ${hm(rin, d.tz)}` : ["airborne", "landed"].includes(r.phase) ? `Arrives ${hm(rin, d.tz)}`
+        : r.phase === "cancelled" ? "Cancelled" : `Departs ${hm(best(rt, "out"), o.tz)}`;
+      tl += `<div class="tl-node"><i></i>${esc(d.iata || "")}</div>
+        <a class="tl-row" href="#/aircraft/${leg.id}/${i}"><div><b>${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}</b><span>${esc(r.display_ident || "")} · ${esc(sub)}</span></div>
+          <span class="${tone(rm, rk)}">${r.phase === "cancelled" ? "Cancelled" : lateWord(rm, rk)}</span></a>`;
+    });
+    const last = rot[Math.min(rot.length, 3) - 1];
+    tl += `<div class="tl-node"><i></i>${esc((last.origin || {}).iata || "")}</div>`;
+    if (rot.length > 3) tl += `<a class="tl-more" href="#/aircraft/${leg.id}/3"><span>${rot.length - 3}</span>Show More Flights</a>`;
+    return `<div class="gk-card">
+      <div class="ib-head"><b>Inbound Aircraft</b><span>${esc([i0.tail, i0.aircraft_type].filter(Boolean).join(" · "))}</span></div>
+      <span class="ib-pill ${ptn}">${esc(pill)}</span>
+      <p class="ib-line">${line}</p>
+      ${turn != null && leg.phase === "scheduled" ? `<div class="turnbar ${tcls}"><div class="bar"><span style="width:${tpct}%"></span></div><div class="num">${fdur(turn * 60)} turn</div></div>` : ""}
+      <div class="tl">${tl}</div></div>`;
+  }
+  function timetable(leg) {
+    const f = leg.flight;
+    if (!f || !f.times) return "";
+    const t = f.times, tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
+    const g = (k) => t[k] || {};
+    const trow = (lbl, s, v, k, cls) => `<div class="tt-row"><div class="tt-l">${lbl}</div><div class="tt-c"><span>Scheduled</span><b>${s}</b></div><div class="tt-c"><span>${k || "&nbsp;"}</span><b class="${cls || ""}">${v}</b></div></div>`;
+    const tp = (lbl, k, tz) => {
+      const x = g(k), v = x.actual || x.estimated;
+      return trow(lbl, x.scheduled ? hm(x.scheduled, tz) : "—", v ? hm(v, tz) : "—", x.actual ? "Actual" : x.estimated ? "Estimated" : "",
+        v && x.scheduled ? lateTone(tone(minsLate(v, x.scheduled))) : "");
+    };
+    const td = (lbl, a, b) => {
+      const A = g(a), B = g(b);
+      const S = A.scheduled && B.scheduled ? B.scheduled - A.scheduled : null;
+      const av = A.actual || A.estimated, bv = B.actual || B.estimated;
+      const V = av && bv ? bv - av : null;
+      const kind = A.actual && B.actual ? "Actual" : V != null ? "Estimated" : "";
+      return trow(lbl, S != null && S > 0 ? fdur(S) : "—", V != null && V > 0 ? fdur(V) : "—", kind, S && V ? lateTone(tone(Math.round((V - S) / 60))) : "");
+    };
+    const src = f.time_src || {};
+    return `<div class="gk-card tt">
+      <h3 class="tt-h">Detailed Timetable</h3><div class="tt-s">Scheduled, estimated and actual</div>
+      ${src.in || src.out ? `<div class="tt-src">${IC.clock}Estimates from ${esc(src.in || src.out)}</div>` : ""}
+      <div class="tt-sec">Depart</div>
+      ${tp("Gate Departure", "out", tzA)}${td("Taxi", "out", "off")}${tp("Take Off", "off", tzA)}
+      <div class="tt-sec">In the Air</div>
+      ${td("Flight", "off", "on")}
+      <div class="tt-sec">Arrive</div>
+      ${tp("Land", "on", tzB)}${td("Taxi", "on", "in")}${tp("Gate Arrival", "in", tzB)}
+    </div>`;
+  }
+  // A generic airliner, side on (no airline's livery), tail in the airline's badge color.
+  const planeSide = (tail) => `<svg class="ac-art" viewBox="0 0 400 110" aria-hidden="true">
+    <path d="M150 63 250 65 284 88c3 2 0 5-4 4l-84-21z" fill="#9aa3b3"/>
+    <path d="M318 47 352 8c4-5 14-4 16 2l4 38z" fill="${tail}"/>
+    <path d="M18 64c0-12 16-18 42-18l270-2c20 0 32 2 42 6l16 4c4 2 2 8-4 9L60 72c-26 0-42-2-42-8z" fill="#eef1f5"/>
+    <path d="M340 55 392 40c4-1 5 2 2 4l-34 14z" fill="${tail}"/>
+    <ellipse cx="205" cy="76" rx="27" ry="9" fill="#c4cad5"/><ellipse cx="180" cy="76" rx="4" ry="8" fill="#6b7383"/>
+    <path d="M30 55 44 51l2 5-18 2z" fill="#2a3242"/>
+    <g fill="#3a4354">${Array.from({ length: 26 }, (_, i) => `<rect x="${70 + i * 9.4}" y="51" width="4.2" height="5" rx="1.6"/>`).join("")}</g>
+    <path d="M24 66c40 3 230 1 340-6" stroke="#cdd3dd" stroke-width="1"/></svg>`;
+  function aircraftF(leg) {
+    const f = leg.flight || {}, name = f.aircraft_name || f.aircraft_type;
+    if (!name && !f.tail) return "";
+    return `<div class="gk-card acard"><div class="ac-k">Aircraft</div><div class="ac-name">${esc(name || "Aircraft")}</div>
+      <div class="ac-sub">${esc([f.tail, f.aircraft_name && f.aircraft_type ? f.aircraft_type : "", f.tail_source ? `tail from ${f.tail_source}` : ""].filter(Boolean).join(" · "))}</div>
+      ${planeSide(alColor(airlineCode(leg)))}
+      ${leg.tail_count ? `<div class="ac-sub">You've flown ${esc(f.tail || "")} ${leg.tail_count} time${leg.tail_count === 1 ? "" : "s"} before.</div>` : ""}</div>`;
+  }
+
+  // ---------- Passport ----------
+  const SCRIPTS = {};
+  const loadScript = (src) => SCRIPTS[src] || (SCRIPTS[src] = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = res; s.onerror = () => { delete SCRIPTS[src]; rej(new Error("couldn't load " + src)); };
+    document.head.appendChild(s);
+  }));
+  const GLOBE = { land: null, rot: null, data: null, el: null, cv: null, raf: 0 };
+  async function globeLibs() {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js");
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js");
+    if (!GLOBE.land) {
+      const topo = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json").then((r) => r.json());
+      GLOBE.land = topojson.feature(topo, topo.objects.land);
+    }
+  }
+  function globeData(d) {
+    const A = d.airports || {}, routes = new Map(), aps = new Map();
+    for (const f of d.flights) {
+      if (f.cancelled) continue;
+      const a = A[f.dep], b = A[f.diverted_to || f.arr];
+      if (!a || !b || a.lat == null || b.lat == null) continue;
+      routes.set([f.dep, f.diverted_to || f.arr].sort().join("-"), [a, b]);
+      aps.set(f.dep, a); aps.set(f.diverted_to || f.arr, b);
+    }
+    return { routes: [...routes.values()], airports: [...aps.values()] };
+  }
+  function drawGlobe(el, data) {
+    if (!el) return;
+    let cv = el.querySelector("canvas");
+    if (!cv) { cv = document.createElement("canvas"); el.appendChild(cv); }
+    GLOBE.el = el; GLOBE.cv = cv; GLOBE.data = data;
+    if (!GLOBE.rot) {
+      let x = 0, y = 0, z = 0;
+      for (const a of data.airports) {
+        const la = a.lat * Math.PI / 180, lo = a.lon * Math.PI / 180;
+        x += Math.cos(la) * Math.cos(lo); y += Math.cos(la) * Math.sin(lo); z += Math.sin(la);
+      }
+      const lon = data.airports.length ? Math.atan2(y, x) * 180 / Math.PI : -80;
+      const lat = data.airports.length ? Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI : 30;
+      GLOBE.rot = [-lon, -Math.max(-20, Math.min(40, lat)) + 6];
+    }
+    if (!el._wired) {
+      el._wired = true;
+      let drag = null;
+      el.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, r: [...GLOBE.rot], id: e.pointerId }; try { el.setPointerCapture(e.pointerId); } catch {} });
+      el.addEventListener("pointermove", (e) => {
+        if (!drag || e.pointerId !== drag.id) return;
+        const k = 180 / (Math.PI * (GLOBE.r || 150));
+        GLOBE.rot = [drag.r[0] + (e.clientX - drag.x) * k, Math.max(-75, Math.min(75, drag.r[1] - (e.clientY - drag.y) * k))];
+        if (!GLOBE.raf) GLOBE.raf = requestAnimationFrame(() => { GLOBE.raf = 0; renderGlobe(); });
+      });
+      const end = () => { drag = null; };
+      el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+      window.addEventListener("resize", () => renderGlobe());
+    }
+    renderGlobe();
+  }
+  function renderGlobe() {
+    const el = GLOBE.el, cv = GLOBE.cv;
+    if (!el || !el.isConnected || !window.d3 || !GLOBE.land) return;
+    const W = el.clientWidth, H = el.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + "px"; cv.style.height = H + "px";
+    }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 170; i++) {
+      ctx.globalAlpha = 0.25 + rnd() * 0.65;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(rnd() * W, rnd() * H, 0.3 + rnd() * 0.9, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    const r = GLOBE.r = Math.min(W * 0.46, H * 0.3), cx = W / 2, cy = H * 0.38 + 10;
+    const proj = d3.geoOrthographic().scale(r).translate([cx, cy]).rotate(GLOBE.rot).clipAngle(90).precision(0.4);
+    const path = d3.geoPath(proj, ctx);
+    const glow = ctx.createRadialGradient(cx, cy, r * 0.96, cx, cy, r * 1.14);
+    glow.addColorStop(0, "rgba(110,160,255,.35)"); glow.addColorStop(1, "rgba(110,160,255,0)");
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy, r * 1.14, 0, 2 * Math.PI); ctx.fill();
+    const oc = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
+    oc.addColorStop(0, "#245c8a"); oc.addColorStop(1, "#06172e");
+    ctx.beginPath(); path({ type: "Sphere" }); ctx.fillStyle = oc; ctx.fill();
+    const lg = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+    lg.addColorStop(0, "#7b8a63"); lg.addColorStop(0.45, "#55703f"); lg.addColorStop(1, "#6d6a4a");
+    ctx.beginPath(); path(GLOBE.land); ctx.fillStyle = lg; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.12)"; ctx.lineWidth = 0.6; ctx.stroke();
+    ctx.beginPath(); path(d3.geoGraticule10()); ctx.strokeStyle = "rgba(255,255,255,.05)"; ctx.lineWidth = 0.6; ctx.stroke();
+    const sun = subsolar(new Date());
+    ctx.beginPath(); path(d3.geoCircle().center([sun.lon + 180, -sun.lat]).radius(90)()); ctx.fillStyle = "rgba(2,6,22,.55)"; ctx.fill();
+    ctx.beginPath();
+    for (const [a, b] of GLOBE.data.routes) path({ type: "LineString", coordinates: [[a.lon, a.lat], [b.lon, b.lat]] });
+    ctx.strokeStyle = "rgba(232,238,255,.9)"; ctx.lineWidth = 1.15; ctx.stroke();
+    const center = [-GLOBE.rot[0], -GLOBE.rot[1]];
+    for (const a of GLOBE.data.airports) {
+      if (d3.geoDistance([a.lon, a.lat], center) > Math.PI / 2 - 0.02) continue;
+      const p = proj([a.lon, a.lat]);
+      ctx.beginPath(); ctx.arc(p[0], p[1], 3.2, 0, 2 * Math.PI);
+      ctx.fillStyle = "#d8e6ff"; ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = "#4c8dff"; ctx.stroke();
+    }
+    const rim = ctx.createRadialGradient(cx, cy, r * 0.72, cx, cy, r);
+    rim.addColorStop(0, "rgba(0,0,0,0)"); rim.addColorStop(1, "rgba(0,0,10,.38)");
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI); ctx.fillStyle = rim; ctx.fill();
+  }
+  let PASS_SORT = (() => { try { return JSON.parse(localStorage.getItem("ft-pass-sort")) || { k: "date", dir: -1 }; } catch { return { k: "date", dir: -1 }; } })();
+  let PASS_ALL = false;
+  function passList(d) {
+    const A = d.airports || {};
+    const city = (c) => cityOf(A[c] || {}, c);
+    const keyF = { date: (f) => fdep(f), from: (f) => f.dep || "", to: (f) => f.diverted_to || f.arr || "",
+      airline: (f) => airlineCode(f), aircraft: (f) => f.aircraft || f.type || "~" }[PASS_SORT.k] || fdep;
+    const dir = PASS_SORT.dir || -1;
+    const fl = [...d.flights].sort((a, b) => {
+      const x = keyF(a), y = keyF(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * (PASS_SORT.k === "date" ? dir : -dir) || fdep(b) - fdep(a);
+    });
+    const groupOf = (f) => PASS_SORT.k === "date" ? (f.date || "").slice(0, 4) || "Undated" : String(keyF(f) === "~" ? "Unknown" : keyF(f));
+    const counts = {};
+    for (const f of fl) counts[groupOf(f)] = (counts[groupOf(f)] || 0) + 1;
+    const chips = [["date", "Date"], ["from", "From"], ["to", "To"], ["airline", "Airline"], ["aircraft", "Aircraft"]]
+      .map(([k, l]) => `<button class="psort ${PASS_SORT.k === k ? "on" : ""}" data-psort="${k}">${l}${PASS_SORT.k === k ? (dir < 0 ? " ↓" : " ↑") : ""}</button>`).join("");
+    let out = `<div class="psorts">${chips}</div>`, grp = null;
+    const lim = PASS_ALL ? fl.length : Math.min(fl.length, 300);
+    for (const f of fl.slice(0, lim)) {
+      const g = groupOf(f);
+      if (g !== grp) { out += `<div class="pgroup"><b>${esc(g)}</b><span>${counts[g]} FLIGHT${counts[g] === 1 ? "" : "S"}</span></div>`; grp = g; }
+      const to = f.diverted_to || f.arr;
+      out += `<a class="prow" href="#/hist/${encodeURIComponent(f.id)}">${alBadge(airlineCode(f))}
+        <div class="pr-main"><div class="pr-top">${esc(flno(f))} <span>${esc(f.dep)} → ${esc(to)}</span>${f.diverted_to ? ' <em class="red">DIVERTED</em>' : ""}${f.cancelled ? ' <em class="red">CANCELLED</em>' : ""}</div>
+        <div class="pr-cities">${esc(city(f.dep))} to ${esc(city(to))}</div></div>
+        <div class="pr-date">${esc(fmt(fdep(f), f.dep_tz, { month: "short", day: "numeric", year: "numeric" }))}</div></a>`;
+    }
+    if (lim < fl.length) out += `<button class="btn wide" data-pall="1">Show all ${fl.length} flights</button>`;
+    return out;
+  }
+  function passCards(d, year) {
+    const st = d.stats, fl = d.flights.filter((f) => !f.cancelled);
+    const y = year ? `/${year}` : "";
+    const mi = Math.round((st.distance_nm || 0) * 1.15078);
+    const hrs = st.block_hours || st.air_hours || 0;
+    const longHaul = fl.filter((f) => (f.distance_nm || 0) * 1.15078 >= 3000).length;
+    const airlines = new Set(fl.map((f) => airlineCode(f)).filter(Boolean)).size;
+    const late = fl.filter((f) => f.arr_delay != null && f.arr_delay >= 15);
+    const lost = late.reduce((a, f) => a + f.arr_delay, 0);
+    const ac = (st.top_aircraft || [])[0];
+    return `<a class="pcard pass" href="#/history/stats${y}">
+        <div class="pc-t">${year ? esc(year) : "All-Time"} Passport</div>
+        <div class="pc-st">PILOT LOGBOOK · ${esc(String(st.flights))} FLIGHTS</div>
+        <div class="pc-grid">
+          <div><span>Flights</span><b>${st.flights.toLocaleString()}</b><small>${longHaul ? `${longHaul} Long Haul` : `${st.routes} routes`}</small></div>
+          <div><span>Distance</span><b>${mi.toLocaleString()} mi</b><small>${((st.distance_nm || 0) / 21639).toFixed(1)}x around the world</small></div>
+          <div><span>Flight Time</span><b>${Math.floor(hrs / 24)}d ${Math.round(hrs % 24)}h</b><small>gate to gate</small></div>
+          <div class="pc-pair"><div><span>Airports</span><b>${st.airports}</b></div><div><span>Airlines</span><b>${airlines}</b></div></div>
+        </div>
+        <div class="pc-btn">All Flight Stats ${IC.chev}</div></a>
+      ${late.length ? `<a class="pcard delay" href="#/history/find?${new URLSearchParams({ ...(year ? { year } : {}), st: "late15", sort: "late" })}">
+        <div class="pd-n">${Math.round(lost / 60).toLocaleString()}</div><div class="pd-t">hours lost from delays</div>
+        <div class="pd-s">Delayed flights averaged ${fdur(lost / late.length * 60)} late</div>
+        <div class="pc-btn">All Delay Stats ${IC.chev}</div></a>` : ""}
+      ${ac ? `<a class="pcard acft" href="#/history/find?${new URLSearchParams({ ...(year ? { year } : {}), ac: ac[0] })}">
+        <div class="pa-k">Most flown aircraft</div><div class="pa-n">${esc(ac[0])}</div><div class="pa-c">${ac[1]} flights</div>
+        ${planeSide("#2b4aa0")}<div class="pc-btn">All Aircraft Stats ${IC.chev}</div></a>` : ""}`;
+  }
+
   // ---------- views ----------
   function homeView() {
     const sortKey = (l) => (l.flight && best(l.flight.times, "out")) || l.sched_out;
     const all = [...STATE.legs].sort((a, b) => sortKey(a) - sortKey(b));
     const live = all.filter((l) => !l.finished);
-    const next = live[0];
+    const moving = (l) => ["taxi_out", "airborne", "landed"].includes(l.phase);
+    const focus = live.find(moving) || live[0];
     // NAS for airports on any flight in the watch window; programs go up top, minor delays below.
     const watching = live.filter((l) => l.watching);
     const myAirports = new Set(watching.flatMap((l) => [l.dep, l.arr]).filter(Boolean));
-    let h = nasTop(watching);
+    const nowS = Date.now() / 1000;
+    let list = "";
+    live.slice(0, 40).forEach((l, i) => { if (i) list += layover(live[i - 1], l); list += row(l); });
+    let h = `<div class="mapbg" id="home-map"></div><div class="sheet-gap"></div><section class="sheet">
+      <div class="sheet-head"><h1>My Flights<a class="hstat" href="#/tools" aria-label="Live updates and Drive backup"><i class="ld"></i>${IC.cloud}</a></h1>
+        <div class="sh-btns"><a class="round" href="#/add" aria-label="Add a flight">${IC.plus}</a>${avatar()}</div></div>`;
+    h += nasTop(watching);
     if (STATE.schedule && STATE.schedule.error) h += `<div class="banner critical"><span class="dot critical"></span><div><b>Schedule</b><br>${esc(STATE.schedule.error)}</div></div>`;
-    if (next) {
-      h += problemBanners(next);
-      h += hero(next);
-      h += inboundCard(next);
-      if (next.note) h += `<div class="small muted" style="margin:-4px 4px 10px">${esc(next.note)}</div>`;
-      if (next.error) h += `<div class="err" style="margin:-4px 4px 10px">${esc(next.error)}</div>`;
-    } else {
-      h += `<div class="card empty"><b>No upcoming flights</b>Nothing coming up in your calendar${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to add a flight.</div>`;
-    }
-    const rest = live.slice(1);
-    h += `<h2 class="section"><span>Upcoming</span><a class="small" style="color:var(--accent)" href="#/add">+ Add flight</a></h2>`;
-    if (rest.length) {
-      let lastDay = "";
-      for (const l of rest.slice(0, 40)) {
-        const d = dayLabel(sortKey(l), l.dep_ap.tz);
-        if (d !== lastDay) { h += `<div class="day">${esc(relDay(sortKey(l), l.dep_ap.tz) || d)}</div>`; lastDay = d; }
-        h += row(l);
-      }
-    } else {
-      h += `<div class="card small muted">Nothing else scheduled.</div>`;
-    }
+    h += live.length ? `<div class="flist">${list}</div>`
+      : `<div class="card empty"><b>No upcoming flights</b>Nothing coming up in your calendar${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to add a flight.</div>`;
     if (myAirports.size) {
       const minor = nasMinor(watching), major = nasGroups(watching).length - minor.length;  // major = shown up top
-      h += `<h2 class="section"><span>NAS · ${esc([...myAirports].join(" · "))}</span><span class="small">${STATE.nas_at ? ago(STATE.nas_at) : ""}</span></h2>`;
+      h += `<h2 class="section"><span>FAA Status</span><span class="small" style="color:var(--muted)">${esc([...myAirports].join(" · "))}${STATE.nas_at ? ` · ${ago(STATE.nas_at)}` : ""}</span></h2>`;
       h += minor.length ? nasCard(minor) : `<div class="card small muted">${major ? "Shown at the top." : "No ground stops, delay programs or closures at your airports."}${STATE.nas_error ? `<div class="err">${esc(STATE.nas_error)}</div>` : ""}</div>`;
     }
-    // Short feeds here; everything older lives in History.
-    const nowS = Date.now() / 1000;
+    // Short feeds here; everything older lives in Passport and Alerts.
     const done = all.filter((l) => l.finished && nowS - (best(l.flight && l.flight.times, "in") || l.sched_in) < 18 * 3600)
       .sort((a, b) => sortKey(b) - sortKey(a)).slice(0, 3);
-    if (done.length) h += `<h2 class="section"><span>Recent</span><a class="small" style="color:var(--accent)" href="#/history">History ›</a></h2>` + done.map(row).join("");
+    if (done.length) h += `<h2 class="section"><span>Recent</span><a href="#/history">Passport ›</a></h2><div class="flist">${done.map(row).join("")}</div>`;
     const fresh = STATE.alerts.filter((a) => nowS - a.at < 12 * 3600).slice(0, 5);
-    if (fresh.length) h += `<h2 class="section"><span>Latest alerts</span><a class="small" style="color:var(--accent)" href="#/history/alerts">All ›</a></h2>` + alertsCard(fresh);
-    h += `<p class="small faint" style="margin:22px 4px">v${esc(STATE.version)} · alerts go to ${esc(STATE.notify_target)} · watching ${STATE.settings.watch_hours} h before departure${STATE.schedule && STATE.schedule.checked ? ` · schedule read ${ago(STATE.schedule.checked)}` : ""}</p>`;
+    if (fresh.length) h += `<h2 class="section"><span>Latest Alerts</span><a href="#/history/alerts">All ›</a></h2>` + alertsCard(fresh);
+    h += `<p class="small faint" style="margin:22px 4px">v${esc(STATE.version)} · alerts go to ${esc(STATE.notify_target)} · watching ${STATE.settings.watch_hours} h before departure${STATE.schedule && STATE.schedule.checked ? ` · schedule read ${ago(STATE.schedule.checked)}` : ""}</p></section>`;
     destroyMaps();
     $app.innerHTML = h;
-    const hm_ = document.getElementById("hero-map");
-    if (hm_ && next) {
-      const opt = { interactive: false, key: `hero-${next.id}` };
-      // draw straight away from the last full copy so the map never shows blank, then update
-      if (LEGS[next.id]) drawMap(hm_, withChain(LEGS[next.id]), opt);
-      api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), withChain(full), opt); liveWatch(full, opt.key); })
-        .catch(() => { if (!LEGS[next.id]) drawMap(hm_, next, opt); });
+    // the map: every route in the next two weeks, and the airplane you're on (or about to be)
+    const onMap = live.filter((l) => sortKey(l) - nowS < 14 * 86400).slice(0, 16);
+    const opt = { key: "home", paint: paintHome, controls: "basic" };
+    const data = (full) => ({ legs: onMap.length ? onMap : live.slice(0, 1), focus: full ? withChain(full) : null });
+    drawMap(document.getElementById("home-map"), data(focus && LEGS[focus.id]), opt);
+    if (focus && moving(focus)) {
+      api(`api/leg/${focus.id}`).then((full) => {
+        LEGS[focus.id] = full;
+        const el = document.getElementById("home-map");
+        if (el) { drawMap(el, data(full), opt); liveWatch(full, "home"); }
+      }).catch(() => {});
     }
   }
 
@@ -1605,13 +2305,13 @@
     const legs = (STATE.legs || []).filter((l) => (l.nas || []).some((n) => n.key === key));
     const g = nasGroups(legs).find((x) => x.n.key === key);
     destroyMaps();
-    if (!g) { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Program ended</b>It's no longer in the FAA's list.</div>`; return; }
+    if (!g) { $app.innerHTML = `<div class="mapbg" id="nas-map"></div><div class="sheet-gap"></div><section class="sheet">${sheetHead("Program ended", "FAA", "#/")}<div class="card empty"><b>Program ended</b>It's no longer in the FAA's list.</div></section>`; return; }
     const n = g.n;
-    $app.innerHTML = `<a class="back" href="#/">‹ Flights</a>
-      <div class="detail-map" id="nas-map"></div>
-      <p class="small faint" id="nas-map-note" style="margin:-6px 4px 10px" hidden></p>
+    $app.innerHTML = `<div class="mapbg" id="nas-map"></div><div class="sheet-gap d"></div>
+      <section class="sheet">${sheetHead(esc(`${n.airport} ${n.label}`), "FAA", "#/")}
+      <p class="small faint" id="nas-map-note" style="margin:6px 4px 10px" hidden></p>
       ${nasAlert(g).replace("tappable", "")}
-      <div class="card small muted">Shaded: the en-route centers whose departures this ${n.kind === "gs" ? "ground stop" : "program"} holds. ${(n.scope || []).filter((c) => !/^Z[A-Z]{2}$/.test(c)).length ? `Also: ${esc(n.scope.filter((c) => !/^Z[A-Z]{2}$/.test(c)).join(" "))}.` : ""}</div>`;
+      <div class="card small muted">Shaded: the en-route centers whose departures this ${n.kind === "gs" ? "ground stop" : "program"} holds. ${(n.scope || []).filter((c) => !/^Z[A-Z]{2}$/.test(c)).length ? `Also: ${esc(n.scope.filter((c) => !/^Z[A-Z]{2}$/.test(c)).join(" "))}.` : ""}</div></section>`;
     let el = document.getElementById("nas-map");
     if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
     // a live update re-draws this page: keep the map you're looking at instead of starting over
@@ -1624,13 +2324,14 @@
     }
     if (have) { try { have.map.remove(); } catch {} delete MAPS.nas; }
     if (el.classList.contains("leaflet-container") || el._leaflet_id) {
-      const f = document.createElement("div"); f.id = el.id; f.className = "detail-map"; el.replaceWith(f); el = f;
+      const f = document.createElement("div"); f.id = el.id; f.className = "mapbg"; el.replaceWith(f); el = f;
     }
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = true;
     // canvas: thousands of boundary points draw without stalling the page
-    const map = L.map(el, { renderer: L.canvas({ padding: 0.2 }), zoomControl: true, attributionControl: true, worldCopyJump: true });
-    if (map.attributionControl) map.attributionControl.setPrefix("");
+    const map = L.map(el, { renderer: L.canvas({ padding: 0.2 }), zoomControl: false, attributionControl: false, worldCopyJump: true });
+    map.addControl(L.control.attribution({ position: "topleft", prefix: "" }));
     addTiles(map, dark);
+    addStack(map);
     MAPS.nas = { el, map, key, layer: L.layerGroup().addTo(map), bounds: [], interactive: true };
     usedMaps.add("nas");
     oneFingerZoom(map, el);
@@ -1655,7 +2356,7 @@
       L.marker(p, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${c}">${esc(i.from)} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}</span>`, iconSize: null, iconAnchor: [-8, 8] }) }).addTo(map);
       bounds.push(p);
     }
-    const fit = () => bounds.length ? map.fitBounds(bounds, { padding: [24, 24], maxZoom: 6 }) : map.setView([39.5, -98.35], 3);
+    const fit = () => bounds.length ? map.fitBounds(bounds, fitOpts(el, 6)) : map.setView([39.5, -98.35], 3);
     fit();
     try { ARTCC = ARTCC || await api("api/artcc"); } catch { ARTCC = null; }
     if (!ARTCC || !MAPS.nas || MAPS.nas.map !== map) {
@@ -1756,56 +2457,49 @@
       ["Calendar", leg.summary],
     ].filter(([, v]) => v);
     destroyMaps();
+    const T0 = tms(leg);
+    const fa_ = leg.fa_id ? `https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}` : leg.ident ? `https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}` : "";
     $app.innerHTML = `
-      <a class="back" href="#/">‹ Flights</a>
-      ${nasTop([leg])}
-      ${problemBanners(leg)}
-      <div class="detail-map" id="detail-map"></div>
-      <div class="card">
-        <div class="hero-top"><div class="flightno">${esc(leg.display || leg.ident || "")}${leg.dh ? '<span class="tag">DH</span>' : ""}</div>${statusPill(leg)}</div>
-        <div class="route">
-          <div class="ap"><div class="code">${esc(leg.dep)}</div><div class="city">${esc(leg.dep_ap.name || "")}</div></div>
-          <div class="mid"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg><span class="dur">${notFound(leg) ? "" : dur(leg.sched_in - leg.sched_out)}</span></div>
-          <div class="ap right"><div class="code">${esc(leg.arr)}</div><div class="city">${esc(leg.arr_ap.name || "")}</div></div>
-        </div>
-        ${progress(leg)}
-        <div class="times">
-          ${timeBlock(f.times.out && f.times.out.actual ? "Departed" : "Departs", f.times.out, notFound(leg) ? "nf" : leg.sched_out, tzA, false, (f.time_src || {}).out)}
-          ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : "Arrives", f.times.in, notFound(leg) ? "nf" : leg.sched_in, tzB, true, (f.time_src || {}).in)}
-        </div>
-        <div class="times sm" ${notFound(leg) ? 'hidden' : ""}>
-          ${timeBlock(f.times.off && f.times.off.actual ? "Took off" : "Takeoff", f.times.off, null, tzA, false, (f.time_src || {}).off,
-            f.swim && f.swim.edct && f.swim.edct.at && !(f.times.off && f.times.off.actual)
-              ? `<div class="sub edct">EDCT <b>${hm(f.swim.edct.at, tzA)}</b>${f.swim.edct.for ? ` · ${esc(f.swim.edct.for)} program` : ""}</div>` : "")}
-          ${timeBlock(f.times.on && f.times.on.actual ? "Landed" : "Landing", f.times.on, null, tzB, true, (f.time_src || {}).on)}
-        </div>
-        ${chips(leg)}
-        ${countdown(leg)}
-      </div>
-      ${inboundCard(leg)}
-      ${leg.route_stats ? `<div class="card small muted">You've flown ${esc(leg.dep)}–${esc(leg.arr)} ${leg.route_stats.flights} time${leg.route_stats.flights === 1 ? "" : "s"}${leg.route_stats.on_time_pct != null ? ` · ${leg.route_stats.on_time_pct}% on time · ${avgArr(leg.route_stats.avg_arr_delay)}` : ""}${leg.tail_count ? ` · ${esc((leg.flight || {}).tail || "")}: ${leg.tail_count} time${leg.tail_count === 1 ? "" : "s"} before` : ""}</div>` : ""}
-      ${wx ? `<h2 class="section">Weather</h2><div class="card">${wx}</div>` : ""}
-      <h2 class="section">Details</h2>
-      <div class="card"><div class="kv">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("")}</div>
-        ${leg.note ? `<p class="small muted">${esc(leg.note)}</p>` : ""}${leg.error ? `<p class="err">${esc(leg.error)}</p>` : ""}
-        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <div class="mapbg" id="detail-map"></div>
+      ${leg.live && leg.phase === "airborne" ? `<div class="telem" id="telem">${telem(leg.live)}</div>` : ""}
+      <div class="sheet-gap d"></div>
+      <section class="sheet detail">
+        ${sheetHead(`${esc(cityOf(leg.dep_ap, leg.dep))} to ${esc(cityOf(leg.arr_ap, leg.arr))}`,
+          `${esc(flno(leg))} • ${esc(fmt(T0.out, tzA, { weekday: "short", day: "numeric", month: "short" }).toUpperCase())}${leg.dh ? " • DH" : ""}${leg.extra ? ` • ${leg.kind === "manual" ? "MANUAL" : "FRIEND"}` : ""}`,
+          "#/", alBadge(airlineCode(leg), "lg"))}
+        ${statusBanner(leg)}
+        ${nasTop([leg])}
+        ${problemBanners(leg)}
+        ${endpoint(leg, "dep")}
+        ${midLine(leg)}
+        ${endpoint(leg, "arr")}
+        ${f.swim && f.swim.edct && f.swim.edct.at && !(f.times.off && f.times.off.actual)
+          ? `<div class="edct-line">EDCT <b>${hm(f.swim.edct.at, tzA)}</b> ${esc(tzAbbr(f.swim.edct.at, tzA))}${f.swim.edct.for ? ` · ${esc(f.swim.edct.for)} program` : ""}</div>` : ""}
+        ${goodToKnow(leg)}
+        ${inboundF(leg)}
+        ${timetable(leg)}
+        ${aircraftF(leg)}
+        <div class="actions">
           ${leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
           ${STATE.aeroapi ? '<button class="btn" id="leg-aero">Check AeroAPI now</button>' : ""}
           ${leg.manual ? `<button class="btn" id="leg-kind">${leg.kind === "manual" ? "Make it a friend's flight" : "It's my flight"}</button><button class="btn" id="leg-remove">Remove</button>` : ""}
-          ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
-        </div></div>
-      ${nasMinor([leg]).length ? `<h2 class="section">Other NAS items</h2>${nasCard(nasMinor([leg]))}` : ""}
-      ${(leg.alerts || []).length ? `<h2 class="section">Alerts for this flight</h2>${alertsCard(leg.alerts)}` : ""}
-      ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
+          ${fa_ ? `<a class="btn" href="${fa_}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
+        </div>
+        ${fold("leg-details", "Flight Details", `<div class="card"><div class="kv">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("")}</div>
+          ${leg.note ? `<p class="small muted">${esc(leg.note)}</p>` : ""}${leg.error ? `<p class="err">${esc(leg.error)}</p>` : ""}</div>`, false)}
+        ${wx ? fold("leg-wx", "METARs", `<div class="card">${wx}</div>`, false) : ""}
+        ${nasMinor([leg]).length ? fold("leg-nas", "Other NAS items", nasCard(nasMinor([leg])), false) : ""}
+        ${(leg.alerts || []).length ? fold("leg-alerts", "Alerts for This Flight", alertsCard(leg.alerts), false) : ""}
+        ${(leg.history || []).length ? fold("leg-log", "Lookup Log", `<div class="card">${leg.history.map((h) => `<div class="hist">
           <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
             ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B|adsb/.test(x) ? "adsb" : ""}">${esc(x)}</span>`).join("")}</div>
           ${(h.seen || []).length ? `<div class="hist-seen">${h.seen.map((x) => `<div><span class="faint">${esc(x.src)}</span> ${x.tail ? `<b>${esc(x.tail)}</b>${x.note ? ` <span class="faint">· ${esc(x.note)}</span>` : ""}` : `<span class="faint">${esc(x.note || "no tail")}</span>`}</div>`).join("")}</div>` : ""}
           ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
             : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
           ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
-        </div>`).join("")}${leg.history_more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${leg.history_more} older</button>` : ""}</div>` : ""}
-      ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
-    `;
+        </div>`).join("")}${leg.history_more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${leg.history_more} older</button>` : ""}</div>`, false) : ""}
+        ${leg.shot ? fold("leg-shot", "Latest Screenshot", `<div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('details').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>`, false) : ""}
+      </section>`;
     drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
     surfaceWatch(leg);
     liveWatch(leg);
@@ -1851,9 +2545,9 @@
     const today = new Date().toISOString().slice(0, 10);
     const earliest = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
     $app.innerHTML = `
-      <a class="back" href="#/">‹ Flights</a>
+      <a class="back" href="#/">‹ My Flights</a>
+      <h1 class="ptitle">Add a Flight</h1>
       <div class="card">
-        <h3 style="margin:0 0 4px">Add a flight</h3>
         <p class="small muted" style="margin:0 0 14px">Flight number with its airline code, and the airports, so a flight number that flies several legs picks the right one. Leave the date blank for the next departure.</p>
         <form id="addform" class="form">
           <div class="seg" role="radiogroup">
@@ -1931,9 +2625,9 @@
       </div>`;
     };
     $app.innerHTML = `
-      <a class="back" href="#/">‹ Flights</a>
+      <a class="back" href="#/tools">‹ Settings</a>
+      <h1 class="ptitle">Notifications</h1>
       <div class="card">
-        <h3 style="margin:0 0 4px">Notifications</h3>
         <p class="small muted" style="margin:0">Every change the tracker can see. For each: on or off, which flights it applies to,
           how close to departure it starts pushing (blank = any time), and whether it's urgent (time-sensitive on iPhone).
           Changes save as you make them. Tracking itself always runs; this only decides what pushes.</p>
@@ -2048,8 +2742,16 @@
         ${x.url ? `<div class="small faint mono" style="word-break:break-all">${esc(x.url)}</div>` : ""}
       </div></div>`;
     $app.innerHTML = `
-      <a class="back" href="#/">‹ Flights</a>
-      <h2 class="section"><span>Tracking</span><span id="s-msg" class="small"></span></h2>
+      <div class="ptitle-row"><h1 class="ptitle">Settings</h1><a class="round back" href="#/" aria-label="Close">${IC.x}</a></div>
+      <div class="glist">
+        <a class="gl-row" href="#/notify"><span>Notifications</span>${IC.chev}</a>
+        <a class="gl-row" href="#/add"><span>Add a flight</span>${IC.chev}</a>
+        <button type="button" class="gl-row" id="p-refresh"><span>Check all flights now</span><span class="small muted" id="p-refresh-msg"></span></button>
+        <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
+        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
+      </div>
+      <h2 class="section"><span>Add-on</span><span id="s-msg" class="small"></span></h2>
       ${[...new Set(st.settings.map((x) => x.group || "Tracking"))].map((g, i) =>
         fold(`set-${g}`, g, `<div class="card nlist">${st.settings.filter((x) => (x.group || "Tracking") === g).map(setRow).join("")}</div>`, i === 0)).join("")}
       ${fold("set-backup", "Backup", backupCard(bk), !bk.connected)}
@@ -2100,6 +2802,16 @@
       <div class="card">${d.fetches.length ? d.fetches.map(fetchRow).join("") : '<div class="small muted">No pages loaded yet. Flights are checked from ' + STATE.settings.watch_hours + ' h before departure; add a flight to test now.</div>'}</div>`)}`;
     wireFolds();
     wireBackup();
+    document.getElementById("p-24h").onchange = (e) => { CLOCK24 = e.target.checked; setPref("ft-24h", CLOCK24 ? "1" : "0"); };
+    document.getElementById("p-refresh").onclick = () => {
+      document.getElementById("p-refresh-msg").textContent = "Checking… (about 20 s)";
+      $refresh.click();
+    };
+    document.getElementById("p-radar").onchange = (e) => setPref("ft-radar", e.target.checked ? "1" : "0");
+    $app.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => {
+      setPref("ft-mapstyle", b.dataset.ms);
+      $app.querySelectorAll("[data-ms]").forEach((x) => x.classList.toggle("on", x === b));
+    });
     document.getElementById("t-notify").onclick = async (e) => {
       const msg = document.getElementById("t-msg");
       e.target.disabled = true; msg.className = "small muted"; msg.textContent = "Sending…";
@@ -2159,6 +2871,7 @@
     if (!$drive) return;
     LAST_DRIVE = b;
     const st = (b && b.state) || "off";
+    document.body.dataset.drive = st;
     $drive.hidden = st === "off";
     $drive.className = "live drive " + st;
     const when = b && b.last ? `last backup ${ago(b.last)}` : "no backup yet";
@@ -2172,7 +2885,9 @@
     const route = ROUTE;
     try {
       if (force || !STATE) await load();
+      document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
       morphing = route === lastRoute && $root.childElementCount > 0;
+      document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
       const m = route.match(/^#\/leg\/([\w-]+)/);
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
       const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);
@@ -2190,9 +2905,10 @@
       else homeView();
       // hero map is drawn after its own fetch; give it a moment before clearing unused maps
       setTimeout(sweepMaps, 1500);
-      const tab = /^#\/hist/.test(route) ? "history" : /^#\/notify/.test(route) ? "notify" : /^#\/tools/.test(route) ? "tools" : "flights";
+      const tab = /^#\/history\/alerts/.test(route) ? "alerts" : /^#\/history\/find/.test(route) ? "search"
+        : /^#\/(history|hist\/)/.test(route) ? "passport" : /^#\/(tools|notify|add)/.test(route) ? "" : "flights";
       document.querySelectorAll("#tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
-      if (restoreY != null) { const y = restoreY; restoreY = null; window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); }
+      if (restoreY != null) { const y = restoreY; restoreY = null; window.scrollTo(0, y); requestAnimationFrame(() => { window.scrollTo(0, y); sheetUp(); }); }
       else if (route !== lastRoute) window.scrollTo(0, 0);
       lastRoute = route;
     } catch (e) {
@@ -2204,6 +2920,7 @@
 
   $refresh.onclick = async () => {
     $refresh.classList.add("spin");
+    const hr = document.getElementById("h-refresh"); if (hr) hr.classList.add("spin");
     try { await api("api/refresh", { method: "POST" }); } catch {}
     setTimeout(async () => { await render(true); $refresh.classList.remove("spin"); }, 20000);
   };
@@ -2217,6 +2934,13 @@
     if (a.classList.contains("back")) goBack(href);
     else go(href, { reset: !!a.closest("#tabbar") });
   });
+  // once the sheet has scrolled over the map, the strip under the phone's status bar takes the
+  // sheet's color (the sticky header sits just below it)
+  const sheetUp = () => {
+    const g = document.querySelector(".sheet-gap");
+    document.body.classList.toggle("sheet-up", !!g && document.body.classList.contains("sheetmode") && window.scrollY >= g.offsetHeight - 4);
+  };
+  window.addEventListener("scroll", sheetUp, { passive: true });
   window.addEventListener("hashchange", () => { if (location.hash && location.hash !== ROUTE) go(location.hash); });
 
   // ---------- live updates ----------
@@ -2237,6 +2961,7 @@
   let lastEvent = null;
   function setLive(on, v) {
     if (v) lastEvent = Date.now();
+    document.body.classList.toggle("is-live", !!on);
     if (!$live) return;
     $live.classList.toggle("on", !!on);
     $live.title = on ? `Live: connected${lastEvent ? ` · last update ${Math.round((Date.now() - lastEvent) / 1000)} s ago` : ""}`

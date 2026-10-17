@@ -465,7 +465,7 @@ def summary(rec, lk=None):
     dd, ad = delays(rec, lk)
     blk = (_t(rec, "in", "a") - _t(rec, "out", "a")) / 60 if _t(rec, "in", "a") and _t(rec, "out", "a") else None
     air = (_t(rec, "on", "a") - _t(rec, "off", "a")) / 60 if _t(rec, "on", "a") and _t(rec, "off", "a") else None
-    s = {k: rec.get(k) for k in ("id", "date", "display", "ident", "dep", "arr", "diverted_to", "cancelled", "kind",
+    s = {k: rec.get(k) for k in ("id", "date", "display", "ident", "airline", "dep", "arr", "diverted_to", "cancelled", "kind",
                                   "source", "aircraft", "type", "tail", "distance_nm", "has_track", "dh",
                                   "dep_gate", "arr_gate", "dep_terminal", "arr_terminal", "route")}
     c, o = lk[0].get(rec.get("id")), lk[1].get(rec.get("id"))
