@@ -128,6 +128,7 @@ def parse(xml_text):
                   "type": a.get("msgType"), "at": a.get("sourceTimeStamp"), "igtd": None, "gufi": None,
                   "off": None, "on": None, "eta": None, "diverted": False,
                   "src": a.get("sourceFacility"), "trigger": a.get("fdTrigger"), "status": None, "airline": None}
+            traj, fixes = [], {}
             for sub in el.iter():
                 n = _local(sub.tag)
                 txt = (sub.text or "").strip()
@@ -151,6 +152,15 @@ def parse(xml_text):
                     ev["route"] = sub.get("legacyFormat")
                 elif n == "remarksKeywords" and txt:
                     ev["remarks"] = txt
+                elif n == "waypoint" and sub.get("latitudeDecimal"):
+                    # the FAA's computed trajectory along the cleared route (FlightSectors)
+                    try:
+                        traj.append((int(sub.get("sequenceNumber") or 0), round(float(sub.get("latitudeDecimal")), 4),
+                                     round(float(sub.get("longitudeDecimal")), 4), int(sub.get("elapsedTime") or 0)))
+                    except ValueError:
+                        pass
+                elif n == "fix" and txt and ev["type"] == "FlightSectors":
+                    fixes[int(sub.get("elapsedTime") or 0)] = txt
                 elif n == "position" and ev["type"] == "trackInformation":
                     pos = _dms_position(sub)
                     if pos:
@@ -171,6 +181,10 @@ def parse(xml_text):
                     ev["gufi"] = sub.text.strip()
                 elif n in ("newArrivalPoint", "arrivalPoint", "arrArpt") and not ev["arr"]:
                     ev["arr"] = _apt("".join(sub.itertext()))
+            if len(traj) > 1:
+                traj.sort()
+                ev["traj"] = [[la, lo, t] for _, la, lo, t in traj]
+                ev["traj_fixes"] = [[la, lo, fixes[t]] for _, la, lo, t in traj if t in fixes]
             if ev["acid"]:
                 out.append(ev)
         elif name == "flight":

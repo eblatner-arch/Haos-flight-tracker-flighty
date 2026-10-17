@@ -272,7 +272,7 @@
   }
   function layoutZoom(entry) {
     const z = entry.map.getZoom(), c = entry.map.getContainer();
-    for (const n of [15, 16, 17]) c.classList.toggle(`z${n}`, z >= n);
+    for (const n of [8, 15, 16, 17]) c.classList.toggle(`z${n}`, z >= n);
   }
   async function layoutCheck(entry) {
     const map = entry.map, leg = entry.leg;
@@ -400,20 +400,27 @@
         },
       });
       map.addControl(new Btn());
-      const Apt = L.Control.extend({
-        options: { position: "topright" },
-        onAdd() {
-          const b = L.DomUtil.create("button", "map-center");
-          b.type = "button"; b.title = "Airport surface"; b.setAttribute("aria-label", "Show airport surface traffic");
-          b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M10 2h4v20h-4zM11.3 4h1.4v3h-1.4zm0 5h1.4v3h-1.4zm0 5h1.4v3h-1.4zM3 9h5v2H3zm13 4h5v2h-5z"/></svg>';
-          b.style.display = "none"; b.style.marginTop = "6px";
-          L.DomEvent.disableClickPropagation(b);
-          L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); if (entry.airport) map.setView(entry.airport, 15); });
-          entry.aptBtn = b;
-          return b;
-        },
-      });
-      map.addControl(new Apt());
+      // Jump to the departure or arrival airport, zoomed in enough to see the surface traffic.
+      const TAKEOFF = '<svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 1.82 3.16.77 1.33 1.6-.43 5.31-1.42 4.35-1.16L21 11.49c.81-.23 1.28-1.05 1.07-1.85z"/></svg>';
+      const LANDING = '<svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm7.18-5.73 4.35 1.16 5.31 1.42c.8.21 1.62-.26 1.84-1.06.21-.8-.26-1.62-1.06-1.84l-5.31-1.42-2.76-9.02L10.12 2v8.28L5.15 8.95l-.93-2.32-1.45-.39v5.17l1.6.43 5.31 1.43z"/></svg>';
+      for (const [side, svg, what] of [["dep_ap", TAKEOFF, "departure"], ["arr_ap", LANDING, "arrival"]]) {
+        const Go = L.Control.extend({
+          options: { position: "topright" },
+          onAdd() {
+            const b = L.DomUtil.create("button", "map-center");
+            b.type = "button"; b.title = `Zoom to the ${what} airport`; b.setAttribute("aria-label", b.title);
+            b.innerHTML = svg; b.style.marginTop = "6px";
+            L.DomEvent.disableClickPropagation(b);
+            L.DomEvent.on(b, "click", (e) => {
+              L.DomEvent.preventDefault(e);
+              const ap = entry.leg && entry.leg[side], p = ll(ap);
+              if (p) map.setView(p, 15);
+            });
+            return b;
+          },
+        });
+        map.addControl(new Go());
+      }
       const Xp = L.Control.extend({
         options: { position: "topright" },
         onAdd() {
@@ -616,10 +623,30 @@
     const bounds = [];
     const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
     const f = leg.flight || {};
-    const wps = (f.waypoints || []).filter((p) => p[0] != null);
+    // The route ahead: the FAA's trajectory along the route ATC has cleared (it follows every
+    // amendment), else FlightAware's filed waypoints. In the air it's drawn from the airplane on,
+    // so flown track + where it is + the (new) route ahead read as one line.
+    const atc = f.swim_route && (f.swim_route.pts || []).length > 1 ? f.swim_route.pts : null;
+    const wps = atc || (f.waypoints || []).filter((p) => p[0] != null);
+    let here = null;
+    if (leg.live && ["airborne", "taxi_out"].includes(leg.phase)) here = [leg.live.lat, leg.live.lon];
+    else if (leg.phase === "airborne") { const tr = (f.track || []).filter((p) => p[0] != null); if (tr.length) here = [tr[tr.length - 1][0], tr[tr.length - 1][1]]; }
     if (wps.length > 1) {
-      add(L.polyline(wps, { color: route, weight: 2, opacity: 0.55, dashArray: "6 6" }));
+      let ahead = wps;
+      if (here && leg.phase === "airborne") {
+        let bi = 0, bd = Infinity;
+        wps.forEach((p, i) => { const d = kmBetween(here, p); if (d < bd) { bd = d; bi = i; } });
+        ahead = [here, ...wps.slice(bi + 1)];
+      }
+      add(L.polyline(ahead, { color: route, weight: 2, opacity: atc ? 0.75 : 0.55, dashArray: "6 6" }));
       wps.forEach((p) => bounds.push(p));
+      if (atc && interactive) {
+        for (const [la, lo, name] of (f.swim_route.fixes || []).slice(1, -1)) {
+          add(L.circleMarker([la, lo], { radius: 1.5, color: route, weight: 0, fillColor: route, fillOpacity: 0.8, interactive: false }));
+          add(L.marker([la, lo], { interactive: false, keyboard: false,
+            icon: L.divIcon({ className: "", iconSize: null, html: `<span class="fix-lbl">${esc(name)}</span>` }) }));
+        }
+      }
     } else if (A && B) {
       const g = gcPoints(A, B);
       add(L.polyline(g, { color: muted, weight: 2, opacity: 0.8, dashArray: "4 7" }));

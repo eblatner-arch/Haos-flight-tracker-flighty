@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.16.0
+- Map: the route ahead is the FAA's trajectory along the route ATC has cleared (FAA SWIM), updated with every amendment and clearance, drawn from the airplane onward so flown track, position and the (new) route ahead read as one line; fix names show from zoom 8. FlightAware's filed route is the fallback.
+- Map: takeoff and landing buttons jump to the departure or arrival airport zoomed in to see the surface traffic (they replace the runway button).
+
 ## 3.15.16
 - Map credits restyled: small, dim and translucent in the map's colors instead of a bright strip; the Leaflet tag is gone (the required OpenStreetMap and CARTO credits stay).
 

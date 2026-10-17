@@ -524,3 +524,8 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 /* taxiway centerlines only when zoomed right in; until then they make the map busy */
 .twy-cl { display: none; }
 .z17 .twy-cl { display: inline; }
+/* fixes along the ATC route: names from zoom 8 */
+.fix-lbl { display: none; position: absolute; transform: translate(5px, -50%); white-space: nowrap; pointer-events: none;
+  font: 600 9px/1 -apple-system, system-ui, sans-serif; color: var(--muted); letter-spacing: .03em;
+  text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
+.z8 .fix-lbl { display: inline; }

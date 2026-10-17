@@ -1620,6 +1620,22 @@ class Swim(unittest.TestCase):
         swim.handle_stdds(xml.replace("40.69", "41.0"))
         self.assertEqual(swim.surface("KEWR")[0]["lat"] in (40.70, 40.68), True)  # not watched: ignored
 
+    def test_route_trajectory_from_flight_sectors(self):
+        """FlightSectors carries the FAA's trajectory (lat/lon every few minutes) and the fixes on it."""
+        import server
+        import swim
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "swim_sectors.xml")) as fh:
+            ev = [e for e in swim.parse(fh.read()) if e["acid"] == "UAL2608" and e["type"] == "FlightSectors"][0]
+        self.assertEqual(len(ev["traj"]), 92)
+        self.assertEqual(ev["traj_fixes"][1], [30.09, -95.26, "KNTKY"])
+        sw = {}
+        server._swim_take(sw, dict(ev, got=1.0))
+        f, _ = fa.flights_from_bootstrap(boot(origin="IAH", dest="EWR"))
+        L = {"id": "t", "ident": "UAL2608", "dep": "IAH", "arr": "EWR", "swim": dict(sw, seen=1)}
+        server.swim_overlay(L, f, T0)
+        self.assertEqual(f["swim_route"]["pts"][-1], [40.69, -74.17])
+
     def test_amendment_marks_diversion(self):
         import server
         import swim

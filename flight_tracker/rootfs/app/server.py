@@ -623,6 +623,10 @@ def _swim_take(sw, ev):
         sw["arr"] = _iata(ev["arr"])
     if ev.get("diverted"):
         sw["diverted"] = True
+    if ev.get("traj"):
+        sw["traj"] = [[p[0], p[1]] for p in ev["traj"]]
+        sw["traj_fixes"] = ev.get("traj_fixes") or []
+        sw["traj_at"] = got
     if ev.get("route"):
         txt = swim.route_text(ev["route"])
         if txt and txt != sw.get("route"):
@@ -838,6 +842,9 @@ def swim_overlay(L, f, now):
         "state": sw.get("tfdm_state"),
         "surf_dep": sd or None, "surf_arr": sa or None, "tower_dep": sw.get("tower_dep"),
     }
+    if sw.get("traj"):
+        # the FAA's trajectory along the route ATC has on file (updated with every amendment)
+        f["swim_route"] = {"pts": sw["traj"], "fixes": sw.get("traj_fixes") or [], "at": sw.get("traj_at")}
 
 
 def route_end(route):
