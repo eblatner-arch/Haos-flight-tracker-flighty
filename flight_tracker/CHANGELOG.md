@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.6
+- FAA SWIM: reads the times the airline itself files with the FAA (gate out, off, on, gate in) and logs them for your flights.
+
 ## 3.12.5
 - FAA SWIM: reads actual takeoff and landing times, the FAA ETA and the diversion flag from TFMS messages; the flight log shows them. Parser checked against real feed samples.
 

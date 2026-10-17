@@ -40,7 +40,8 @@ def _apt(code):
 
 
 def parse(xml_text):
-    """Flight-data messages in one TFMS payload -> [{acid, dep, arr, type, at, igtd, gufi, off, on, eta, diverted}].
+    """Flight-data messages in one TFMS payload -> [{acid, dep, arr, type, at, igtd, gufi, off, on, eta, diverted,
+    src, trigger, status, airline}]. airline = {out, off, on, in} as the airline itself filed them (CDM).
     off/on are actual wheels-up/down (UTC ISO), eta the FAA estimate, diverted the diversionIndicator flag.
     A payload can hold many messages; every element called fltdMessage (attributes acid, depArpt,
     arrArpt, msgType, sourceTimeStamp) or a flight block with aircraftId/departurePoint/arrivalPoint
@@ -56,7 +57,8 @@ def parse(xml_text):
             a = el.attrib
             ev = {"acid": (a.get("acid") or "").upper(), "dep": _apt(a.get("depArpt")), "arr": _apt(a.get("arrArpt")),
                   "type": a.get("msgType"), "at": a.get("sourceTimeStamp"), "igtd": None, "gufi": None,
-                  "off": None, "on": None, "eta": None, "diverted": False}
+                  "off": None, "on": None, "eta": None, "diverted": False,
+                  "src": a.get("sourceFacility"), "trigger": a.get("fdTrigger"), "status": None, "airline": None}
             for sub in el.iter():
                 n = _local(sub.tag)
                 txt = (sub.text or "").strip()
@@ -71,6 +73,11 @@ def parse(xml_text):
                         ev["on"] = ev["on"] or sub.get("timeValue")
                     else:
                         ev["eta"] = sub.get("timeValue")
+                elif n == "flightTimeData" and sub.get("airlineOutTime"):
+                    # The airline's own gate/runway times (CDM): only from messages the airline sent.
+                    ev["airline"] = {k: sub.get(f"airline{k.title()}Time") for k in ("out", "off", "on", "in")}
+                elif n == "flightStatus" and txt:
+                    ev["status"] = txt
                 elif n == "diversionIndicator" and txt and txt != "NO_DIVERSION":
                     ev["diverted"] = True
                 elif n == "igtd" and sub.text and not ev["igtd"]:

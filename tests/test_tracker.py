@@ -1355,6 +1355,9 @@ class Swim(unittest.TestCase):
         self.assertEqual((b["dep"], b["arr"], b["gufi"], b["igtd"]), ("KSEA", "KDEN", "KS009927Gk", "2026-10-17T01:05:00Z"))
         d = [e for e in load("swim_departure.xml").values() if e["acid"] == "JBU2823" and e["type"] == "departureInformation"][0]
         self.assertEqual((d["dep"], d["arr"], d["off"], d["diverted"]), ("KFLL", "KMSY", "2026-10-17T01:49:00Z", False))
+        m = load("swim_modify.xml")[("PDT5817", "FlightModify")]
+        self.assertEqual((m["src"], m["status"], m["airline"]["out"], m["airline"]["in"]),
+                         ("AAL", "PLANNED", "2026-10-17T03:21:00Z", "2026-10-17T04:40:00Z"))
 
     def test_amendment_marks_diversion(self):
         import server

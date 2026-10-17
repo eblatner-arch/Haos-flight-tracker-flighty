@@ -529,6 +529,10 @@ def swim_check(L, f, planned):
             v = next((x.get(k) for x in reversed(fresh) if x.get(k)), None)
             if v:
                 bits.append(f"{lbl} {v[11:16]}Z")
+        al = next((x for x in reversed(fresh) if x.get("airline") and x.get("src") not in (None, "TFMS")), None)
+        if al:
+            bits.append(f"{al['src']} times " + " ".join(f"{k} {(al['airline'].get(k) or '')[11:16]}Z"
+                                                       for k in ("out", "off", "on", "in") if al["airline"].get(k)))
         if any(x.get("diverted") for x in fresh):
             bits.append("diversion flagged")
         saw(L, "FAA SWIM", None, " ".join(bits))
@@ -536,6 +540,9 @@ def swim_check(L, f, planned):
         v = next((x.get(k) for x in reversed(mine) if x.get(k)), None)
         if v:
             out[k] = v
+    al = next((x for x in reversed(mine) if x.get("airline") and x.get("src") not in (None, "TFMS")), None)
+    if al:
+        out["airline"] = dict(al["airline"], src=al["src"], at=al.get("at"))
     if any(x.get("diverted") for x in mine) and arr and planned and arr != _iata(planned):
         out["diverted_to"] = arr
     return out
