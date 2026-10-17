@@ -974,7 +974,8 @@
     const scope = (n.scope || []).length ? `<div class="na-scope"><span class="faint">Departures from</span> ${n.scope.map((c) => `<span class="cc ${hits.has(c) ? "on" : ""}">${esc(c)}</span>`).join("")}</div>`
       : n.flights ? `<div class="na-scope faint">${esc(n.flights)}</div>` : "";
     const holds = g.uses.some((u) => u.impact.some((i) => i.hit !== false));
-    return `<div class="nas-alert k-${esc(n.kind)} ${holds ? "" : "clear"}">
+    const tappable = ["gs", "gdp"].includes(n.kind) && (n.scope || []).length;
+    return `<div class="nas-alert k-${esc(n.kind)} ${holds ? "" : "clear"} ${tappable ? "tappable" : ""}" ${tappable ? `data-nas="${esc(n.key)}"` : ""}>
       <div class="na-top"><span class="na-apt">${esc(n.airport)}</span><span class="na-kind">${esc(n.label)}</span><span class="na-when">${esc(when)}</span></div>
       ${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}
       ${scope}${lines.join("")}
@@ -1013,6 +1014,11 @@
   function fold(id, title, body, dflt = false, extra = "") {
     return `<details class="fold" data-fold="${esc(id)}" ${isOpen(id, dflt) ? "open" : ""}><summary><span>${esc(title)}</span>${extra}<i></i></summary>${body}</details>`;
   }
+  document.addEventListener("click", (e) => {
+    const c = e.target.closest && e.target.closest("[data-nas]");
+    if (!c || e.target.closest("a")) return;
+    location.hash = `#/nas/${encodeURIComponent(c.dataset.nas)}`;
+  });
   function wireFolds() {
     $app.querySelectorAll("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => {
       try { localStorage.setItem(openKey(d.dataset.fold), d.open ? "1" : "0"); } catch {}
@@ -1481,6 +1487,76 @@
       api(`api/leg/${next.id}`).then((full) => { LEGS[next.id] = full; drawMap(document.getElementById("hero-map"), withChain(full), opt); })
         .catch(() => { if (!LEGS[next.id]) drawMap(hm_, next, opt); });
     }
+  }
+
+  // A ground stop or delay program on a map: the centers whose departures it holds, filled; the
+  // program airport; and where your flight (or its inbound) departs, red if it's held, green if not.
+  let ARTCC = null;
+  async function nasView(key) {
+    const legs = (STATE.legs || []).filter((l) => (l.nas || []).some((n) => n.key === key));
+    const g = nasGroups(legs).find((x) => x.n.key === key);
+    destroyMaps();
+    if (!g) { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Program ended</b>It's no longer in the FAA's list.</div>`; return; }
+    const n = g.n;
+    $app.innerHTML = `<a class="back" href="#/">‹ Flights</a>
+      <div class="detail-map" id="nas-map"></div>
+      <p class="small faint" id="nas-map-note" style="margin:-6px 4px 10px" hidden></p>
+      ${nasAlert(g).replace("tappable", "")}
+      <div class="card small muted">Shaded: the en-route centers whose departures this ${n.kind === "gs" ? "ground stop" : "program"} holds. ${(n.scope || []).filter((c) => !/^Z[A-Z]{2}$/.test(c)).length ? `Also: ${esc(n.scope.filter((c) => !/^Z[A-Z]{2}$/.test(c)).join(" "))}.` : ""}</div>`;
+    const el = document.getElementById("nas-map");
+    if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: true, attributionControl: true, worldCopyJump: true });
+    if (map.attributionControl) map.attributionControl.setPrefix("");
+    addTiles(map, dark);
+    MAPS.nas = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive: true };
+    usedMaps.add("nas");
+    oneFingerZoom(map, el);
+    const hot = n.kind === "gs" ? css("--red") : css("--amber");
+    const ok = css("--green"), muted = css("--faint");
+    const bounds = [];
+    const apPos = {};
+    for (const l of legs) for (const a of [l.dep_ap, l.arr_ap]) if (a && ll(a)) apPos[a.iata] = ll(a);
+    // where the program is
+    const prog = apPos[n.airport];
+    if (prog) {
+      L.circleMarker(prog, { radius: 6, color: hot, fillColor: hot, fillOpacity: 1, weight: 2 }).addTo(map);
+      L.marker(prog, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${hot}">${esc(n.airport)} ${n.kind === "gs" ? "ground stop" : "delay program"}</span>`, iconSize: null, iconAnchor: [-8, 30] }) }).addTo(map);
+      bounds.push(prog);
+    }
+    // your departures / inbound departures it touches
+    for (const u of g.uses) for (const i of u.impact) {
+      const p = apPos[i.from] || (u.leg.inbound && u.leg.inbound.origin && ll(u.leg.inbound.origin));
+      if (!p) continue;
+      const c = i.airborne ? muted : i.hit === true ? hot : i.hit === false ? ok : muted;
+      L.circleMarker(p, { radius: 5, color: c, fillColor: c, fillOpacity: 1, weight: 0 }).addTo(map);
+      L.marker(p, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${c}">${esc(i.from)} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}</span>`, iconSize: null, iconAnchor: [-8, 8] }) }).addTo(map);
+      bounds.push(p);
+    }
+    const fit = () => bounds.length ? map.fitBounds(bounds, { padding: [24, 24], maxZoom: 6 }) : map.setView([39.5, -98.35], 3);
+    fit();
+    try { ARTCC = ARTCC || await api("api/artcc"); } catch { ARTCC = null; }
+    if (!ARTCC || !MAPS.nas || MAPS.nas.map !== map) {
+      const note = document.getElementById("nas-map-note");
+      if (note && !ARTCC) { note.hidden = false; note.textContent = "Center boundaries aren't available right now; the scope is listed below."; }
+      return;
+    }
+    const scope = new Set(n.scope || []);
+    for (const [id, c] of Object.entries(ARTCC)) {
+      const inS = scope.has(id);
+      for (const ring of c.rings) {
+        L.polygon(ring, { color: inS ? hot : muted, weight: inS ? 1.5 : 0.8, opacity: inS ? 0.9 : 0.5,
+          fillColor: hot, fillOpacity: inS ? 0.22 : 0, interactive: false }).addTo(map);
+        if (inS) ring.forEach((p) => bounds.push(p));
+      }
+      const big = c.rings.slice().sort((a, b) => b.length - a.length)[0];
+      if (big && big.length) {
+        const lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;
+        L.marker([lat, lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: null,
+          html: `<span class="ctr-lbl ${inS ? "on" : ""}" style="${inS ? `color:${hot}` : ""}">${esc(id)}</span>` }) }).addTo(map);
+      }
+    }
+    fit();
   }
 
   async function legView(id) {
@@ -1954,9 +2030,11 @@
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
       const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);
       const mf = route.match(/^#\/hist\/(.+)$/);
+      const mn = route.match(/^#\/nas\/(.+)$/);
       if (route.startsWith("#/history/find")) await findView(route);
       else if (mh) await (mh[1] === "stats" ? statsView(mh[2] || "") : mh[1] === "alerts" ? alertsHistoryView() : historyView(mh[2] || ""));
       else if (mf) await histFlightView(decodeURIComponent(mf[1]));
+      else if (mn) await nasView(decodeURIComponent(mn[1]));
       else if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
       else if (m) await legView(m[1]);
       else if (route.startsWith("#/add")) addView();

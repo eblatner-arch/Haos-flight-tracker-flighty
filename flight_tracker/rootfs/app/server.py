@@ -2653,6 +2653,74 @@ def airport_layout(code):
             return None
 
 
+# ---------------------------------------------------------------- ARTCC boundaries
+# The 20-odd en-route centers (ZNY, ZDC …) as polygons, from the FAA's own aeronautical data
+# (AIS open data, public domain), fetched once and kept for 90 days. Used to draw a ground stop's
+# or delay program's departure scope on a map.
+ARTCC_URL = ("https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Boundary_Airspace/FeatureServer/0/query")
+ARTCC_PATH = os.path.join(DATA_DIR, "artcc_boundaries.json")
+_artcc_lock = threading.Lock()
+
+
+def _artcc_from_geojson(data):
+    """FAA boundary features -> {ZNY: {name, rings: [[[lat, lon], …], …]}}: one shape per center,
+    the high-altitude one when there are several, rounded and thinned for drawing."""
+    best = {}
+    for ft in data.get("features") or []:
+        p = ft.get("properties") or {}
+        ident = (p.get("IDENT") or "").upper()
+        if len(ident) == 4 and ident.startswith("KZ"):
+            ident = ident[1:]
+        if not re.fullmatch(r"Z[A-Z]{2}", ident):
+            continue
+        g = ft.get("geometry") or {}
+        polys = g.get("coordinates") or []
+        if g.get("type") == "Polygon":
+            polys = [polys]
+        elif g.get("type") != "MultiPolygon":
+            continue
+        rings = [[[round(c[1], 3), round(c[0], 3)] for c in poly[0]] for poly in polys if poly and poly[0]]
+        size = sum(len(r) for r in rings)
+        high = "H" in str(p.get("LEVEL_") or "") or str(p.get("LOCAL_TYPE") or "").upper().endswith("_H")
+        score = (1 if high else 0, size)
+        if ident not in best or score > best[ident][0]:
+            best[ident] = (score, {"name": (p.get("NAME") or "").title() or ident, "rings": rings})
+    return {k: v for k, (_, v) in best.items()}
+
+
+def artcc_boundaries():
+    with _artcc_lock:
+        try:
+            if time.time() - os.path.getmtime(ARTCC_PATH) < 90 * 86400:
+                with open(ARTCC_PATH) as fh:
+                    return json.load(fh)
+        except OSError:
+            pass
+        for where in ("TYPE_CODE LIKE 'ARTCC%' OR LOCAL_TYPE LIKE 'ARTCC%'", "TYPE_CODE = 'ARTCC'", "IDENT LIKE 'Z%'"):
+            q = urllib.parse.urlencode({
+                "where": where, "outFields": "*", "returnGeometry": "true", "outSR": "4326",
+                "maxAllowableOffset": "0.02", "geometryPrecision": "3", "resultRecordCount": "2000", "f": "geojson"})
+            try:
+                req = urllib.request.Request(ARTCC_URL + "?" + q, headers={"User-Agent": f"HA-Flight-Tracker/{VERSION}"})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    out = _artcc_from_geojson(json.load(r))
+                if len(out) >= 15:
+                    os.makedirs(os.path.dirname(ARTCC_PATH), exist_ok=True)
+                    with open(ARTCC_PATH + ".tmp", "w") as fh:
+                        json.dump(out, fh, separators=(",", ":"))
+                    os.replace(ARTCC_PATH + ".tmp", ARTCC_PATH)
+                    log.info("ARTCC boundaries: %d centers from the FAA", len(out))
+                    return out
+                log.info("ARTCC boundaries: only %d centers for %s", len(out), where)
+            except Exception as e:
+                log.warning("ARTCC boundaries (%s): %s", where, e)
+        try:
+            with open(ARTCC_PATH) as fh:
+                return json.load(fh)
+        except OSError:
+            return None
+
+
 def leg_summary(L, now, nas, full=False):
     f = L.get("flight")
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra", "kind",
@@ -3001,6 +3069,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/alerts":
             with LOCK:
                 return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
+        if path == "/api/artcc":
+            d = artcc_boundaries()
+            return self._send(200, d, cache="private, max-age=86400") if d else self._send(404, {"error": "no boundaries"})
         m = re.match(r"^/api/airport/([A-Za-z0-9]{3,4})/layout$", path)
         if m:
             d = airport_layout(m.group(1).upper())

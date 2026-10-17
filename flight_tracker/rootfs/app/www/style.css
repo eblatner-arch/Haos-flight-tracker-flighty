@@ -530,3 +530,10 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
   font: 600 9px/1 -apple-system, system-ui, sans-serif; color: var(--muted); letter-spacing: .03em;
   text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
 .z8 .fix-lbl { display: inline; }
+/* ground stop / delay program cards open their map */
+.nas-alert.tappable { cursor: pointer; }
+.nas-alert.tappable .na-top::after { content: "Map ›"; margin-left: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.ctr-lbl { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none;
+  font: 800 10px/1 -apple-system, system-ui, sans-serif; color: var(--faint); letter-spacing: .04em;
+  text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
+.ctr-lbl.on { font-size: 12px; }
