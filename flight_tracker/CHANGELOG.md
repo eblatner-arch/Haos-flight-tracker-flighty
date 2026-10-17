@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.21.3
+- Airport layouts download in the background for every airport of a flight being watched (yours, its destination, the inbound's origin), one at a time, so a map opens with its runways and gates already there. Saved layouts are read without waiting on a download in progress, and one airport's download no longer holds up another's.
+
 ## 3.21.2
 - When the FAA's expected path doesn't follow the route FlightAware shows, the FAA's is shown as the route ("Route (FAA)", its fixes in order) and FlightAware's underneath as an older filing. Checked on UA1102 MIA→EWR: United's flight plan matched the FAA's inland path fix for fix.
 

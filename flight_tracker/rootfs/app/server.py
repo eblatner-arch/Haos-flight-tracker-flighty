@@ -2812,6 +2812,8 @@ def api_surface(lid, now, want=None):
 LAYOUT_DIR = os.path.join(DATA_DIR, "airport_layouts")
 LAYOUT_TTL = 30 * 86400
 _layout_lock = threading.Lock()
+_layout_locks = {}
+_layout_tried = {}
 OVERPASS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
 
 
@@ -2854,13 +2856,24 @@ def airport_layout(code):
     if not icao or ap.get("lat") is None:
         return None
     path = os.path.join(LAYOUT_DIR, f"{icao}.json")
-    with _layout_lock:
+    def cached():
         try:
             if time.time() - os.path.getmtime(path) < LAYOUT_TTL:
                 with open(path) as fh:
                     return json.load(fh)
-        except OSError:
+        except (OSError, ValueError):
             pass
+        return None
+    c = cached()          # saved copies are read without waiting on anything
+    if c:
+        return c
+    with _layout_lock:
+        lk = _layout_locks.setdefault(icao, threading.Lock())
+    with lk:              # one download per airport at a time; other airports aren't held up
+        c = cached()
+        if c:
+            return c
+        _layout_tried[icao] = time.time()
         q = (f'[out:json][timeout:90];('
              f'way["aeroway"~"^(runway|taxiway|taxilane|terminal|apron)$"](around:5000,{ap["lat"]},{ap["lon"]});'
              f'node["aeroway"~"^(gate|parking_position|holding_position)$"](around:5000,{ap["lat"]},{ap["lon"]}););'
@@ -2889,6 +2902,38 @@ def airport_layout(code):
                 return json.load(fh)
         except OSError:
             return None
+
+
+def layout_prefetch_loop():
+    """Download the layout of every airport of a flight being watched before anyone opens its map,
+    one at a time, in the background, starting a minute after start-up. An airport that failed is
+    tried again after an hour."""
+    time.sleep(60)
+    while True:
+        try:
+            with LOCK:
+                codes = set()
+                now = time.time()
+                for L in STATE["legs"].values():
+                    if L.get("ident") and watched(L, now):
+                        f = L.get("flight") or {}
+                        codes.update(c for c in (L.get("dep"), L.get("arr"), (f.get("destination") or {}).get("iata"),
+                                                  ((L.get("inbound") or {}).get("origin") or {}).get("iata")) if c)
+            for code in sorted(codes):
+                icao = ((airports.get(code) or {}).get("icao") or "").upper()
+                if not icao or time.time() - _layout_tried.get(icao, 0) < 3600:
+                    continue
+                p = os.path.join(LAYOUT_DIR, f"{icao}.json")
+                try:
+                    if time.time() - os.path.getmtime(p) < LAYOUT_TTL - 86400:
+                        continue
+                except OSError:
+                    pass
+                airport_layout(code)
+                time.sleep(5)
+        except Exception:
+            log.exception("airport layout prefetch")
+        time.sleep(300)
 
 
 # ---------------------------------------------------------------- ARTCC boundaries
@@ -3567,6 +3612,7 @@ def main():
     threading.Thread(target=worker, daemon=True, name="tracker").start()
     threading.Thread(target=backup_loop, daemon=True, name="backup").start()
     threading.Thread(target=live_loop, daemon=True, name="live").start()
+    threading.Thread(target=layout_prefetch_loop, daemon=True, name="layouts").start()
     swim.ON_NEWS = lambda acid: WAKE.set()
     swim.ON_NAS = lambda ap: (NAS_NEWS.add(ap), WAKE.set())
     swim.load_edcts(os.path.join(DATA_DIR, "swim_edcts.json"))
