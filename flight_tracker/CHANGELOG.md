@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.22.0
+- Pushes about the same program (ground stop, delay program, closure, delay trend) that fire for several of your flights within 20 s go out as one: "EWR: Ground stop · 3 of your flights", the program once, then the flights. EDCTs arriving together (a revised slot list) likewise. Other pushes are unchanged and immediate.
+- Fixed in 3.21.9's NAS pushes: the message started with the program's id ("EWR|delay MIA→EWR: …") instead of your flight.
+
 ## 3.21.11
 - EDCTs and the messages about your flights are written to disk when the add-on stops (an update or restart), not only every 2 min. UA2677's EDCT changes (BNA times 12:01, 12:15, 12:39, 13:47 CDT) each came within minutes of an update to the add-on; one that arrived less than 2 min before the add-on stopped was lost with it.
 

@@ -750,10 +750,25 @@ class Followed(unittest.TestCase):
              "sched_in": T0 + 2 * H, "notified": {"watch": True}}
         L["flight"], _ = fa.flights_from_bootstrap(boot(origin="BOS", dest="EWR", out_s=T0 + H))
         items = _near_t0(sources.parse_events(self.EVENTS))
-        self.assertTrue(any("Ground stop" in a["title"] for a in alerts.evaluate(L, CFG, T0, items)))
+        first = [a for a in alerts.evaluate(L, CFG, T0, items) if "Ground stop" in a["title"]]
+        self.assertTrue(first and first[0]["message"].startswith("UA 1 BOS→EWR: "))   # the flight, not the program's id
         for i in items:
             i["key"] = i["key"] + "-swim"
         self.assertEqual([a for a in alerts.evaluate(L, CFG, T0 + 600, items) if "Ground stop" in a["title"]], [])
+
+    def test_program_pushes_combined(self):
+        """Pushes for one program that fire together for several flights go out as one."""
+        import server
+        sent = []
+        with mock.patch.object(server, "_send", lambda a: sent.append(a) or (True, "")), \
+                mock.patch.object(server.threading, "Timer", lambda *a, **k: mock.Mock()):
+            for who in ("UA 1 BOS→EWR", "UA 2 MIA→EWR"):
+                server.notify({"key": "nas_gs", "title": "EWR: Ground stop", "level": "critical", "tag": "x",
+                               "message": f"{who}: Ground stop until 16:30 · wind"})
+            server.notify({"key": "edct", "title": "UA 3 EDCT 17:18", "message": "BNA→EWR", "level": "warn", "tag": "y"})
+            server._flush_batch()
+        self.assertEqual([a["title"] for a in sent], ["EWR: Ground stop · 2 of your flights", "UA 3 EDCT 17:18"])
+        self.assertEqual(sent[0]["message"], "Ground stop until 16:30 · wind\nUA 1 BOS→EWR, UA 2 MIA→EWR")
 
     def test_delay_trend_direction(self):
         items = sources.parse_events([{"airportId": "ORD", "departureDelay": {"reason": "VOL:Volume", "averageDelay": "15",

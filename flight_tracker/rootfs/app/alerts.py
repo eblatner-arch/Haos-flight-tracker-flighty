@@ -491,12 +491,12 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
             # The same program can come back under another key (from the FAA's SWIM feed or the NAS
             # status page, or rebuilt after a restart): one program per airport and kind that's been
             # seen in the last 2 h is the same program, not news.
-            ident = f"{n['airport']}|{n['kind']}"
-            prev = ext.get(n["key"]) or ext.get(ident)
-            cur[n["key"]] = cur[ident] = {"end": n.get("end"), "scope": n.get("scope") or []}
-            known = n["key"] in seen or now - (live.get(ident) or 0) < 2 * 3600 \
-                or (ident not in live and any(k.startswith(ident + "|") for k in seen))
-            live[ident] = now
+            pid = f"{n['airport']}|{n['kind']}"
+            prev = ext.get(n["key"]) or ext.get(pid)
+            cur[n["key"]] = cur[pid] = {"end": n.get("end"), "scope": n.get("scope") or []}
+            known = n["key"] in seen or now - (live.get(pid) or 0) < 2 * 3600 \
+                or (pid not in live and any(k.startswith(pid + "|") for k in seen))
+            live[pid] = now
             if not known:
                 seen.add(n["key"])
                 add(ev, f"{n['airport']}: {n['label']}", f"{ident} {route}: {nas_text(n, atz)}", level)

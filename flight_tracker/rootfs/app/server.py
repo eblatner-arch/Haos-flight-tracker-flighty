@@ -267,7 +267,55 @@ def find_ingress():
     log.info("Notifications open %s", INGRESS.get("path") or "(nothing: set notification_url)")
 
 
+# Programs and EDCTs touch several of your flights at once (a ground stop at EWR, a revised slot
+# list): pushes of those kinds that fire within a few seconds of each other go out as one.
+BATCH_KEYS = {"nas_gs", "nas_gdp", "nas_closure", "nas_other", "nas_delay", "edct"}
+BATCH_WAIT = 20
+_batch = {"items": [], "timer": None}
+_batch_lock = threading.Lock()
+
+
 def notify(alert):
+    if alert.get("key") in BATCH_KEYS and not alert.get("_single"):
+        with _batch_lock:
+            _batch["items"].append(alert)
+            if not _batch["timer"]:
+                t = threading.Timer(BATCH_WAIT, _flush_batch)
+                t.daemon = True
+                _batch["timer"] = t
+                t.start()
+        return True, "queued"
+    return _send(alert)
+
+
+def _flush_batch():
+    with _batch_lock:
+        items, _batch["items"], _batch["timer"] = _batch["items"], [], None
+    groups = {}
+    for a in items:
+        # one push per program (same title: "EWR: Ground stop", "EWR: ground stop extended"); EDCTs together
+        k = (a["key"], "" if a["key"] == "edct" else a["title"])
+        groups.setdefault(k, []).append(a)
+    for (key, title), lst in groups.items():
+        if len(lst) == 1:
+            _send(lst[0])
+            continue
+        lvl = max((a["level"] for a in lst), key=lambda v: ["info", "warn", "critical"].index(v) if v in ("info", "warn", "critical") else 0)
+        if key == "edct":
+            t = f"EDCTs for {len(lst)} of your flights"
+            msg = "\n".join(a["title"] for a in lst)
+        else:
+            # "UA 2677 BNA→EWR: Ground stop until 16:30 · …" -> the program once, then the flights
+            first = lst[0]["message"]
+            detail = first.split(": ", 1)[1] if ": " in first else first
+            flights = [a["message"].split(": ", 1)[0] for a in lst]
+            t = f"{lst[0]['title']} · {len(lst)} of your flights"
+            msg = f"{detail}\n{', '.join(flights)}"
+        _send({**lst[0], "title": t, "message": msg, "level": lvl, "tag": f"batch-{key}",
+               "ts": any(a.get("ts") for a in lst)})
+
+
+def _send(alert):
     svc = (CFG.get("notify_service") or "").strip()
     if svc.startswith("notify."):
         svc = svc[7:]
