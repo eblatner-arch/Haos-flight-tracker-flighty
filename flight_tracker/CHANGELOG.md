@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.21.8
+- SWIM samples download: for every TFMS message type, the last 4 messages that mention one of your flights (your_flights/by_type/), so what the FAA sends about a flight around an EDCT change can be checked.
+
 ## 3.21.7
 - One route row in Details: the clearance's route once the tower has sent it ("Route (cleared)"); else ATC's; else the filed one. The separate "Cleared route" row is gone.
 - "Route (FAA) / FlightAware shows · an older filing" only when the FAA's path really misses the filed route's fixes. Airways and procedures are left out of the comparison (the FAA lists every fix along Q87; the filed route just says Q87), which wrongly flagged UA1643's route.

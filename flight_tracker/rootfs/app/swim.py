@@ -24,6 +24,7 @@ KEEP = 40            # events per callsign
 SAMPLES = {}         # message type -> a few raw messages, to check the parser against the real feed
 MATCHED_RAW = []     # the last raw messages that matched your flights
 PDC_RAW = []         # every datalink clearance message that mentions one of your flights (kept apart)
+YOURS_BY_TYPE = {}   # message type -> the last few raw messages that mention one of your flights
 TYPE_COUNTS = {}
 import re as _re
 _TYPE_RE = _re.compile(r'msgType="([^"]+)"')
@@ -396,6 +397,14 @@ def handle(xml_text):
     except Exception:
         pass
     head = xml_text[:4000]
+    if WATCH:
+        hit = next((cs for cs in WATCH if cs in xml_text), None)
+        if hit:
+            # what the FAA sends about your flights, every kind of message, for checking (samples download)
+            t = (_TYPE_RE.findall(head) or ["unknown"])[0]
+            lst = YOURS_BY_TYPE.setdefault(t, [])
+            lst.append(xml_text[:150000])
+            del lst[:-4]
     if "controlledDepartureTime" in xml_text or 'etdType="CONTROLLED"' in xml_text:
         _edct_sample(xml_text)
         try:
@@ -1217,6 +1226,9 @@ def samples_zip():
                     z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for i, m in enumerate(MATCHED_RAW, 1):
             z.writestr(f"your_flights/{i:02d}{'_' + m['feed'] if m.get('feed') else ''}.xml", m["xml"])
+        for t, lst in YOURS_BY_TYPE.items():
+            for i, x in enumerate(lst, 1):
+                z.writestr(f"your_flights/by_type/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for i, m in enumerate(PDC_RAW, 1):
             z.writestr(f"your_flights/clearance_{i:02d}.xml", m["xml"])
         for i, x in enumerate(STDDS_RAW, 1):
