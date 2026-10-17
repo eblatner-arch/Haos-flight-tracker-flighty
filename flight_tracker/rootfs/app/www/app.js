@@ -1505,7 +1505,9 @@
         <b>${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.swim.status] || STATE.swim.status)}</b>
         ${STATE.swim.status === "connected" ? ` · ${nm(STATE.swim.rate || 0)} messages a minute · ${STATE.swim.matched || 0} for your flights` : ""}
         ${STATE.swim.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.swim.error)}</p>` : ""}
-        <p class="faint" style="margin:8px 0 0">The FAA's live flight plans and amendments (TFMS). A flight plan amended to a new destination marks a diversion right away.</p></div>`) : ""}
+        <p class="faint" style="margin:8px 0 0">The FAA's live flight plans and amendments (TFMS). A flight plan amended to a new destination marks a diversion right away.</p>
+        <p style="margin:10px 0 0"><a class="btn" href="api/swim/samples.zip" download>Download sample messages</a></p>
+        <p class="faint" style="margin:6px 0 0">A zip with a few messages of each type the feed has sent, and the last ones for your flights, to check they're read right.</p></div>`) : ""}
       <p class="small faint" style="margin:-4px 4px 14px">Alerts are on the bell page. Schedule file, notify service and API keys are in the add-on's Configuration tab in Home Assistant.</p>
       <div class="card">
         <h3 style="margin:0 0 4px">Notifications</h3>

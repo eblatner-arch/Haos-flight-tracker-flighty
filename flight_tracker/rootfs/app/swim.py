@@ -21,6 +21,11 @@ WATCH = set()        # callsigns to keep (UAL2608 …), set by the server each c
 EVENTS = {}          # callsign -> [event, …] newest last
 LOCK = threading.Lock()
 KEEP = 40            # events per callsign
+SAMPLES = {}         # message type -> a few raw messages, to check the parser against the real feed
+MATCHED_RAW = []     # the last raw messages that matched your flights
+TYPE_COUNTS = {}
+import re as _re
+_TYPE_RE = _re.compile(r'msgType="([^"]+)"')
 _thread = None
 _cfg = {}
 
@@ -74,22 +79,40 @@ def parse(xml_text):
     return out
 
 
+def _sample(xml_text):
+    types = _TYPE_RE.findall(xml_text[:200000]) or ["unknown"]
+    for t in set(types):
+        TYPE_COUNTS[t] = TYPE_COUNTS.get(t, 0) + 1
+        lst = SAMPLES.setdefault(t, [])
+        if len(lst) < 3:
+            lst.append(xml_text[:200000])
+
+
 def handle(xml_text):
     """Keep the events for watched callsigns."""
     STATE["messages"] += 1
     STATE["last_message"] = time.time()
+    try:
+        _sample(xml_text)
+    except Exception:
+        pass
     if not WATCH:
         return
     if not any(cs in xml_text for cs in WATCH):  # cheap test before parsing
         return
+    hit = False
     for ev in parse(xml_text):
         if ev["acid"] in WATCH:
+            hit = True
             ev["got"] = time.time()
             with LOCK:
                 lst = EVENTS.setdefault(ev["acid"], [])
                 lst.append(ev)
                 del lst[:-KEEP]
             STATE["matched"] += 1
+    if hit:
+        MATCHED_RAW.append({"at": time.time(), "xml": xml_text[:200000]})
+        del MATCHED_RAW[:-20]
 
 
 def events(callsign):
@@ -222,3 +245,20 @@ def _session():
         except Exception:
             pass
     raise RuntimeError("connection dropped")
+
+
+def samples_zip():
+    """Examples of each message type seen, the last messages for your flights, and counts."""
+    import io
+    import json
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("summary.json", json.dumps({"state": STATE, "watching": sorted(WATCH), "types": TYPE_COUNTS,
+                                               "events": {k: v for k, v in EVENTS.items()}}, indent=1, default=str))
+        for t, lst in SAMPLES.items():
+            for i, x in enumerate(lst, 1):
+                z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
+        for i, m in enumerate(MATCHED_RAW, 1):
+            z.writestr(f"your_flights/{i:02d}.xml", m["xml"])
+    return buf.getvalue()

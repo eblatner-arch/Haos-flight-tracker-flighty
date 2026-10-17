@@ -2371,6 +2371,15 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(blob)
             return
+        if path == "/api/swim/samples.zip":
+            blob = swim.samples_zip()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="swim-samples.zip"')
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            self.wfile.write(blob)
+            return
         if path == "/api/history/export.csv":
             blob = history.export_csv()
             self.send_response(200)

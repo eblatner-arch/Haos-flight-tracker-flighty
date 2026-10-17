@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.2
+- Settings → FAA SWIM → Download sample messages: a zip with up to three raw messages of every type the feed has sent, the last 20 that matched your flights, and a summary of counts and what was read from them
+
 ## 3.12.1
 - FAA SWIM connection set up the way the FAA's Python JumpStart kit does it: credentials as connection properties, retry forever, certificate checked against Let's Encrypt's ISRG Root X1
 
