@@ -1328,3 +1328,31 @@ class SameCallsignTwice(unittest.TestCase):
             self.assertEqual(server.pick_live("UAL1", fl)["tail"], "N1")
         finally:
             sources.fetch_live_all = real
+
+
+class AutoRecovery(unittest.TestCase):
+    def test_follow_and_calendar_wins(self):
+        import server
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="IAH", dest="ABE", off_a=T0 + 600))
+        f["times"]["on"]["actual"] = T0 + 3 * H
+        fa.fix_diversion(f, "EWR")
+        L = {"id": "c-2608", "ident": "UAL2608", "display": "UA 2608", "flight_no": "2608", "dep": "IAH", "arr": "EWR",
+             "sched_out": T0, "sched_in": T0 + 4 * H, "flight": f, "notified": {}}
+        server.STATE["legs"] = {"c-2608": L}
+        server.STATE["manual"] = []
+        sent = []
+        real = server.notify
+        server.notify = lambda a: sent.append(a) or (True, "")
+        try:
+            server.auto_recovery(T0 + 3 * H)
+            auto = [x for x in server.STATE["manual"] if x.get("auto")]
+            self.assertEqual([(x["ident"], x["dep"], x["arr"]) for x in auto], [("UA2608", "ABE", "EWR")])
+            server.auto_recovery(T0 + 3 * H + 60)                     # not twice
+            self.assertEqual(len(server.STATE["manual"]), 1)
+            # the work calendar now lists UA2608 ABE→EWR: the automatic copy goes
+            server.STATE["legs"]["c-rec"] = {"id": "c-rec", "flight_no": "2608", "dep": "ABE", "arr": "EWR",
+                                             "sched_out": T0 + 5 * H, "sched_in": T0 + 6 * H}
+            server.auto_recovery(T0 + 3 * H + 120)
+            self.assertEqual(server.STATE["manual"], [])
+        finally:
+            server.notify = real

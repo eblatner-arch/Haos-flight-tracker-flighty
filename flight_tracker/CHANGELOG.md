@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.10.0
+- Recovery flights are followed automatically: when a flight you track diverts and lands at the diversion airport, the same flight number from there to the original destination is added and found (UA2608 IAH→EWR diverted to ABE → UA2608 ABE→EWR), with a push "UA 2608 continues ABE→EWR" (Alerts → Recovery flight followed). It's yours (kept in History, paired with the diversion) or a friend's, like the diverted flight
+- If your work calendar already has that leg, nothing is added; if the calendar lists it later, the calendar's copy wins and the automatic one is removed
+
 ## 3.9.5
 - Two airplanes broadcasting the same flight number at once (a late earlier leg still flying or holding): ADS-B now picks the one with the tail we know, otherwise the one nearest where this flight should be (its last tracked position, or along its route), for your flight, your inbound and the airplane's earlier legs
 

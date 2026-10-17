@@ -703,6 +703,68 @@ def set_kind(lid, kind):
     return False
 
 
+def auto_recovery(now):
+    """After a diversion lands, follow the same flight number on from the diversion airport to the
+    original destination (UA2608 IAH→EWR diverted to ABE: follow UA2608 ABE→EWR). It's found through
+    FlightAware like any added flight. If your work calendar later lists that leg, the calendar's
+    copy wins and the automatic one is dropped."""
+    adds = []
+    with LOCK:
+        legs = list(STATE["legs"].values())
+        for L in legs:
+            f = L.get("flight") or {}
+            t = f.get("times") or {}
+            to = f.get("diverted_to") or (((f.get("destination") or {}).get("iata") or "").upper() if f.get("diverted") else "")
+            planned = planned_arr(L)
+            landed = (t.get("on") or {}).get("actual") or (t.get("in") or {}).get("actual")
+            if not to or not planned or to == planned or not landed or L.get("recovery_added"):
+                continue
+            m = IDENT_RE.match((L.get("display") or "").replace(" ", "")) or IDENT_RE.match(L.get("ident") or "")
+            if not m:
+                continue
+            num = m.group(2)
+            if any(o is not L and (o.get("flight_no") or "") == num and o.get("dep") == to and planned_arr(o) == planned
+                   for o in legs):
+                L["recovery_added"] = "existing"  # already on your calendar or added
+                continue
+            try:
+                tz = ZoneInfo(airports.get(to).get("tz") or TZNAME)
+            except Exception:
+                tz = HOME_TZ
+            date = datetime.fromtimestamp(landed, tz).strftime("%Y-%m-%d")
+            kind = "friend" if rules_mod.kind_of(L) == "friends" else "manual"
+            adds.append((L, f"{m.group(1)}{num}", to, planned, date, kind))
+        # the calendar now lists an automatic recovery leg: keep the calendar's
+        cal = {(o.get("flight_no"), o.get("dep"), o.get("arr")) for o in legs if not o.get("extra")}
+        drop = [x for x in STATE["manual"] if x.get("auto") and
+                ((IDENT_RE.match(x["ident"]) or [None, None, None])[2], x["dep"], x["arr"]) in cal]
+    for x in drop:
+        remove_manual(extra_id(**_x(x)))
+        log.info("Recovery leg %s %s→%s is on the calendar now; dropped the automatic copy", x["ident"], x["dep"], x["arr"])
+    for L, ident, dep, arr, date, kind in adds:
+        try:
+            lid = add_manual(ident, dep, arr, date, kind)
+        except ValueError as e:
+            log.info("Recovery leg for %s: %s", L.get("display"), e)
+            continue
+        with LOCK:
+            for x in STATE["manual"]:
+                if extra_id(**_x(x)) == lid:
+                    x["auto"] = L["id"]
+            cur = STATE["legs"].get(L["id"])
+            if cur is not None:
+                cur["recovery_added"] = lid
+        REFRESH_Q.put(lid)
+        WAKE.set()
+        log.info("%s diverted to %s: now following %s %s→%s", L.get("display"), dep, ident, dep, arr)
+        push_event("recovery", f"{L.get('display') or ident} continues {dep}→{arr}",
+                   f"Now following {L.get('display') or ident} {dep}→{arr}, the flight on to {arr} after the diversion.",
+                   leg=L)
+    if adds or drop:
+        save_state()
+        bump()
+
+
 def remove_manual(lid):
     with LOCK:
         STATE["manual"] = [x for x in STATE["manual"] if extra_id(**_x(x)) != lid]
@@ -2029,6 +2091,7 @@ def worker():
                     update_leg(browser, lid)
             inbound_adsb(time.time())
             archive_finished(time.time())
+            auto_recovery(time.time())
             STATE["worker"].update(busy=None, last_cycle=time.time(), error=None)
             if time.time() - last_pub > 60 or due:
                 publish()

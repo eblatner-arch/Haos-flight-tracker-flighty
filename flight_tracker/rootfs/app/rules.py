@@ -53,6 +53,8 @@ CATALOG = [
      dict(on=True, hours=None, calendar=True, manual=True, friends=True, ts=True), {}),
     ("diverted", "Status", "Diverted", "The flight diverted.",
      dict(on=True, hours=None, calendar=True, manual=True, friends=True, ts=True), {}),
+    ("recovery", "Status", "Recovery flight followed", "After a diversion, the flight on to the original destination is found and followed automatically.",
+     dict(on=True, hours=None, calendar=True, manual=True, friends=True, ts=False), {}),
     # Aircraft
     ("tail_identified", "Aircraft", "Tail identified", "First time the tail number is known.",
      dict(on=False, hours=None, calendar=True, manual=True, friends=False, ts=False), {}),
