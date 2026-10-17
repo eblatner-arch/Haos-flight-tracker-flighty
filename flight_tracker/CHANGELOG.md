@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.21.6
+- The EDCT no longer replaces the takeoff estimate: the estimate stays the tower's (or FlightAware's), and the EDCT shows under it in amber ("EDCT 14:59 · EWR program"), so a tower prediction later than the slot is visible next to it.
+
 ## 3.21.5
 - Lookup log: a clearance message that repeats the clearance with one thing added (the crew's ROGER, a revised EDCT) logs only that ("MCO clearance by datalink: crew answered roger").
 

@@ -897,11 +897,10 @@ def swim_overlay(L, f, now):
         if v and v <= now + 60 and not t[slot].get("actual"):
             t[slot]["actual"] = v
             src[slot]["actual"] = "tower"
-    if sw.get("edct") and not t["off"].get("actual"):
-        t["off"]["estimated"] = sw["edct"]
-        src["off"]["estimated"] = "FAA EDCT"
+    # The EDCT is shown under the takeoff time, not in place of it: the tower (or the airline) can
+    # predict later than the slot (a 14:58 push for a 14:59 EDCT), and both are worth seeing.
     est_off = (td_dep.get("runwayDepartureTime") or {}).get("estimated")
-    if est_off and not t["off"].get("actual") and not sw.get("edct"):
+    if est_off and not t["off"].get("actual"):
         t["off"]["estimated"] = _ts(est_off)
         src["off"]["estimated"] = f"{L.get('dep')} tower"
     if sw.get("route"):

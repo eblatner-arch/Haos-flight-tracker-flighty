@@ -829,7 +829,7 @@
   const notFound = (leg) => leg.extra && !leg.flight;
   // Calendar flights come from the crew schedule; app-added ones are yours (Manual) or a friend's.
   const kindTag = (leg) => !leg.extra ? "" : leg.kind === "manual" ? '<span class="tag">MANUAL</span>' : '<span class="tag friend">FRIEND</span>';
-  function timeBlock(label, t, sched, tz, right, src) {
+  function timeBlock(label, t, sched, tz, right, src, extra) {
     if (sched === "nf") return `<div class="t ${right ? "right" : ""}"><div class="lbl">${label}</div><div><span class="big">—</span></div><div class="sub">Not found</div></div>`;
     const shown = t ? (t.actual || t.estimated || t.scheduled) : null;
     const s = (t && t.scheduled) || sched;
@@ -841,6 +841,7 @@
       <div><span class="big ${cls}">${hm(shown || s, tz)}</span>${Math.abs(diff) >= 5 ? `<span class="was">${hm(s, tz)}</span>` : ""}</div>
       <div class="sub">${shown || s ? `${kind} · ${tzAbbr(shown || s, tz)} · ${dayLabel(shown || s, tz)}` : "Not known yet"}</div>
       ${src && t && (t.actual ? src.actual : t.estimated ? src.estimated : null) ? `<div class="sub faint">from ${esc(t.actual ? src.actual : src.estimated)}</div>` : ""}
+      ${extra || ""}
     </div>`;
   }
 
@@ -1764,7 +1765,9 @@
           ${timeBlock(f.times.in && f.times.in.actual ? "Arrived" : "Arrives", f.times.in, notFound(leg) ? "nf" : leg.sched_in, tzB, true, (f.time_src || {}).in)}
         </div>
         <div class="times sm" ${notFound(leg) ? 'hidden' : ""}>
-          ${timeBlock(f.times.off && f.times.off.actual ? "Took off" : "Takeoff", f.times.off, null, tzA, false, (f.time_src || {}).off)}
+          ${timeBlock(f.times.off && f.times.off.actual ? "Took off" : "Takeoff", f.times.off, null, tzA, false, (f.time_src || {}).off,
+            f.swim && f.swim.edct && f.swim.edct.at && !(f.times.off && f.times.off.actual)
+              ? `<div class="sub edct">EDCT <b>${hm(f.swim.edct.at, tzA)}</b>${f.swim.edct.for ? ` · ${esc(f.swim.edct.for)} program` : ""}</div>` : "")}
           ${timeBlock(f.times.on && f.times.on.actual ? "Landed" : "Landing", f.times.on, null, tzB, true, (f.time_src || {}).on)}
         </div>
         ${chips(leg)}

@@ -1755,8 +1755,9 @@ class Swim(unittest.TestCase):
         with mock.patch.object(server, "push_event", lambda *a, **k: pushed.append(a)):
             server.swim_check(L, f, "PHX")
             server.swim_overlay(L, f, so)
-        self.assertEqual(f["times"]["off"]["estimated"], datetime(2026, 10, 17, 6, 13, tzinfo=timezone.utc).timestamp())
-        self.assertEqual(f["time_src"]["off"]["estimated"], "FAA EDCT")
+        # the EDCT is shown beside the takeoff estimate, not in place of it
+        self.assertEqual(f["swim"]["edct"]["at"], datetime(2026, 10, 17, 6, 13, tzinfo=timezone.utc).timestamp())
+        self.assertNotEqual(f["time_src"]["off"].get("estimated"), "FAA EDCT")
         self.assertEqual(pushed[0][0], "edct")
         with mock.patch.object(server, "push_event", lambda *a, **k: pushed.append(a)):
             server.swim_check(L, f, "PHX")          # nothing new: no second push

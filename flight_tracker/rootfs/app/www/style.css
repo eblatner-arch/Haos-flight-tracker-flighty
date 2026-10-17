@@ -537,3 +537,6 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
   font: 800 10px/1 -apple-system, system-ui, sans-serif; color: var(--faint); letter-spacing: .04em;
   text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
 .ctr-lbl.on { font-size: 12px; }
+
+.t .sub.edct { color: var(--amber); }
+.t .sub.edct b { font-weight: 700; }
