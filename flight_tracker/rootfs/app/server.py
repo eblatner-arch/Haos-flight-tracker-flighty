@@ -1714,6 +1714,18 @@ def _set_live(lid, who, live):
             return
         L[key] = live
         add_fix(L.get("flight") if who == "own" else L.get("inbound"), live)
+        if who == "inb" and live.get("tail") and live.get("src"):
+            # approach radar sees the inbound's transponder (so its tail) while it climbs out of its
+            # origin: keep it, it's the airplane coming to fly your flight
+            f, inb = L.get("flight") or {}, L.get("inbound") or {}
+            tail = live["tail"].upper()
+            prev = (L.get("adsb_inbound") or {}).get("tail")
+            route = f"{(inb.get('origin') or {}).get('iata') or '?'}→{(inb.get('destination') or {}).get('iata') or '?'}"
+            L["adsb_inbound"] = {"tail": tail, "at": live.get("at") or time.time(), "root": f.get("inbound_fa_id"),
+                                 "source": f"inbound {inb.get('display_ident') or inb.get('ident')} {route} on {live['src']}"}
+            if tail != (prev or "").upper() and tail != (f.get("tail") or "").upper():
+                REFRESH_Q.put(lid)
+                WAKE.set()
 
 
 def live_loop():
@@ -1779,6 +1791,26 @@ def walk_chain(browser, L, now):
                          "source": f"{'inbound ' if i == 0 else ''}{name} {route} in flight"}
     L["chain"] = hops
     return found
+
+
+def inbound_pdc(L, f):
+    """The airplane named in your inbound's datalink clearance at its departure airport."""
+    inb = L.get("inbound") or {}
+    if not inb.get("ident"):
+        return None
+    org = _iata((inb.get("origin") or {}).get("iata") or (inb.get("origin") or {}).get("icao"))
+    so = fa.best_time(inb.get("times") or {}, "out") or 0
+    best = None
+    for ev in swim.events(inb["ident"]):
+        pd = ev.get("pdc") or {}
+        tail = (pd.get("tail") or "").upper().strip()
+        if not tail or _iata(ev.get("dep")) != org:
+            continue
+        issued = _ts(pd.get("at")) or ev.get("got") or 0
+        if so and so - 4 * HOUR <= issued <= so + 2 * HOUR and (not best or issued >= best["at"]):
+            best = {"tail": ("N" + tail) if tail[0].isdigit() else tail, "at": issued, "root": f.get("inbound_fa_id"),
+                    "source": f"inbound {inb.get('display_ident') or inb['ident']} datalink clearance"}
+    return best
 
 
 def pdc_tail(L, f):
@@ -1955,9 +1987,16 @@ def resolve_tail(browser, L, f, now):
     inb = L.get("inbound") or {}
     inb_gone = bool(inb.get("times")) and fa.phase(inb, now) in ("taxi_out", "airborne", "landed", "arrived")
     ai = L.get("adsb_inbound") or {}
-    fresh_ai = ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id"))
+    if not (ai.get("tail") and fa.same_flight(ai.get("root"), f.get("inbound_fa_id"))):
+        ai = inbound_pdc(L, f) or {}
+    # The inbound's own transponder (or its clearance): fresh, or seen since it left its gate. Once
+    # it has left, its airplane can't change, so a tail seen then stays the answer even when nothing
+    # can see the transponder later (en route the FAA's center radar carries no tail).
+    inb_out = ((inb.get("times") or {}).get("out") or {}).get("actual") or 0
+    fresh_ai = bool(ai.get("tail")) and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")) and (
+        now - (ai.get("at") or 0) < 20 * 60 or (inb_gone and (ai.get("at") or 0) >= inb_out - 10 * 60))
     chain = walk_chain(browser, L, now) if ph == "scheduled" and info.get("kind") not in ("own", "pdc") and not (inb_gone and fresh_ai) else None
-    if not chain and ai.get("tail") and now - (ai.get("at") or 0) < 20 * 60 and fa.same_flight(ai.get("root"), f.get("inbound_fa_id")):
+    if not chain and fresh_ai:
         chain = {"tail": ai["tail"], "kind": "chain", "at": ai["at"], "root": ai["root"], "source": ai["source"]}
     mine = own_inbound(L, f) if info.get("kind") != "own" else None
     mi = (mine or {}).get("tail_info") or {}

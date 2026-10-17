@@ -1771,6 +1771,23 @@ class Swim(unittest.TestCase):
             server.resolve_tail(None, L, f, so - 30 * 60)
             self.assertEqual(f["tail"], "N11111")
 
+    def test_inbound_tail_from_radar_survives_en_route(self):
+        """Approach radar saw the inbound's tail at takeoff (a swap that kept the inbound number); 40 min
+        later en route nothing can see its transponder, and the seen tail still stands."""
+        import server
+        so = T0 + 3 * 3600
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="EWR", dest="SFO", tail="N11111"))
+        L = {"id": "i1", "ident": "UAL1234", "display": "UA 1234", "dep": "EWR", "arr": "SFO", "sched_out": so,
+             "inbound": {"ident": "UAL567", "origin": {"iata": "ORD"}, "destination": {"iata": "EWR"},
+                         "times": {k: {"scheduled": T0 + o, "actual": T0 + o if k in ("out", "off") else None}
+                                   for k, o in (("out", 0), ("off", 900), ("on", 2 * 3600), ("in", 2 * 3600 + 600))}},
+             "adsb_inbound": {"tail": "N22222", "at": T0 + 1000, "root": f["inbound_fa_id"],
+                              "source": "inbound UA567 ORD→EWR on FAA approach radar"}}
+        with mock.patch.object(server, "live_all", lambda cs, quick=False: []), \
+                mock.patch.object(server, "walk_chain", lambda *a: None), mock.patch.object(server, "aero_on", lambda: False):
+            server.resolve_tail(None, L, f, T0 + 3400)
+        self.assertEqual((f["tail"], L["tail_info"]["kind"]), ("N22222", "chain"))
+
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,
         and survives a restart."""

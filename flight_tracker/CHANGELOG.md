@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.20.5
+- Swap on the inbound that keeps its flight number, without adsb.lol: the 5-second position loop records the inbound's tail whenever FAA approach radar sees it (climbing out of its origin, arriving at yours), and a new tail triggers a check of your flight at once.
+- Once the inbound has left its gate, the tail seen on it stays the answer for the rest of its flight (its airplane can't change in the air), instead of expiring after 20 min while en route, where the FAA's center radar carries no tail.
+- The inbound's own datalink clearance at its origin also names its airplane.
+
 ## 3.20.4
 - The FAA datalink clearance (PDC) is a tail source: it names the airplane (/AN N12345) for your flight at your departure airport, usually 30-60 min before departure. Trusted next after your own transponder; if it differs from what the app had, you get the aircraft swap alert ("from FAA datalink clearance"). A clearance from another day's flight with the same number is ignored. Airports without PDC simply don't add this signal.
 - adsb.lol's route lookup also waits out the pause after adsb.lol stops answering.
