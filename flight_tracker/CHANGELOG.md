@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.10.2
+- A ground stop or ground delay program at your departure airport only pushes when your inbound is known, hasn't taken off, and is inside the program's scope (or the scope can't be told). No inbound known, or an inbound from outside the listed centers, no push (it still shows on the flight's screen)
+
 ## 3.10.1
 - AeroDataBox diversion check is off by default: its site answers the page reader with "Verification required" (the lookup log now says so instead of "no flight data read")
 

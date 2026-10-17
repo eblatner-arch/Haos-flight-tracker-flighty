@@ -437,11 +437,13 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
         cur = {}
         for n in nas_for(leg, nas_items):
             if n["kind"] in ("gs", "gdp") and n.get("here") == "dep" and n["airport"] != arr:
+                # A program at your departure airport only holds flights coming *in*: it matters only
+                # through an inbound that hasn't taken off yet and is (or may be) inside its scope.
                 imp = [i for i in n.get("impact") or [] if i["who"] == "inbound"]
                 inb = leg.get("inbound") or {}
                 inb_ph = fa.phase(inb, now) if inb.get("times") else None
-                # no inbound known: tell you (it might be held); inbound airborne or in: it can't be
-                if (imp and all(i.get("airborne") for i in imp)) or inb_ph in ("airborne", "landed", "arrived"):
+                if inb_ph in ("airborne", "landed", "arrived") or not imp \
+                        or all(i.get("airborne") or i.get("hit") is False for i in imp):
                     continue
             ev = NAS_EVENT.get(n["kind"], "nas_other")
             atz = dep_tz if n["airport"] == dep else arr_tz

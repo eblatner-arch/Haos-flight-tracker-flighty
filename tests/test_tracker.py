@@ -1356,3 +1356,17 @@ class AutoRecovery(unittest.TestCase):
             self.assertEqual(server.STATE["manual"], [])
         finally:
             server.notify = real
+
+
+class DepartureProgramScope(unittest.TestCase):
+    def test_gdp_at_departure_needs_inbound_in_scope(self):
+        gdp = [{"airport": "SFO", "kind": "gdp", "label": "Ground delay program", "reason": "other", "detail": "",
+                "scope": ["CYEG", "CYVR", "CYYC"], "key": "SFO|gdp|1"}]
+        L = {"id": "u1", "ident": "UAL1", "display": "UA 1", "dep": "SFO", "arr": "SIN", "sched_out": T0 + H,
+             "sched_in": T0 + 18 * H, "notified": {"watch": True}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(out_s=T0 + H, origin="SFO", dest="SIN"))
+        nas = lambda a: [x for x in a if x["key"].startswith("nas")]  # noqa: E731
+        self.assertEqual(nas(alerts.evaluate(L, CFG, T0, gdp)), [])          # no inbound known: no push
+        inb, _ = fa.flights_from_bootstrap(boot(fa_id="IN-1", out_s=T0 - 2 * H, origin="LAX", dest="SFO", inbound_id=None))
+        L["inbound"] = inb
+        self.assertEqual(nas(alerts.evaluate(L, CFG, T0 + 60, gdp)), [])     # inbound from LAX: not in scope
