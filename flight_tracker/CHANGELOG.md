@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.9.5
+- Two airplanes broadcasting the same flight number at once (a late earlier leg still flying or holding): ADS-B now picks the one with the tail we know, otherwise the one nearest where this flight should be (its last tracked position, or along its route), for your flight, your inbound and the airplane's earlier legs
+
 ## 3.9.4
 - History-list lookup: if a route appears twice on the date, it takes the leg closest to now
 

@@ -1311,3 +1311,20 @@ class HistoryList(unittest.TestCase):
                  "https://www.flightaware.com/live/flight/UAL2608/history/20261015/2003Z/KIAH/KEWR"]
         self.assertEqual(fa.pick_history_link(links, "KABE", "KEWR", "2026-10-16"), links[1])
         self.assertIsNone(fa.pick_history_link(links, "KABE", "KEWR", "2026-10-14"))
+
+
+class SameCallsignTwice(unittest.TestCase):
+    def test_pick_by_tail_then_position(self):
+        import server
+        two = [{"lat": 41.9, "lon": -87.9, "ground": False, "tail": "N1"},   # near ORD
+               {"lat": 40.7, "lon": -74.5, "ground": False, "tail": "N2"}]   # near EWR
+        real = sources.fetch_live_all
+        sources.fetch_live_all = lambda cs: list(two)
+        try:
+            self.assertEqual(server.pick_live("UAL1", {"tail": "N2"})["tail"], "N2")
+            fl = {"track": [[40.6, -75.0, 30000, 400, T0]]}
+            self.assertEqual(server.pick_live("UAL1", fl)["tail"], "N2")
+            fl = {"origin": {"iata": "ORD"}, "destination": {"iata": "MKE"}}
+            self.assertEqual(server.pick_live("UAL1", fl)["tail"], "N1")
+        finally:
+            sources.fetch_live_all = real

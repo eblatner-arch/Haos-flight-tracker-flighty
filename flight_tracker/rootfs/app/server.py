@@ -1148,6 +1148,33 @@ def update_rotation(browser, L, now):
     L["rotation"] = rot
 
 
+def pick_live(callsign, fl, accept=None):
+    """The airplane broadcasting this callsign that is *this* flight. Two can be up at once with the
+    same number (yesterday's late one still flying, an earlier leg holding): prefer the one with the
+    tail we know, then the one nearest where this flight should be (its last tracked position, or
+    its route between the two airports)."""
+    cands = [a for a in sources.fetch_live_all(callsign) if accept is None or accept(a)]
+    if len(cands) <= 1:
+        return cands[0] if cands else None
+    fl = fl or {}
+    tail = (fl.get("tail") or "").upper()
+    same = [a for a in cands if tail and (a.get("tail") or "").upper() == tail]
+    if len(same) == 1:
+        return same[0]
+    pts = []
+    tr = [p for p in (fl.get("track") or []) if p and p[0] is not None]
+    if tr:
+        pts = [(tr[-1][0], tr[-1][1])]
+    else:
+        o, d = fl.get("origin") or {}, fl.get("destination") or {}
+        oa, da = airports.get(o.get("iata") or o.get("icao")), airports.get(d.get("iata") or d.get("icao"))
+        if oa.get("lat") is not None and da.get("lat") is not None:
+            pts = [(oa["lat"] + (da["lat"] - oa["lat"]) * i / 20, oa["lon"] + (da["lon"] - oa["lon"]) * i / 20) for i in range(21)]
+    if not pts:
+        return cands[0]
+    return min(cands, key=lambda a: min(sources.nm_between(p[0], p[1], a["lat"], a["lon"]) for p in pts))
+
+
 def add_fix(fl, live):
     """Extend a flight's drawn track with a live ADS-B position, so the airplane sits on its line
     between FlightAware's (less frequent) track updates."""
@@ -1177,7 +1204,7 @@ def walk_chain(browser, L, now):
                      "out": fa.best_time(cur["times"], "out"), "in": fa.best_time(cur["times"], "in")})
         if found is None and ph in ("taxi_out", "airborne", "landed") and cur.get("ident"):
             try:
-                live = sources.fetch_live(cur["ident"])
+                live = pick_live(cur["ident"], cur)
             except Exception as e:
                 log.info("%s chain ADS-B: %s", L.get("display"), e)
                 live = None
@@ -1654,7 +1681,7 @@ def update_leg(browser, lid):
                         return not ac.get("ground")
                     return _near(L.get("dep") if ph == "taxi_out" else (f.get("destination") or {}).get("iata") or L.get("arr"), ac, 12) is not False
                 try:
-                    L["live"] = sources.fetch_live(L["ident"], mine)
+                    L["live"] = pick_live(L["ident"], L.get("flight"), mine)
                     add_fix(L.get("flight"), L["live"])
                 except Exception as e:
                     log.info("%s live position: %s", L.get("display"), e)
@@ -1663,7 +1690,7 @@ def update_leg(browser, lid):
             inb = L.get("inbound")
             if inb and ph == "scheduled" and fa.phase(inb, now) in ("taxi_out", "airborne") and inb.get("ident"):
                 try:
-                    L["inbound_live"] = sources.fetch_live(inb["ident"], lambda ac: not ac.get("ground") or fa.phase(inb, now) == "taxi_out")
+                    L["inbound_live"] = pick_live(inb["ident"], inb, lambda ac: not ac.get("ground") or fa.phase(inb, now) == "taxi_out")
                     add_fix(inb, L["inbound_live"])
                 except Exception as e:
                     log.info("inbound live position: %s", e)
@@ -1781,7 +1808,7 @@ def inbound_adsb(now):
             continue
         try:
             # the inbound flight number can also fly an earlier leg: take the one moving toward you
-            live = sources.fetch_live(inb["ident"], lambda ac: not ac.get("ground") or iph in ("taxi_out", "landed")
+            live = pick_live(inb["ident"], inb, lambda ac: not ac.get("ground") or iph in ("taxi_out", "landed")
                                       or _near((inb.get("origin") or {}).get("iata"), ac, 12) is not False)
             err = None
         except Exception as e:
