@@ -420,7 +420,7 @@
     }
     if (interactive) {
       oneFingerZoom(map, el);
-      map.on("zoomend moveend", () => layoutCheck(entry));
+      map.on("zoomend moveend", () => { layoutCheck(entry); surfaceNow(entry); });
     }
     paintMap(entry, leg, true);
     setTimeout(() => map.invalidateSize(), 50);
@@ -497,7 +497,9 @@
       SURF.timer = null;
       if (SURF.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (SURF.id === id) stopSurface(); return; }
       let d = null;
-      try { d = await api(`api/surface/${encodeURIComponent(id)}`); } catch {}
+      const ent = MAPS[`leg-${id}`];
+      const ap = ent ? zoomedAirport(ent, 13) : null;
+      try { d = await api(`api/surface/${encodeURIComponent(id)}${ap ? `?ap=${encodeURIComponent(ap)}` : ""}`); } catch {}
       if (SURF.id !== id) return;
       const entry = MAPS[`leg-${id}`];
       if (entry) paintSurface(entry, d || {});
@@ -505,6 +507,26 @@
     };
     SURF.timer = setTimeout(tick, 0);
   }
+  // The flight airport the map is zoomed in on (center within 8 km, at least zoom z), or null.
+  function zoomedAirport(entry, z) {
+    const leg = entry.leg;
+    if (!leg || entry.map.getZoom() < z) return null;
+    const c = entry.map.getCenter(), here = [c.lat, c.lng];
+    const a = [leg.dep_ap, leg.arr_ap].find((a) => a && ll(a) && kmBetween(here, ll(a)) < 8);
+    return a ? a.iata || a.icao : null;
+  }
+  // zoomed in on an airport: look for surface traffic now rather than at the next 20 s poll
+  function surfaceNow(entry) {
+    if (!SURF.id || !entry.leg || entry.leg.id !== SURF.id || !zoomedAirport(entry, 13)) return;
+    if (entry.surfAp === zoomedAirport(entry, 13)) return;
+    entry.surfAp = zoomedAirport(entry, 13);
+    if (SURF.timer) clearTimeout(SURF.timer);
+    SURF.timer = null;
+    const l = entry.leg;
+    SURF.id = null;
+    surfaceWatch(l);
+  }
+
   function paintSurface(entry, d) {
     if (!entry.surface) entry.surface = L.layerGroup().addTo(entry.map);
     entry.surface.clearLayers();

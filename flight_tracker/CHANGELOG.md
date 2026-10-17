@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.8
+- Surface traffic shows whenever you zoom the flight's map in on its departure or arrival airport (zoom 13+), at any phase of the flight, and loads right away when you get there.
+
 ## 3.15.7
 - Arrival estimate in the air uses only estimates worked out after takeoff (the tower's pre-departure one still assumed the schedule).
 - The shown arrival only moves when the estimate changes by 2+ minutes, so the log isn't a new line every minute.

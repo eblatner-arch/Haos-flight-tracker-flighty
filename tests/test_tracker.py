@@ -424,6 +424,22 @@ class Stdds(unittest.TestCase):
         self.feed("stdds_asdex.xml")
         self.assertGreater(len(swim.surface("KSEA")), 1)
 
+
+class SurfaceWanted(unittest.TestCase):
+    def test_zoomed_airport_shows_even_en_route(self):
+        import server
+        import swim
+        swim.STDDS_STATE["status"] = "connected"
+        now = T0
+        f, _ = fa.flights_from_bootstrap(boot(out_s=now - 2 * H, origin="EWR", dest="SFO", off_a=now - H))
+        server.STATE["legs"]["sw1"] = {"id": "sw1", "ident": "UAL1234", "dep": "EWR", "arr": "SFO",
+                                        "sched_out": now - 2 * H, "sched_in": now + 4 * H, "flight": f}
+        with mock.patch.object(server, "watched", return_value=True):
+            self.assertEqual(server.api_surface("sw1", now)["targets"], [])          # en route: nothing by itself
+            self.assertEqual(server.api_surface("sw1", now, "EWR")["airport"], "EWR")  # zoomed on EWR
+            self.assertNotIn("airport", server.api_surface("sw1", now, "ORD"))      # not this flight's airport
+        del server.STATE["legs"]["sw1"]
+
 class AirportLayout(unittest.TestCase):
     def test_osm_to_features(self):
         import server

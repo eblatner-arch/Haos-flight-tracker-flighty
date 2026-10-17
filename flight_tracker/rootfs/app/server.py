@@ -2386,7 +2386,7 @@ def worker():
 # web
 # --------------------------------------------------------------------------
 
-def api_surface(lid, now):
+def api_surface(lid, now, want=None):
     """Live surface positions (FAA STDDS) at the airport where this flight is on the ground: the
     departure airport until takeoff, the arrival airport once it's landing. Only for flights
     you're watching, and only while STDDS is connected."""
@@ -2399,7 +2399,9 @@ def api_surface(lid, now):
         t = f.get("times") or {}
         dest = f.get("diverted_to") or (f.get("destination") or {}).get("iata") or L.get("arr")
         on_e = fa.best_time(t, "on") if t else None
-        if ph in ("scheduled", "taxi_out"):
+        if want and want.upper() in {(c or "").upper() for c in (L.get("dep"), L.get("arr"), dest)}:
+            code = want.upper()   # you've zoomed in on one of this flight's airports
+        elif ph in ("scheduled", "taxi_out"):
             code = L.get("dep")
         elif ph == "landed" or (ph == "airborne" and on_e and on_e - now < 6 * 60):
             code = dest
@@ -2863,7 +2865,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, d, cache="private, max-age=86400") if d else self._send(404, {"error": "no layout"})
         m = re.match(r"^/api/surface/([\w-]+)$", path)
         if m:
-            return self._send(200, api_surface(m.group(1), time.time()))
+            want = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("ap") or [None])[0]
+            return self._send(200, api_surface(m.group(1), time.time(), want))
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
