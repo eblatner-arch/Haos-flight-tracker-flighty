@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.8
+- FAA SWIM: the flight on after a diversion (UA2127 MDT→EWR) now matches. The FAA keeps the original departure time on it, which the 6-hour check used to reject.
+
 ## 3.12.7
 - FAA SWIM: ignores the FAA's automatic "still not departed" re-timings (every 5 min for a filed flight that hasn't left); they carry no news and a placeholder ETA.
 

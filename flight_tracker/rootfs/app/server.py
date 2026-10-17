@@ -507,7 +507,10 @@ def swim_check(L, f, planned):
         if ev.get("igtd"):
             try:
                 t = datetime.fromisoformat(ev["igtd"].replace("Z", "+00:00")).timestamp()
-                if abs(t - so) > 6 * HOUR:
+                # igtd is the flight's first planned departure. After a diversion the FAA keeps the
+                # original one on the continuation (UA2127 MDT→EWR carries LAX's 17:15Z), so allow
+                # it to be well before this leg's scheduled time.
+                if so and not (so - 18 * HOUR <= t <= so + 6 * HOUR):
                     continue
             except ValueError:
                 pass

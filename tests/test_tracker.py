@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 """Run with: python3 -m unittest discover -s tests"""
 
 import os
@@ -1372,6 +1373,24 @@ class Swim(unittest.TestCase):
         f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="ABE", dest="EWR"))
         L = {"id": "s2", "ident": "UAL2608", "dep": "ABE", "arr": "EWR", "sched_out": T0}
         self.assertEqual(server.swim_check(L, f, "EWR"), {})
+
+    def test_continuation_keeps_original_igtd(self):
+        """UA2127 LAX→EWR diverted to MDT: the MDT→EWR plan still carries LAX's departure (8 h earlier)."""
+        import server
+        import swim
+        swim.STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("UAL2127")
+        swim.EVENTS.clear()
+        igtd = datetime.fromtimestamp(T0 - 8 * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        tomorrow = datetime.fromtimestamp(T0 + 16 * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        swim.handle(f'''<x xmlns:fdm="f" xmlns:n="n"><fdm:fltdMessage acid="UAL2127" arrArpt="KEWR" depArpt="KMDT"
+          msgType="departureInformation" sourceFacility="KZNY" sourceTimeStamp="2026-10-17T02:30:00Z"><n:igtd>{igtd}</n:igtd>
+          <n:timeOfDeparture estimated="false">2026-10-17T02:29:00Z</n:timeOfDeparture></fdm:fltdMessage>
+          <fdm:fltdMessage acid="UAL2127" arrArpt="KEWR" depArpt="KMDT" msgType="FlightSectors" sourceFacility="TFMS">
+          <n:igtd>{tomorrow}</n:igtd></fdm:fltdMessage></x>''')
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="MDT", dest="EWR"))
+        L = {"id": "s3", "ident": "UAL2127", "dep": "MDT", "arr": "EWR", "sched_out": T0}
+        self.assertEqual(server.swim_check(L, f, "EWR").get("off"), "2026-10-17T02:29:00Z")
 
     def test_amendment_marks_diversion(self):
         import server
