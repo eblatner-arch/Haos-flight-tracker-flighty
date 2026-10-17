@@ -1359,6 +1359,20 @@ class Swim(unittest.TestCase):
         self.assertEqual((m["src"], m["status"], m["airline"]["out"], m["airline"]["in"]),
                          ("AAL", "PLANNED", "2026-10-17T03:21:00Z", "2026-10-17T04:40:00Z"))
 
+    def test_departure_timeout_is_ignored(self):
+        import server
+        import swim
+        swim.STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("UAL2608")
+        swim.EVENTS.clear()
+        swim.handle('''<x xmlns:fdm="f"><fdm:fltdMessage acid="UAL2608" arrArpt="KEWR" depArpt="KABE"
+          fdTrigger="UPDATE_DEPARTURE_TIMEOUT" msgType="FlightTimes" sourceFacility="TFMS" sourceTimeStamp="2026-10-17T01:54:20Z">
+          <fdm:t><nxcm:eta xmlns:nxcm="n" etaType="ESTIMATED" timeValue="2026-10-17T02:01:00Z"/></fdm:t></fdm:fltdMessage></x>''')
+        self.assertEqual(len(swim.events("UAL2608")), 1)
+        f, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="ABE", dest="EWR"))
+        L = {"id": "s2", "ident": "UAL2608", "dep": "ABE", "arr": "EWR", "sched_out": T0}
+        self.assertEqual(server.swim_check(L, f, "EWR"), {})
+
     def test_amendment_marks_diversion(self):
         import server
         import swim

@@ -512,6 +512,9 @@ def swim_check(L, f, planned):
             except ValueError:
                 pass
         mine.append(ev)
+    # TFMS re-proposes the departure every few minutes when a filed flight hasn't left
+    # (UPDATE_DEPARTURE_TIMEOUT): no news, and its ETA is a placeholder.
+    mine = [e for e in mine if e.get("trigger") != "UPDATE_DEPARTURE_TIMEOUT"]
     if not mine:
         return out
     last = mine[-1]

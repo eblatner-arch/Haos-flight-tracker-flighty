@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.7
+- FAA SWIM: ignores the FAA's automatic "still not departed" re-timings (every 5 min for a filed flight that hasn't left); they carry no news and a placeholder ETA.
+
 ## 3.12.6
 - FAA SWIM: reads the times the airline itself files with the FAA (gate out, off, on, gate in) and logs them for your flights.
 
