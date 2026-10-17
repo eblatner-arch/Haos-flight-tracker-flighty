@@ -2004,7 +2004,9 @@ def resolve_tail(browser, L, f, now):
         pt = pdc_tail(L, f)
         if pt:
             info = pt
-            saw(L, "FAA datalink clearance (PDC)", pt["tail"], None)
+            if L.get("pdc_logged") != pt["tail"]:   # once per airplane, not every check
+                L["pdc_logged"] = pt["tail"]
+                saw(L, "FAA datalink clearance (PDC)", pt["tail"], None)
     # Free signals first: the airplane flying in on ADS-B
     # and your own earlier leg on a turn. AeroAPI only to confirm what those can't explain.
     # Once the inbound has left its gate, the airplane can't change without a new inbound number

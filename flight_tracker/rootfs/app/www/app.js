@@ -1561,6 +1561,7 @@
   // A ground stop or delay program on a map: the centers whose departures it holds, filled; the
   // program airport; and where your flight (or its inbound) departs, red if it's held, green if not.
   let ARTCC = null;
+  const CTR_LABEL_AT = { ZNY: [41.05, -76.45] };
   async function nasView(key) {
     const legs = (STATE.legs || []).filter((l) => (l.nas || []).some((n) => n.key === key));
     const g = nasGroups(legs).find((x) => x.n.key === key);
@@ -1632,7 +1633,9 @@
       if (inS) c.rings.forEach((ring) => ring.forEach((p) => bounds.push(p)));
       const big = c.rings.slice().sort((a, b) => b.length - a.length)[0];
       if (big && big.length) {
-        const lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;
+        // centers with a lot of ocean get their label over land, where it reads as theirs
+        let lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;
+        if (CTR_LABEL_AT[id]) [lat, lon] = CTR_LABEL_AT[id];
         L.marker([lat, lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: null,
           html: `<span class="ctr-lbl ${inS ? "on" : ""}" style="${inS ? `color:${hot}` : ""}">${esc(id)}</span>` }) }).addTo(map);
       }

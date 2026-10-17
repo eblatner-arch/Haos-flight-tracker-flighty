@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.20.8
+- The datalink clearance's airplane is logged once (and again only if it changes), not on every check.
+- The ZNY label sits over Pennsylvania instead of the New Jersey coast.
+
 ## 3.20.7
 - Ground stop / delay program maps: each center is drawn from all of its FAA boundaries (low and high altitude), filled once where they overlap. Only one was drawn before, which left part of New York center (ZNY) uncovered. The boundaries are fetched again once.
 
