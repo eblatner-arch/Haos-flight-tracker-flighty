@@ -2962,7 +2962,7 @@ def airport_layout(code):
 
 
 def layout_prefetch_loop():
-    """Download the layout of every airport of a flight being watched before anyone opens its map,
+    """Download the layout of every airport of an upcoming flight before anyone opens its map,
     one at a time, in the background, starting a minute after start-up. An airport that failed is
     tried again after an hour."""
     time.sleep(60)
@@ -2972,8 +2972,9 @@ def layout_prefetch_loop():
                 codes = set()
                 now = time.time()
                 for L in STATE["legs"].values():
-                    # every flight in the next week, not only the ones being watched now
-                    if L.get("dep") and not finished(L, now) and (L.get("sched_out") or 0) - now < 7 * 86400:
+                    # every upcoming flight, not only the ones being watched now: the add-on does
+                    # the slow download ahead of time, so the first open of a map is instant
+                    if L.get("dep") and not finished(L, now):
                         f = L.get("flight") or {}
                         codes.update(c for c in (L.get("dep"), L.get("arr"), (f.get("destination") or {}).get("iata"),
                                                   ((L.get("inbound") or {}).get("origin") or {}).get("iata")) if c)
