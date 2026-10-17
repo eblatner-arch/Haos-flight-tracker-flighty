@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.13
+- Airport map restyled for contrast: taxiway labels look like taxiway location signs (yellow on black, boxed), runway labels like runway signs (white on red), taxiway pavement in neutral gray with the yellow centerline only at zoom 17+, and surface aircraft brighter.
+
 ## 3.15.12
 - Airport map: taxiways drawn at their real width (about 75 ft) with a yellow centerline, like the paint on the ground.
 

@@ -504,9 +504,10 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .ap-lbl { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none;
   font: 600 10px/1.1 -apple-system, system-ui, sans-serif; color: var(--muted); letter-spacing: .02em;
   text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 2px var(--bg); }
-.ap-lbl.ap-rwy { font-size: 11px; font-weight: 800; color: var(--text); }
+.ap-lbl.ap-rwy { font-size: 10px; font-weight: 800; color: #fff; background: #a3191f; padding: 2px 4px; border-radius: 2px; text-shadow: none; }
 .ap-lbl.ap-term { font-size: 11px; font-weight: 700; color: var(--text); opacity: .85; }
-.ap-lbl.ap-twy { display: none; color: var(--amber); font-weight: 800; }
+.ap-lbl.ap-twy { display: none; color: #f6c445; font-weight: 800; font-size: 9.5px; background: #0b0b0b; border: 1px solid #f6c445;
+  padding: 1px 3px; border-radius: 2px; text-shadow: none; }
 .ap-lbl.ap-gate { display: none; font-size: 9px; }
 .z15 .ap-lbl.ap-twy { display: inline; }
 .z16 .ap-lbl.ap-gate { display: inline; }
@@ -517,3 +518,6 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .map-center.xpdr.on { color: var(--route); border-color: var(--route); }
 .leaflet-tooltip.surf-tip.surf-id { font-size: 9.5px; padding: 1px 4px; background: color-mix(in srgb, var(--card) 85%, transparent); box-shadow: none; }
 .leaflet-tooltip-right.surf-id::before { display: none; }
+/* taxiway centerlines only when zoomed right in; until then they make the map busy */
+.twy-cl { display: none; }
+.z17 .twy-cl { display: inline; }

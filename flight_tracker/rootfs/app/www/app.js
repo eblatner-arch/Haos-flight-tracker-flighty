@@ -344,7 +344,7 @@
       else if (f.k === "taxiway" && f.ref) {
         const body = L.polyline(f.g, { color: css("--text"), opacity: 0.12, weight: 4, lineJoin: "round", interactive: false });
         g.addLayer(body); twys.push(body);
-        g.addLayer(L.polyline(f.g, { color: css("--amber"), opacity: 0.55, weight: 1, interactive: false }));
+        g.addLayer(L.polyline(f.g, { color: css("--amber"), opacity: 0.45, weight: 1, interactive: false, className: "twy-cl" }));
         const [p, len] = mid(f.g);
         if (len < 0.08 || near(f.ref, p, 0.35)) continue;
         (placed[f.ref] = placed[f.ref] || []).push(p);
@@ -592,7 +592,7 @@
       }
       const sz = t.mine ? 22 : 15;
       const icon = L.divIcon({ className: "surf-icon", iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
-        html: `<div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : muted};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>` });
+        html: `<div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : css("--text")};opacity:${t.mine ? 1 : 0.85};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>` });
       const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 });
       if (t.mine) m.bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: true, className: "surf-tip" });
       else if (ids && (t.cs || t.squawk)) m.bindTooltip(t.cs || t.squawk, { direction: "right", offset: [sz / 2, 0], permanent: true, className: "surf-tip surf-id" });
