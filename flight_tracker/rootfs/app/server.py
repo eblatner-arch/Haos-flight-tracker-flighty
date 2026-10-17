@@ -2972,7 +2972,8 @@ def layout_prefetch_loop():
                 codes = set()
                 now = time.time()
                 for L in STATE["legs"].values():
-                    if L.get("ident") and watched(L, now):
+                    # every flight in the next week, not only the ones being watched now
+                    if L.get("dep") and not finished(L, now) and (L.get("sched_out") or 0) - now < 7 * 86400:
                         f = L.get("flight") or {}
                         codes.update(c for c in (L.get("dep"), L.get("arr"), (f.get("destination") or {}).get("iata"),
                                                   ((L.get("inbound") or {}).get("origin") or {}).get("iata")) if c)

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.22.2
+- Airport layouts download in the background for every flight in the next 7 days (not only flights being watched now), so a map opened days ahead already has its runways, taxiways and gates.
+
 ## 3.22.1
 - The airplane's direction (when its own heading isn't known) is taken over ~15 km of track instead of ~2 km. The track mixes sources (FlightAware's ADS-B and FAA center radar that reports a little behind); a radar fix landing just behind the last FlightAware point pointed the airplane backwards until the next one.
 
