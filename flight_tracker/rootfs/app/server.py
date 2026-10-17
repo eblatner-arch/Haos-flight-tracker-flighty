@@ -2573,8 +2573,10 @@ def api_state():
             "wx": wx,
             "alerts": list(reversed(STATE["alerts"][-50:])),
             "schedule": STATE["schedule"], "worker": STATE["worker"],
-            "settings": {k: CFG[k] for k in ("watch_hours", "delay_threshold_minutes", "min_turn_minutes",
-                                             "airline_icao", "live_positions")},
+            "settings": {**{k: CFG[k] for k in ("watch_hours", "delay_threshold_minutes", "min_turn_minutes",
+                                                "airline_icao", "live_positions")},
+                         # a basemap key is used by the browser for map tiles, so the app hands it over
+                         "carto_key": (CFG.get("carto_api_key") or "").strip()},
             "map_tiles": {"url": (CFG.get("map_tile_url") or "").strip(), "key": (CFG.get("map_api_key") or "").strip()},
             "notify_target": CFG.get("notify_service") or "persistent notification",
             "gemini": bool(CFG.get("gemini_api_key")),
