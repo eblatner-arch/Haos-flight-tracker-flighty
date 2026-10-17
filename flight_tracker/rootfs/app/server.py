@@ -2122,6 +2122,17 @@ def _seen_key(seen):
 def log_lookup(L, prev, now, sources, seen=None):
     """Append what this check changed (or count it as a quiet check)."""
     seen = seen if seen is not None else L.pop("_seen", None) or []
+    # A transponder / clearance line only when it says something new for that airplane: a tail
+    # (or a reason it has none) different from the last one logged, whichever source saw it.
+    last = L.setdefault("seen_last", {})
+    keep = []
+    for x in seen:
+        who = x["src"].split(" · ", 1)[-1]
+        val = [x.get("tail"), re.sub(r"\d+", "#", x.get("note") or "")]
+        if last.get(who) != val:
+            last[who] = val
+            keep.append(x)
+    seen = keep
     cur = snapshot(L)
     changes = [{"field": k, "from": prev.get(k), "to": v} for k, v in cur.items() if v != prev.get(k) and v is not None]
     ts = (L.get("flight") or {}).get("time_src") or {}
@@ -2144,7 +2155,7 @@ def log_lookup(L, prev, now, sources, seen=None):
                 c["via"] = L["flight"]["tail_source"]
     hist = L.setdefault("history", [])
     if not changes and hist and not hist[-1]["changes"] and hist[-1]["sources"] == sources \
-            and _seen_key(hist[-1].get("seen")) == _seen_key(seen):
+            and (not seen or _seen_key(hist[-1].get("seen")) == _seen_key(seen)):
         hist[-1]["quiet"] = hist[-1].get("quiet", 1) + 1
         hist[-1]["last"] = now
     else:
