@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.17.3
+- SWIM ground stops: delays so far and the FAA's expected average (checked against tonight's real LAS ground stop).
+
 ## 3.17.2
 - Lookup log: takeoff and landing estimates (and the landing time) are tracked too, so when SWIM moves them the log shows the change and where it came from ("Takeoff estimate 22:53 → 22:57 via SFO tower").
 - Map: the XPDR label sits centered in its button.

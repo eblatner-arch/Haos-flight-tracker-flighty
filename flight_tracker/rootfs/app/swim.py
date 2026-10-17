@@ -263,8 +263,19 @@ def _flow(xml_text):
                 or next((c for c in body.iter() if _local(c.tag) == "departureScope"), None)
             scope = [(c.text or "").strip() for c in scope_el.iter() if _local(c.tag) == "facilityId" and (c.text or "").strip()] \
                 if scope_el is not None else []
-            avg, mx = f.get("avgDelay"), f.get("maxDelay")
-            det = ", ".join(x for x in (f"avg {round(float(avg))} min" if avg else "", f"max {mx} min" if mx else "") if x)
+            def delays(group):
+                el = next((c for c in body.iter() if _local(c.tag) == group), None)
+                if el is None:
+                    return None, None
+                g = {_local(c.tag): (c.text or "").strip() for c in el.iter()}
+                return g.get("avgDelay"), g.get("maxDelay")
+            # ground stops report delays so far and those expected; delay programs one set
+            avg, mx = delays("currentDelays")
+            ant_avg, ant_max = delays("anticipatedDelays")
+            if not avg and not mx:
+                avg, mx = f.get("avgDelay"), f.get("maxDelay")
+            det = ", ".join(x for x in (f"avg {round(float(avg))} min" if avg else "", f"max {mx} min" if mx else "",
+                                        f"expected avg {round(float(ant_avg))} min" if ant_avg else "") if x)
             NAS[k] = {"airport": arpt, "kind": kind, "label": "Ground stop" if kind == "gs" else "Ground delay program",
                       "reason": (f.get("impactingCondition") or "").title(), "detail": det,
                       "start": _iso_epoch(st), "end": _iso_epoch(en),

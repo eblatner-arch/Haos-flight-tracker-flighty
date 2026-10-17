@@ -507,6 +507,18 @@ class NasFromSwim(unittest.TestCase):
         self.assertEqual((jfk["key"], jfk["advisory"], jfk["detail"]), (key, "https://x/adv", "avg 60 min, max 133 min"))
         self.assertIn("BWI", [n["airport"] for n in out])          # delay trends still from the page
 
+    def test_real_ground_stop(self):
+        """LAS ground stop 05:30–06:30Z (staffing), departures from ZLA ZOA ZAB, captured live."""
+        import swim
+        swim.NAS.clear(); swim.NAS_CANCELLED.clear()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_gs.xml")) as fh:
+            swim._flow(fh.read())
+        g = swim.NAS[("LAS", "gs")]
+        z = lambda iso: datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+        self.assertEqual((g["start"], g["end"], g["scope"], g["reason"]),
+                         (z("2026-10-17T05:30:00Z"), z("2026-10-17T06:30:00Z"), ["ZLA", "ZOA", "ZAB"], "Staffing"))
+        self.assertEqual(g["detail"], "avg 34 min, max 207 min, expected avg 93 min")
+
     def test_swim_cancel_beats_stale_page(self):
         import server
         page = [{"airport": "SAN", "kind": "gs", "label": "Ground stop", "key": "SAN|gs|1"}]
