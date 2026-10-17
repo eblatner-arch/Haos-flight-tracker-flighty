@@ -235,13 +235,14 @@
   // Free basemaps, no API key: CARTO's OpenStreetMap tiles (kept current: new terminals, taxiways;
   // detailed to zoom 20), falling back to OpenStreetMap's own if they won't load.
   function addTiles(map, dark) {
-    // Your own tile address or key (add-on Configuration) when set: {style} becomes dark_all or
-    // light_all, {key} your key; a key alone is added to CARTO's address as api_key.
+    // CARTO now watermarks tiles fetched without its free key. With your key (add-on Configuration)
+    // tiles come from its keyed address (?key=…); a tile address of your own wins: {style} becomes
+    // dark_all or light_all, {key} your key.
     const mt = (STATE && STATE.map_tiles) || {};
     const style = dark ? "dark_all" : "light_all";
     let url = `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`;
     if (mt.url) url = mt.url.replace("{style}", style).replace("{key}", encodeURIComponent(mt.key || ""));
-    else if (mt.key) url += `?api_key=${encodeURIComponent(mt.key)}`;
+    else if (mt.key) url = `https://basemaps.cartocdn.com/rastertiles/${style}/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(mt.key)}`;
     const base = L.tileLayer(url,
       { maxZoom: 20, subdomains: "abcd", attribution: "&copy; OpenStreetMap contributors &copy; CARTO" }).addTo(map);
     let errors = 0, switched = false;

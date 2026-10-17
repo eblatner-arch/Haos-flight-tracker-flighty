@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.4
+- Map tiles: the CARTO key goes in the address CARTO documents (rastertiles …?key=), so tiles load without the "API key required" mark.
+
 ## 3.15.3
 - Map tiles: optional API key and tile address in the Configuration (CARTO or another provider).
 
