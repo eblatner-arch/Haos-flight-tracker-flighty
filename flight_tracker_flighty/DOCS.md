@@ -1,4 +1,4 @@
-# Flight Tracker
+# Flight Tracker Flighty
 
 A Flighty-style tracker for your own crew schedule, inside Home Assistant.
 
@@ -29,7 +29,7 @@ Open it from **Flights** in the Home Assistant sidebar.
 Use **Flights** in the Home Assistant sidebar. To open it outside Home Assistant (e.g. as a
 home-screen app), set a port next to 8099 under **Network** on the add-on's page and browse to
 `http://<your-ha-ip>:<that port>/`. That port has no login, so only use it on your home network.
-Port 6080 is the tracker's browser viewer, not the app.
+Port 6081 is the tracker's browser viewer, not the app.
 
 ## Notifications
 
@@ -124,11 +124,11 @@ Following) and isn't checked again.
 
 ## Sensors
 
-- `sensor.flight_tracker_next_leg`: status of your next flight, with times,
+- `sensor.flight_tracker_flighty_next_leg`: status of your next flight, with times,
   gates, aircraft, inbound and problems as attributes.
-- `binary_sensor.flight_tracker_problem`: on when a watched flight is delayed,
+- `binary_sensor.flight_tracker_flighty_problem`: on when a watched flight is delayed,
   cancelled, diverted, has a tight turn, or a NAS program affects it.
-- `sensor.flight_tracker_nas_programs`: number of current NAS programs.
+- `sensor.flight_tracker_flighty_nas_programs`: number of current NAS programs.
 
 They're pushed through the API, so they reappear within a minute of a Home
 Assistant restart.
@@ -138,13 +138,13 @@ Assistant restart.
 - **FlightAware** flight pages, opened in a real Chromium browser. The add-on
   reads the data the page itself is drawn from (gates, times, aircraft,
   inbound, filed route waypoints, track) and saves a screenshot of each page to
-  `/share/flight_tracker/`. If that data can't be read, and you set a Gemini
+  `/share/flight_tracker_flighty/`. If that data can't be read, and you set a Gemini
   API key, Gemini Flash-Lite reads the screenshot instead.
 - **FAA NAS status** (nasstatus.faa.gov), **aviationweather.gov** METARs and
   **adsb.lol** live positions — all free, no keys.
 
 If FlightAware shows a CAPTCHA or wants you signed in, set a
-`viewer_password`, open `http://<your-ha-ip>:6080/vnc.html`, and handle it in
+`viewer_password`, open `http://<your-ha-ip>:6081/vnc.html`, and handle it in
 the tracker's browser. The browser profile is kept, so you only do it once.
 Signing in to a free FlightAware account also tends to show more detail.
 

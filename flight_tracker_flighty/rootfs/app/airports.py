@@ -2,7 +2,7 @@
 
 import logging
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 _IATA = {}
 _ICAO = {}

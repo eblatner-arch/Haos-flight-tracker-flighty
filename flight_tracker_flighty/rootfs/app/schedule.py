@@ -12,7 +12,7 @@ import os
 import re
 from datetime import date, datetime, timedelta, timezone
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 HOUR = 3600
 MAX_LEG_SECONDS = 20 * HOUR

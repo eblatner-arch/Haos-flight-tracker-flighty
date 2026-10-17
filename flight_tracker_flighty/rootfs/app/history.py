@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import airports
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 LOCK = threading.RLock()
 _DIR = None

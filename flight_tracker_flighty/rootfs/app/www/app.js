@@ -1,4 +1,4 @@
-/* Flight Tracker web app. Served through Home Assistant ingress, so every URL is relative. */
+/* Flight Tracker Flighty web app. Served through Home Assistant ingress, so every URL is relative. */
 (() => {
   "use strict";
   const $root = document.getElementById("app");

@@ -1,5 +1,8 @@
 # Changelog
 
+## Flighty fork
+- Forked from Flight Tracker 3.22.3 as a separate add-on: slug `flight_tracker_flighty`, image `ghcr.io/eblatner-arch/flight-tracker-flighty`, panel "Flighty". Entities are `sensor.flight_tracker_flighty_*` / `binary_sensor.flight_tracker_flighty_problem`, the browser viewer is on port 6081, screenshots go to `/share/flight_tracker_flighty/`, and the Drive backup folder is "Flight Tracker Flighty (Home Assistant)", so it runs alongside the original without clashing.
+
 ## 3.22.3
 - Airport layouts download in the background for every upcoming flight, however far out, not only the next 7 days.
 

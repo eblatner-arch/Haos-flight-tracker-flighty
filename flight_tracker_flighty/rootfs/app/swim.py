@@ -13,7 +13,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "matched": 0,
          "last_message": None, "rate": 0.0}

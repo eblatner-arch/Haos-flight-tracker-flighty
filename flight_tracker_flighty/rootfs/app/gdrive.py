@@ -16,7 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 SCOPE = "https://www.googleapis.com/auth/drive.file openid email"
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
@@ -250,7 +250,7 @@ def upload(files):
     """files: [(name, mime, bytes)]. Returns True when done, False when not connected."""
     try:
         token = access_token()
-        folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker (Home Assistant)").strip())
+        folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker Flighty (Home Assistant)").strip())
         for name, mime, content in files:
             _put(token, folder, name, mime, content)
         _update(last_backup=time.time(), last_error=None)
@@ -272,7 +272,7 @@ def upload(files):
 def copy(name, new_name):
     """Keep a copy of a file already in the folder under another name (before it gets overwritten)."""
     token = access_token()
-    folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker (Home Assistant)").strip())
+    folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker Flighty (Home Assistant)").strip())
     found = _find(token, name, folder)
     if not found:
         return False
@@ -288,7 +288,7 @@ def note(**kw):
 def download(name):
     """The bytes of one backup file in the folder, or None."""
     token = access_token()
-    folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker (Home Assistant)").strip())
+    folder = _folder(token, (_CFG.get("drive_folder") or "Flight Tracker Flighty (Home Assistant)").strip())
     found = _find(token, name, folder)
     if not found:
         return None
@@ -301,6 +301,6 @@ def status():
     p = DEVICE.get("pending")
     return {"configured": configured(), "connected": bool(g.get("refresh_token")), "email": g.get("email") or "",
             "last_backup": g.get("last_backup"), "last_error": g.get("last_error"),
-            "folder": (_CFG.get("drive_folder") or "Flight Tracker (Home Assistant)").strip(),
+            "folder": (_CFG.get("drive_folder") or "Flight Tracker Flighty (Home Assistant)").strip(),
             "folder_url": f"https://drive.google.com/drive/folders/{g['folder_id']}" if g.get("folder_id") else None,
             "pending": ({k: p.get(k) for k in ("user_code", "verification_url", "expires_at", "error")} if p else None)}

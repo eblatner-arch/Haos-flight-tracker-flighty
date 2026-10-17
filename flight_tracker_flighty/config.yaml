@@ -1,9 +1,9 @@
-name: Flight Tracker
+name: Flight Tracker Flighty
 version: "3.22.3"
-slug: flight_tracker
+slug: flight_tracker_flighty
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
-url: https://github.com/eblatner-arch/haos-flight-tracker
-image: ghcr.io/eblatner-arch/flight-tracker
+url: https://github.com/eblatner-arch/haos-flight-tracker-flighty
+image: ghcr.io/eblatner-arch/flight-tracker-flighty
 arch: [amd64, aarch64]
 startup: application
 boot: auto
@@ -11,7 +11,7 @@ init: false
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:airplane
-panel_title: Flights
+panel_title: Flighty
 homeassistant_api: true
 hassio_api: true
 map:
@@ -19,10 +19,10 @@ map:
   - type: share
     read_only: false
 ports:
-  6080/tcp: 6080
+  6081/tcp: 6081
   8099/tcp: null
 ports_description:
-  6080/tcp: Live browser viewer (noVNC)
+  6081/tcp: Live browser viewer (noVNC)
   8099/tcp: "Direct web access to the app without a Home Assistant login (leave blank unless you need it)"
 options:
   ics_file_path: /homeassistant/ics2gcal/feed.ics
@@ -34,7 +34,7 @@ options:
   gemini_model: gemini-flash-lite-latest
   google_client_id: ""
   google_client_secret: ""
-  drive_folder: Flight Tracker (Home Assistant)
+  drive_folder: Flight Tracker Flighty (Home Assistant)
   enable_viewer: true
   viewer_password: ""
   swim_username: ""

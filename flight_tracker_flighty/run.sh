@@ -12,8 +12,8 @@ if [ "$(jq -r '.enable_viewer' $OPTS)" = "true" ]; then
     echo "Viewer enabled but no viewer_password set; skipping the viewer."
   else
     x11vnc -display :99 -forever -shared -quiet -passwd "$PW" -rfbport 5900 &
-    websockify --web /usr/share/novnc 6080 localhost:5900 >/dev/null 2>&1 &
-    echo "Browser viewer: http://<your-ha-ip>:6080/vnc.html"
+    websockify --web /usr/share/novnc 6081 localhost:5900 >/dev/null 2>&1 &
+    echo "Browser viewer: http://<your-ha-ip>:6081/vnc.html"
   fi
 fi
 

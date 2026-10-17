@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Flight Tracker add-on: schedule watcher, tracker worker, alerts, sensors and the web app."""
+"""Flight Tracker Flighty add-on: schedule watcher, tracker worker, alerts, sensors and the web app."""
 
 import gzip
 import hashlib
@@ -28,10 +28,10 @@ import sources
 import swim
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 DATA_DIR = os.environ.get("FT_DATA", "/data")
-SHOT_DIR = os.environ.get("FT_SHOTS", "/share/flight_tracker")
+SHOT_DIR = os.environ.get("FT_SHOTS", "/share/flight_tracker_flighty")
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
 PORT = int(os.environ.get("FT_PORT", "8099"))
 VERSION = os.environ.get("FT_VERSION", "dev")
@@ -319,7 +319,7 @@ def _send(alert):
     svc = (CFG.get("notify_service") or "").strip()
     if svc.startswith("notify."):
         svc = svc[7:]
-    data = {"tag": f"{alert['tag']}-{alert['key']}", "group": "flight-tracker",
+    data = {"tag": f"{alert['tag']}-{alert['key']}", "group": "flight-tracker-flighty",
             # Custom notification icon: Android companion today, iOS companion once its custom-icon
             # support ships (home-assistant/iOS#4672). Older apps ignore these keys.
             "notification_icon": "mdi:airplane", "notification_icon_color": "#FFFFFF", "color": "#3B4FB8"}
@@ -372,7 +372,7 @@ def publish():
         if nxt:
             f = nxt.get("flight") or {}
             tz = alerting.tz_for(nxt["dep"], f.get("origin"))
-            post_state("sensor.flight_tracker_next_leg", alerting.status_label(nxt, CFG), {
+            post_state("sensor.flight_tracker_flighty_next_leg", alerting.status_label(nxt, CFG), {
                 "friendly_name": "Next flight", "icon": "mdi:airplane-takeoff",
                 "flight": nxt.get("display"), "ident": nxt.get("ident"), "deadhead": nxt.get("dh"),
                 "origin": nxt["dep"], "destination": nxt["arr"],
@@ -392,19 +392,19 @@ def publish():
                 "last_update": iso(nxt.get("updated")),
             })
         else:
-            post_state("sensor.flight_tracker_next_leg", "None", {"friendly_name": "Next flight",
+            post_state("sensor.flight_tracker_flighty_next_leg", "None", {"friendly_name": "Next flight",
                                                                   "icon": "mdi:airplane-off"})
         probs = []
         for L in upcoming:
             if watched(L, now):
                 probs += [f"{L.get('display') or L['dep']}: {p['text']}" for p in alerting.problems(L, CFG, nas, rules=STATE['rules'])]
-        post_state("binary_sensor.flight_tracker_problem", "on" if probs else "off",
+        post_state("binary_sensor.flight_tracker_flighty_problem", "on" if probs else "off",
                    {"friendly_name": "Flight problem", "device_class": "problem", "problems": probs})
         mine = []
         for L in upcoming:
             if watched(L, now):
                 mine += [n for n in alerting.nas_for(L, nas) if n not in mine]
-        post_state("sensor.flight_tracker_nas_programs", len(mine), {
+        post_state("sensor.flight_tracker_flighty_nas_programs", len(mine), {
             "friendly_name": "NAS programs at my airports", "icon": "mdi:radar", "unit_of_measurement": "programs",
             "airports": sorted({c for L in upcoming if watched(L, now) for c in (L["dep"], L["arr"]) if c}),
             "programs": [f"{n['airport']} {n['label']}" for n in mine]})
@@ -1374,7 +1374,7 @@ def load(browser, url, shot, L, what):
         need = STATE["rules"]["sys_blocked"]["params"].get("count") or 3
         if streak == need:
             push_event("sys_blocked", "FlightAware checks failing",
-                       f"The last {need} page checks found no flight data. Open the browser viewer on port 6080 "
+                       f"The last {need} page checks found no flight data. Open the browser viewer on port 6081 "
                        "to clear a CAPTCHA or sign in.", "warn")
 
 
@@ -3213,7 +3213,7 @@ def api_debug():
                        else "persistent notification (notify_service not set)",
                        "ingress": f"{INGRESS['path']} (from {INGRESS.get('how', '?')})" if INGRESS.get("path") else "(unknown: set notification_url)", "gemini": bool(CFG.get("gemini_api_key")),
                        "gemini_model": CFG.get("gemini_model"), "watch_hours": CFG["watch_hours"],
-                       "home_tz": TZNAME, "viewer_port": 6080},
+                       "home_tz": TZNAME, "viewer_port": 6081},
             "manual": STATE["manual"],
             "screenshots": dict(zip(("count", "bytes"), shot_usage()), keep_hours=SHOT_KEEP_HOURS),
             "aeroapi": {"enabled": bool(CFG.get("aeroapi_key")),
@@ -3632,7 +3632,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 return self._send(200, {"ok": True, "rules": rules_mod.catalog_for_ui(STATE["rules"])})
         if path == "/api/test-notify":
-            ok, detail = notify({"title": "Flight Tracker test", "level": "warn", "tag": "test", "key": "notify",
+            ok, detail = notify({"title": "Flight Tracker Flighty test", "level": "warn", "tag": "test", "key": "notify",
                                  "message": f"Notifications work. Sent {datetime.now(HOME_TZ):%H:%M} via "
                                             f"{CFG.get('notify_service') or 'persistent notification'}."})
             return self._send(200 if ok else 502, {"ok": ok, "detail": detail})
@@ -3684,7 +3684,7 @@ def main():
     swim.load_edcts(os.path.join(DATA_DIR, "swim_edcts.json"))
     swim.load_yours(os.path.join(DATA_DIR, "swim_yours.json"))
     swim.start(CFG)
-    log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
+    log.info("Flight Tracker Flighty %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     srv.daemon_threads = True

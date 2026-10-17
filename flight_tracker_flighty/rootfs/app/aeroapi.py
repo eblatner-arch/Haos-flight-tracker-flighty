@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 BASE = "https://aeroapi.flightaware.com/aeroapi"
 

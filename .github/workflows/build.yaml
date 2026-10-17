@@ -3,11 +3,11 @@ name: Build add-on image
 on:
   push:
     branches: [main]
-    paths: ["flight_tracker/**", ".github/workflows/build.yaml"]
+    paths: ["flight_tracker_flighty/**", ".github/workflows/build.yaml"]
   workflow_dispatch:
 
 concurrency:
-  group: build
+  group: build-flighty
   cancel-in-progress: true
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
       - name: Read version
         id: v
         run: |
-          v=$(python3 -c "import yaml;print(yaml.safe_load(open('flight_tracker/config.yaml'))['version'])")
+          v=$(python3 -c "import yaml;print(yaml.safe_load(open('flight_tracker_flighty/config.yaml'))['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
@@ -39,7 +39,7 @@ jobs:
       - name: Build and push (amd64 + aarch64)
         uses: docker/build-push-action@v6
         with:
-          context: flight_tracker
+          context: flight_tracker_flighty
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: BUILD_VERSION=${{ steps.v.outputs.version }}
@@ -48,7 +48,7 @@ jobs:
             io.hass.version=${{ steps.v.outputs.version }}
             io.hass.type=app
           tags: |
-            ghcr.io/eblatner-arch/flight-tracker:${{ steps.v.outputs.version }}
-            ghcr.io/eblatner-arch/flight-tracker:latest
+            ghcr.io/eblatner-arch/flight-tracker-flighty:${{ steps.v.outputs.version }}
+            ghcr.io/eblatner-arch/flight-tracker-flighty:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

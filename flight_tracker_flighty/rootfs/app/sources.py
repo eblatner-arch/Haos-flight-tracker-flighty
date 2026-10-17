@@ -7,9 +7,9 @@ import xml.etree.ElementTree as ET
 
 import requests
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
-UA = {"User-Agent": "haos-flight-tracker (+https://github.com/eblatner-arch/haos-flight-tracker)"}
+UA = {"User-Agent": "haos-flight-tracker-flighty (+https://github.com/eblatner-arch/haos-flight-tracker-flighty)"}
 NAS_URL = "https://nasstatus.faa.gov/api/airport-status-information"
 EVENTS_URL = "https://nasstatus.faa.gov/api/airport-events"
 METAR_URL = "https://aviationweather.gov/api/data/metar"

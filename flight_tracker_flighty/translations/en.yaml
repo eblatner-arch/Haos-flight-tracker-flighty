@@ -37,10 +37,10 @@ configuration:
     description: That client's secret.
   drive_folder:
     name: Drive folder
-    description: Folder the backup goes in. Default "Flight Tracker (Home Assistant)".
+    description: Folder the backup goes in. Default "Flight Tracker Flighty (Home Assistant)".
   enable_viewer:
     name: Enable browser viewer
-    description: Serve the tracker's browser over noVNC on port 6080 (to clear a CAPTCHA or sign in to FlightAware).
+    description: Serve the tracker's browser over noVNC on port 6081 (to clear a CAPTCHA or sign in to FlightAware).
   viewer_password:
     name: Viewer password
     description: Required for the viewer to start. VNC only uses the first 8 characters.

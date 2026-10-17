@@ -14,7 +14,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-log = logging.getLogger("flight_tracker")
+log = logging.getLogger("flight_tracker_flighty")
 
 BOOTSTRAP_JS = """() => {
   try { const b = window.trackpollBootstrap; return b ? JSON.stringify(b) : null; }

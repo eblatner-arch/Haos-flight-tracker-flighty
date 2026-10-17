@@ -8,7 +8,7 @@ import sys
 import json
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "flight_tracker", "rootfs", "app"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "flight_tracker_flighty", "rootfs", "app"))
 
 import alerts  # noqa: E402
 import flightaware as fa  # noqa: E402
