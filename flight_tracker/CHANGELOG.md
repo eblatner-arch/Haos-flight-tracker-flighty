@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.20.6
+- Datalink clearances in the flight-strip format (United at SFO) are read: cleared route, SID and transition, climb via SID / expected altitude, departure frequency, runway, and the EDCT printed after the destination. The airline's delivery note that follows ("UAL444 001 Y C .N14214 P1527 GE6") gives the airplane and gate, so the PDC tail source works there too.
+- An EDCT in the clearance becomes the flight's EDCT when the FAA's own assignment didn't reach the app.
+- CPDLC clearances with an intermediate clearance limit ("CLEARED TO LCU VIA … AFTER LCU CLEARED TO KIAD") name the destination, not the fix.
+- A clearance saved before this version is read again.
+- The SWIM samples download keeps one clearance per tower and airline (up to 40), to check the other formats.
+
 ## 3.20.5
 - Swap on the inbound that keeps its flight number, without adsb.lol: the 5-second position loop records the inbound's tail whenever FAA approach radar sees it (climbing out of its origin, arriving at yours), and a new tail triggers a check of your flight at once.
 - Once the inbound has left its gate, the tail seen on it stays the answer for the rest of its flight (its airplane can't change in the air), instead of expiring after 20 min while en route, where the FAA's center radar carries no tail.

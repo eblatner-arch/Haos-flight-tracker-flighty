@@ -570,6 +570,17 @@ def swim_events_for(L, f):
     return mine
 
 
+def _hhmm_near(hhmm, ref):
+    """'1557' (UTC) -> the timestamp of that time nearest to ref (a clearance is issued within hours)."""
+    if not hhmm or not ref or not re.fullmatch(r"\d{4}", hhmm):
+        return None
+    h, m = int(hhmm[:2]), int(hhmm[2:])
+    if h > 23 or m > 59:
+        return None
+    d = datetime.fromtimestamp(ref, timezone.utc).replace(hour=h, minute=m, second=0, microsecond=0).timestamp()
+    return min((d - 86400, d, d + 86400), key=lambda x: abs(x - ref))
+
+
 def _swim_take(sw, ev):
     """Fold one event into the leg's saved SWIM facts (newest wins, field by field)."""
     got = ev.get("got") or time.time()
@@ -600,7 +611,13 @@ def _swim_take(sw, ev):
             sw["tower_dep"] = {"clearance": _ts(tw.get("clearance")), "gate": tw.get("gate"), "at": got}
         if ev.get("pdc"):
             # a later datalink message (an EDCT revision, the pilot's WILCO) adds to the clearance
-            sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got}
+            sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got, "v": 2}
+            e = _hhmm_near(ev["pdc"].get("edct"), _ts(ev["pdc"].get("at")) or got)
+            if e and not sw.get("edct_tfms") and e != sw.get("edct"):
+                # the EDCT printed in the clearance, when the FAA's own assignment didn't reach us
+                sw["edct_prev"] = sw.get("edct")
+                sw["edct"], sw["edct_at"], sw["edct_for"], sw["edct_new"] = e, got, None, True
+                sw["edct_src"] = "clearance"
         return
     if ev.get("src") == "TFDM":
         td = ev.get("tfdm") or {}
@@ -639,6 +656,7 @@ def _swim_take(sw, ev):
             sw["edct"], sw["cta"], sw["edct_at"] = e, _ts(ev.get("cta")), got
             sw["edct_for"] = _iata(ev.get("element")) if ev.get("element") else None
             sw["edct_new"] = True
+            sw["edct_tfms"] = True
     if ev.get("traj"):
         sw["traj"] = [[p[0], p[1]] for p in ev["traj"]]
         sw["traj_fixes"] = ev.get("traj_fixes") or []
@@ -678,6 +696,10 @@ def swim_check(L, f, planned):
         return out
     mine = swim_events_for(L, f)
     sw = L.setdefault("swim", {})
+    pd = sw.get("pdc")
+    if pd and pd.get("text") and pd.get("v") != 2:
+        # saved before the parser knew this tower's format: read the saved text again
+        sw["pdc"] = {**pd, **swim.parse_pdc(pd["text"]), "v": 2}
     seen_at = max(L.get("swim_seen") or 0, sw.get("seen") or 0)
     fresh = [e for e in mine if (e.get("got") or 0) > seen_at]
     for e in fresh:
@@ -737,10 +759,13 @@ def swim_check(L, f, planned):
             if pd:
                 parts = [f"cleared to {pd['cleared_to']}" if pd.get("cleared_to") else None,
                          pd.get("departure") and f"via {pd['departure']}",
-                         pd.get("altitude") and f"maintain {pd['altitude']}",
+                         pd.get("altitude") and (pd["altitude"] if not pd["altitude"].isdigit() else f"maintain {pd['altitude']}"),
+                         pd.get("expect_alt") and f"expect FL{pd['expect_alt']}",
+                         pd.get("runway") and f"runway {pd['runway']}",
+                         pd.get("gate") and f"gate {pd['gate']}",
                          pd.get("dep_freq") and f"departure {pd['dep_freq']}",
                          pd.get("edct") and f"EDCT {pd['edct']}Z",
-                         pd.get("tail"), pd.get("response") and pd["response"].lower()]
+                         pd.get("tail") and f"airplane {pd['tail']}", pd.get("response") and pd["response"].lower()]
                 bits.append(f"{dep} clearance by datalink: " + ", ".join(p for p in parts if p))
             tw = x.get("tower")
             if tw and tw.get("clearance"):

@@ -490,6 +490,16 @@ def parse_tfdm(xml_text):
     return out
 
 
+def _pdc_sample(xml_text):
+    """One datalink clearance per tower and airline (they come in several formats), up to 40."""
+    ap = _re.search(r"<airportID>([A-Z0-9]+)", xml_text[:2000])
+    hd = _re.search(r"<dataHeader>\S+ (\S+)", xml_text[:3000])
+    key = f"{ap.group(1) if ap else '?'} {hd.group(1)[:7] if hd else '?'}"
+    seen = SAMPLES.setdefault("pdc_by_tower", [])
+    if len(seen) < 40 and not any(k == key for k, _ in seen):
+        seen.append((key, xml_text[:20000]))
+
+
 def _edct_sample(xml_text):
     """Every kind of message that carries an EDCT, a few of each, for checking the parser."""
     t = (_TYPE_RE.findall(xml_text[:4000]) or ["unknown"])[0]
@@ -673,6 +683,8 @@ def handle_stdds(xml_text):
     except Exception:
         pass
     root = (_ROOT_RE.findall(xml_text[:400]) or [""])[0]
+    if root == "TDLSCSPMessage":
+        _pdc_sample(xml_text)
     if WATCH and root in ("TATrackAndFlightPlan", "SurfaceMovementEventMessage", "TowerDepartureEventMessage",
                           "TDLSCSPMessage") \
             and any(cs in xml_text for cs in WATCH):
@@ -784,13 +796,28 @@ def parse_pdc(text):
         m = _re.search(rx, t)
         return m.group(1) if m else None
     route = g(r"\b([A-Z]{4}\.[A-Z0-9./]+\.[A-Z]{4})\s*$")
-    return {k: v for k, v in {
-        "tail": g(r"/AN (N?[A-Z0-9-]+)"), "response": g(r"PILOT RESPONSE - ([A-Z ]+?)(?: \d{3}|$)"),
-        "cleared_to": g(r"CLEARED TO ([A-Z0-9]{3,4})"),
-        "departure": g(r"CLEARED TO [A-Z0-9]{3,4}(?: AIRPORT)? ([A-Z0-9]+[0-9][A-Z0-9]*(?:\.[A-Z0-9]+)?)"),
-        "altitude": g(r"MAINT (\d+) ?FT"), "dep_freq": g(r"DEP FREQ ([\d.]+)"), "runway": g(r"EXPECT RWY (\S+)"),
-        "fl": g(r"\bFL(\d{3})\b"), "edct": g(r"EDCT (\d{4})"),
-        "route": route_text(route) if route else None, "text": t or None}.items() if v}
+    # The flight-strip style (United at SFO): "001 UAL444 3616 KSFO B738/L P1527 960 370 -SSTIK5 YYUNG
+    # LAX- KSFO SSTIK5 KTINA … PLYYA2 KSAN 1557 CLEARED SSTIK5 DEPARTURE YYUNG TRSN CLIMB VIA SID EXP 370
+    # 10 MIN AFT DP,DPFRQ 135.1 EXPECT RWY 01L", the time after the destination being the EDCT; then
+    # the airline's delivery note "UAL444 001 Y C .N14214 P1527 GE6" naming the airplane and gate.
+    strip = _re.search(r"\b([A-Z]{4} [A-Z0-9 ]+? ([A-Z]{4}))(?: (\d{4}))? CLEARED ", t)
+    out = {
+        "tail": g(r"/AN (N?[A-Z0-9-]+)") or g(r"(?:^| )\.(N[0-9][0-9A-Z]{0,4})\b"),
+        "gate": g(r"\.N[0-9][0-9A-Z]{0,4} P\d{4} ([A-Z0-9]{1,5})\b"),
+        "response": g(r"PILOT RESPONSE - ([A-Z ]+?)(?: \d{3}|$)"),
+        "cleared_to": g(r"CLEARED TO ([A-Z0-9]{4}) (?:ARPT|AIRPORT)") or (strip and strip.group(2))
+                      or g(r"\.([A-Z]{4})\s*$") or g(r"CLEARED TO ([A-Z0-9]{3,4})"),
+        "departure": g(r"CLEARED TO [A-Z0-9]{3,4}(?: AIRPORT)? ([A-Z0-9]+[0-9][A-Z0-9]*(?:\.[A-Z0-9]+)?)")
+                     or " ".join(x for x in (g(r"CLEARED ([A-Z]+\d[A-Z]?) DEPARTURE"), g(r"DEPARTURE ([A-Z0-9]+) TRSN")) if x)
+                     or g(r"CLEARED TO [A-Z0-9]{3,5} VIA [A-Z0-9 ]*?\b([A-Z]+\d\.[A-Z0-9]+)") or None,
+        "altitude": g(r"MAINT (\d+) ?FT") or ("climb via SID" if "CLIMB VIA SID" in t else None),
+        "expect_alt": g(r"\bEXP (\d{3}) "),
+        "dep_freq": g(r"DEP FREQ ([\d.]+)") or g(r"DPFRQ ([\d.]+)"), "runway": g(r"EXPECT RWY (\S+)"),
+        "fl": g(r"\bFL(\d{3})\b") or g(r"\bP\d{4} \d+ (\d{3}) "),
+        "edct": g(r"EDCT (\d{4})") or (strip and strip.group(3)),
+        "route": route_text(route) if route else (strip.group(1) if strip else None),
+        "text": t if "CLEAR" in t else None}
+    return {k: v for k, v in out.items() if v}
 
 
 LIVE = {}   # callsign -> source key -> latest position from FAA radar (center, approach, surface)
@@ -1097,7 +1124,10 @@ def samples_zip():
                                               indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):
-                z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
+                if isinstance(x, tuple):   # (label, xml)
+                    z.writestr(f"samples/{t}/{_re.sub(r'[^A-Za-z0-9_]+', '_', x[0])}.xml", x[1])
+                else:
+                    z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for i, m in enumerate(MATCHED_RAW, 1):
             z.writestr(f"your_flights/{i:02d}{'_' + m['feed'] if m.get('feed') else ''}.xml", m["xml"])
         for i, x in enumerate(STDDS_RAW, 1):

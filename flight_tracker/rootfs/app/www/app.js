@@ -1676,9 +1676,10 @@
       ["EDCT", sw.edct && !sw.edct.at ? "assigned (per the departure tower; time not received yet)" : sw.edct ? [`${hm(sw.edct.at, tzA)}`, sw.edct.prev && `was ${hm(sw.edct.prev, tzA)}`, sw.edct.for && `${sw.edct.for} program`,
         sw.edct.cta && `arrival slot ${hm(sw.edct.cta, tzB)}`].filter(Boolean).join(" · ") : ""],
       ["Clearance (datalink)", sw.pdc ? [sw.pdc.cleared_to && `cleared to ${sw.pdc.cleared_to}`, sw.pdc.departure && `via ${sw.pdc.departure}`,
-        sw.pdc.altitude && `maintain ${sw.pdc.altitude}`, sw.pdc.fl && `FL${sw.pdc.fl}`, sw.pdc.dep_freq && `departure ${sw.pdc.dep_freq}`,
+        sw.pdc.altitude && (/^\d+$/.test(sw.pdc.altitude) ? `maintain ${sw.pdc.altitude}` : sw.pdc.altitude),
+        sw.pdc.expect_alt ? `expect FL${sw.pdc.expect_alt}` : sw.pdc.fl && `FL${sw.pdc.fl}`, sw.pdc.dep_freq && `departure ${sw.pdc.dep_freq}`,
         sw.pdc.runway && `expect ${sw.pdc.runway}`, sw.pdc.squawk && `squawk ${sw.pdc.squawk}`, sw.pdc.edct && `EDCT ${sw.pdc.edct}Z`,
-        sw.pdc.tail, sw.pdc.response && sw.pdc.response.toLowerCase(), sw.pdc.at && `at ${hm(Date.parse(sw.pdc.at) / 1000, tzA)}`]
+        sw.pdc.tail && `airplane ${sw.pdc.tail}`, sw.pdc.gate && `gate ${sw.pdc.gate}`, sw.pdc.response && sw.pdc.response.toLowerCase(), sw.pdc.at && `at ${hm(Date.parse(sw.pdc.at) / 1000, tzA)}`]
         .filter(Boolean).join(" · ") : ""],
       ["Cleared route", sw.pdc && sw.pdc.route ? sw.pdc.route : ""],
       [`${leg.dep} ground`, [sw.tower_dep && sw.tower_dep.clearance && `cleared ${hm(sw.tower_dep.clearance, tzA)}`,

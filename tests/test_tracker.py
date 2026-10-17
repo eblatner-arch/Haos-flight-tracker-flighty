@@ -1788,6 +1788,27 @@ class Swim(unittest.TestCase):
             server.resolve_tail(None, L, f, T0 + 3400)
         self.assertEqual((f["tail"], L["tail_info"]["kind"]), ("N22222", "chain"))
 
+    def test_pdc_flight_strip_format(self):
+        """United's SFO clearance (flight-strip style) and the delivery note naming the airplane (captured
+        live, UA444 SFO→SAN with an EDCT of 1557Z)."""
+        import server
+        import swim
+        swim.STATE["status"] = "connected"; swim.STDDS_STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("UAL444"); swim.EVENTS.clear(); swim.EDCTS.clear()
+        here = os.path.dirname(os.path.abspath(__file__))
+        for n in ("stdds_pdc_sfo.xml", "stdds_pdc_sfo_ack.xml"):
+            with open(os.path.join(here, n)) as fh:
+                swim.handle_stdds(fh.read())
+        sw = {}
+        for e in swim.events("UAL444"):
+            server._swim_take(sw, e)
+        p = sw["pdc"]
+        self.assertEqual((p["tail"], p["gate"], p["edct"], p["departure"], p["runway"], p["dep_freq"], p["cleared_to"]),
+                         ("N14214", "GE6", "1557", "SSTIK5 YYUNG", "01L", "135.1", "KSAN"))
+        self.assertEqual(sw["edct"], datetime(2026, 10, 17, 15, 57, tzinfo=timezone.utc).timestamp())
+        self.assertIn("CLEARED SSTIK5", p["text"])
+        swim.STATE["status"] = "off"; swim.STDDS_STATE["status"] = "off"
+
     def test_edct_before_watching_is_kept(self):
         """An EDCT assigned before the flight is being watched (a GDP issued hours ahead) still reaches it,
         and survives a restart."""
