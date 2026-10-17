@@ -417,7 +417,8 @@ def parse_surface(xml_text):
             elif n == "speed":
                 r["kt"] = _num(v)
             elif n == "aircraftId":
-                r["cs"] = v.upper()
+                if v.upper() not in ("UNKN", "UNK", "UNKNOWN", "NONE"):   # radar-only target, no transponder
+                    r["cs"] = v.upper()
             elif n == "acType":
                 r["type"] = v
             elif n == "tgtType":

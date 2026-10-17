@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.10
+- Surface map: targets the radar labels "UNKN" (seen by radar only, no transponder reply) no longer count as identified, so the XPDR filter hides them and ID doesn't tag them "UNKN".
+
 ## 3.15.9
 - Maps: never fall back to OpenStreetMap's own tile servers (they block apps: "Access blocked"). If CARTO tiles won't load the map steps down to keyless CARTO, then Esri's gray map. A source is only abandoned when it loads nothing, not on a few bad tiles. The keyed CARTO address no longer asks for retina tiles.
 

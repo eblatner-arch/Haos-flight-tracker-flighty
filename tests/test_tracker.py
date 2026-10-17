@@ -417,6 +417,13 @@ class Stdds(unittest.TestCase):
         server.swim_overlay(L, f, so)
         self.assertEqual(f["swim"]["tower_dep"]["gate"], "A16")
 
+    def test_unknown_targets_have_no_callsign(self):
+        import swim
+        _, reps = swim.parse_surface("""<a:asdexMsg xmlns:a="x"><airport>KEWR</airport><positionReport full="true"><track>9</track>
+            <flightId><aircraftId>UNKN</aircraftId></flightId><flightInfo><tgtType>unknown</tgtType></flightInfo>
+            <position><latitude>40.69</latitude><longitude>-74.17</longitude></position></positionReport></a:asdexMsg>""")
+        self.assertNotIn("cs", reps[0])
+
     def test_surface_positions_real(self):
         import swim
         swim.WATCH_AIRPORTS.clear(); swim.WATCH_AIRPORTS.add("KSEA")
