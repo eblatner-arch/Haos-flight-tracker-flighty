@@ -661,7 +661,7 @@ class AeroAPI(unittest.TestCase):
         L = self.run_at("a1", T0)
         self.assertIsNone(L.get("flight"))
         self.assertEqual(L["aero"]["other_routes"], ["EWR→SFO"])
-        self.assertIn("flies EWR→SFO, not HOU→SFO", L["note"])
+        self.assertIn("as EWR→SFO, not HOU→SFO", L["note"])
         self.assertEqual(alerts.status_label(L, self.server.CFG), "Not found")
 
     def test_first_lookup_tail_has_source(self):

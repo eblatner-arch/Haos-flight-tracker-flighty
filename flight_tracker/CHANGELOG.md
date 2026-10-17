@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.9.1
+- A flight you add that AeroAPI doesn't have (like a diversion's recovery leg, UA2608 ABE→EWR) is now looked up on FlightAware's page instead of waiting: the page often shows it long before AeroAPI does, and it's free. The "Not found" note says it's checking there
+
 ## 3.9.0
 - AeroDataBox diversion check (free, no key): while your flight is in the air, its page for the flight number is read every 15 minutes (Settings → Tail and position sources → AeroDataBox diversion check; 0 turns it off). When it shows a different arrival airport, the flight is marked diverted right away, often before FlightAware. Each read is in the lookup log (purple tag) with what it found, and a screenshot
 - Fix: your own flight's live ADS-B position (used for the map while you're flying) was never fetched since 2.6.0, because of a name clash in the code; it is now

@@ -762,7 +762,14 @@ def watched(L, now):
     if finished(L, now):
         return False
     if L.get("extra") and not L.get("flight"):
-        return not aero_on()  # no AeroAPI: the page check is the only way to find it
+        if not aero_on():
+            return True  # no AeroAPI: the page check is the only way to find it
+        if not (L.get("aero") or {}).get("at"):
+            return False  # AeroAPI looks first
+        # AeroAPI didn't have it: FlightAware's own page often does (a diversion's recovery leg,
+        # ABE→EWR, shows there long before AeroAPI lists it), and looking there is free
+        start, end = aero_window(L, now)
+        return start <= now <= end
     return now >= L["sched_out"] - float(CFG["watch_hours"]) * HOUR
 
 
@@ -991,9 +998,10 @@ def not_found_note(L):
     routes = (L.get("aero") or {}).get("other_routes") or []
     want = f"{L.get('dep') or '?'}→{L.get('arr') or '?'}"
     if routes:
-        return (f"Not found: {L.get('display') or L.get('ident')} flies {', '.join(routes)}, not {want}. "
-                "Stop following it and add it again with the right airports.")
-    return f"Not found: AeroAPI has no {L.get('display') or L.get('ident')} {want} yet. It will look again in a few hours."
+        return (f"Not found yet: AeroAPI has {L.get('display') or L.get('ident')} as {', '.join(routes)}, not {want}. "
+                "Checking FlightAware's page meanwhile (a diversion's recovery flight often shows there first); "
+                "if it never turns up, the airports may be wrong.")
+    return f"Not found yet: AeroAPI has no {L.get('display') or L.get('ident')} {want}. Checking FlightAware's page meanwhile."
 
 
 def first_lookup_due(L, now):
