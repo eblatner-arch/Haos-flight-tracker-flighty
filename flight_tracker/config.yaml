@@ -1,5 +1,5 @@
 name: Flight Tracker
-version: "3.13.1"
+version: "3.14.0"
 slug: flight_tracker
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker
@@ -43,6 +43,9 @@ options:
   swim_tfdm_queue: ""
   swim_tfdm_vpn: TFDM
   swim_tfdm_password: ""
+  swim_stdds_queue: ""
+  swim_stdds_vpn: STDDS
+  swim_stdds_password: ""
 schema:
   ics_file_path: str
   airline_icao: str?
@@ -70,5 +73,10 @@ schema:
   swim_tfdm_host: str?
   swim_tfdm_username: str?
   swim_tfdm_password: password?
+  swim_stdds_queue: str?
+  swim_stdds_vpn: str?
+  swim_stdds_host: str?
+  swim_stdds_username: str?
+  swim_stdds_password: password?
   flight_regex: str?
   home_timezone: str?

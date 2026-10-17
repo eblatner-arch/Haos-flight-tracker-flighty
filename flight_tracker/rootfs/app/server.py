@@ -477,10 +477,11 @@ def _iata(code):
 
 
 def swim_watch(now):
-    """Tell the SWIM reader which callsigns to keep: flights being watched, and their inbounds."""
+    """Tell the SWIM reader which callsigns (flights being watched and their inbounds) and which
+    airports (for surface positions) to keep."""
     if swim.STATE.get("status") == "off":
         return
-    keep = set()
+    keep, aps = set(), set()
     with LOCK:
         for L in STATE["legs"].values():
             if L.get("ident") and watched(L, now):
@@ -488,70 +489,226 @@ def swim_watch(now):
                 inb = L.get("inbound") or {}
                 if inb.get("ident"):
                     keep.add(inb["ident"].upper())
+                f = L.get("flight") or {}
+                for code in (L.get("dep"), L.get("arr"), (f.get("destination") or {}).get("iata"), f.get("diverted_to")):
+                    icao = (airports.get(code) or {}).get("icao") if code else None
+                    if icao:
+                        aps.add(icao.upper())
     swim.WATCH.clear()
     swim.WATCH.update(keep)
+    swim.WATCH_AIRPORTS.clear()
+    swim.WATCH_AIRPORTS.update(aps)
 
 
-def swim_check(L, f, planned):
-    """The FAA's own messages for this flight (SWIM TFMS): a flight plan or amendment from our
-    departure airport to somewhere other than planned is a diversion. -> {diverted_to, new}"""
-    out = {}
-    if not L.get("ident") or swim.STATE.get("status") == "off":
-        return out
+def swim_news(now):
+    """Legs to refresh right away because SWIM just reported their (or their inbound's) takeoff,
+    landing or diversion. At most once a minute per leg."""
+    if not swim.PENDING:
+        return set()
+    acids = set(swim.PENDING)
+    swim.PENDING.difference_update(acids)
+    out = set()
+    with LOCK:
+        for L in STATE["legs"].values():
+            idents = {(L.get("ident") or "").upper(), ((L.get("inbound") or {}).get("ident") or "").upper()}
+            if acids & idents and watched(L, now) and now - (L.get("swim_forced") or 0) >= 60:
+                L["swim_forced"] = now
+                out.add(L["id"])
+    if out:
+        log.info("FAA SWIM news for %s: refreshing now", ", ".join(sorted(acids)))
+    return out
+
+
+def _ts(iso):
+    """ISO UTC time -> epoch seconds (None when missing or unreadable)."""
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _airline_src(ev):
+    """Messages the airline itself sent carry its 3-letter code as the source (UAL); the FAA's carry
+    TFMS or a facility (KZNY)."""
+    src = ev.get("src") or ""
+    return len(src) == 3 and src.isalpha() and src != "TFM"
+
+
+def swim_events_for(L, f):
+    """This leg's SWIM events (TFMS and TFDM): same callsign, same departure airport, and the FAA's
+    first planned departure (igtd) close enough to this leg's schedule. The FAA's automatic
+    re-timing of a flight that hasn't left is left out."""
+    if not L.get("ident"):
+        return []
     dep = _iata(L.get("dep"))
     so = (f.get("times") or {}).get("out", {}).get("scheduled") or L.get("sched_out") or 0
     mine = []
     for ev in swim.events(L["ident"]):
-        if _iata(ev.get("dep")) != dep:
+        if _iata(ev.get("dep")) != dep or ev.get("trigger") == "UPDATE_DEPARTURE_TIMEOUT":
             continue
-        if ev.get("igtd"):
-            try:
-                t = datetime.fromisoformat(ev["igtd"].replace("Z", "+00:00")).timestamp()
-                # igtd is the flight's first planned departure. After a diversion the FAA keeps the
-                # original one on the continuation (UA2127 MDT→EWR carries LAX's 17:15Z), so allow
-                # it to be well before this leg's scheduled time.
-                if so and not (so - 18 * HOUR <= t <= so + 6 * HOUR):
-                    continue
-            except ValueError:
-                pass
+        t = _ts(ev.get("igtd"))
+        # igtd is the flight's first planned departure. After a diversion the FAA keeps the
+        # original one on the continuation (UA2127 MDT→EWR carries LAX's 17:15Z), so allow
+        # it to be well before this leg's scheduled time.
+        if t and so and not (so - 18 * HOUR <= t <= so + 6 * HOUR):
+            continue
         mine.append(ev)
-    # TFMS re-proposes the departure every few minutes when a filed flight hasn't left
-    # (UPDATE_DEPARTURE_TIMEOUT): no news, and its ETA is a placeholder.
-    mine = [e for e in mine if e.get("trigger") != "UPDATE_DEPARTURE_TIMEOUT"]
-    if not mine:
+    return mine
+
+
+def _swim_take(sw, ev):
+    """Fold one event into the leg's saved SWIM facts (newest wins, field by field)."""
+    got = ev.get("got") or time.time()
+    if ev.get("src") == "TFDM":
+        td = ev.get("tfdm") or {}
+        for side in ("dep", "arr"):
+            cur = sw.setdefault("tfdm_" + side, {})
+            for k, v in (td.get(side) or {}).items():
+                cur[k] = {**cur.get(k), **v} if isinstance(v, dict) and isinstance(cur.get(k), dict) else v
+        if td.get("state"):
+            sw["tfdm_state"] = td["state"]
+        sw["tfdm_at"] = got
+        dep_rwy = (sw.get("tfdm_dep") or {}).get("runwayDepartureTime") or {}
+        arr_rwy = (sw.get("tfdm_arr") or {}).get("runwayArrivalTime") or {}
+        if dep_rwy.get("actual"):
+            sw["off"] = sw.get("off") or _ts(dep_rwy["actual"])
+        if arr_rwy.get("actual"):
+            sw["on"] = sw.get("on") or _ts(arr_rwy["actual"])
+        if arr_rwy.get("estimated") and (td.get("arr") or {}).get("runwayArrivalTime"):
+            sw["tfdm_eta"], sw["tfdm_eta_at"] = _ts(arr_rwy["estimated"]), got
+        return
+    airline = _airline_src(ev)
+    if ev.get("off") and not airline:
+        sw["off"] = _ts(ev["off"])
+    if ev.get("on") and not airline:
+        sw["on"] = _ts(ev["on"])
+    if ev.get("eta") and not airline:
+        sw["eta"], sw["eta_at"] = _ts(ev["eta"]), got
+    if ev.get("arr") and not airline:
+        sw["arr"] = _iata(ev["arr"])
+    if ev.get("diverted"):
+        sw["diverted"] = True
+    if ev.get("route"):
+        txt = swim.route_text(ev["route"])
+        if txt and txt != sw.get("route"):
+            if sw.get("route"):
+                sw["route_prev"], sw["route_changed"] = sw["route"], got
+            sw["route"], sw["route_at"] = txt, got
+    if airline and ev.get("airline"):
+        a = ev["airline"]
+        u = sw.setdefault("airline", {})
+        for k in ("gate_out", "runway_off", "gate_in", "runway_on", "in", "on", "sched_out", "sched_in"):
+            if a.get(k):
+                u[k] = _ts(a[k])
+        u["src"], u["at"] = ev["src"], got
+        if ev.get("status"):
+            u["status"] = ev["status"]
+        if ev.get("remarks"):
+            u["remarks"] = ev["remarks"]
+
+
+def swim_check(L, f, planned):
+    """Read this leg's new SWIM messages into its saved SWIM facts (L['swim'], kept across restarts
+    and however long the flight), log what came in, and report a diversion.
+    -> {diverted_to, new, off, on, eta} (times as ISO)."""
+    out = {}
+    if not L.get("ident") or swim.STATE.get("status") == "off":
         return out
-    last = mine[-1]
-    arr = _iata(last.get("arr"))
-    if planned and arr and arr != _iata(planned):
-        out["diverted_to"] = arr
-    seen_at = L.get("swim_seen") or 0
+    mine = swim_events_for(L, f)
+    sw = L.setdefault("swim", {})
+    seen_at = max(L.get("swim_seen") or 0, sw.get("seen") or 0)
     fresh = [e for e in mine if (e.get("got") or 0) > seen_at]
+    for e in fresh:
+        _swim_take(sw, e)
     if fresh:
         out["new"] = True
-        L["swim_seen"] = max(e.get("got") or 0 for e in fresh)
-        e = fresh[-1]
+        sw["seen"] = L["swim_seen"] = max(e.get("got") or 0 for e in fresh)
+        e = next((x for x in reversed(fresh) if x.get("src") != "TFDM"), fresh[-1])
         bits = [e.get("type") or "message", f"{_iata(e.get('dep')) or '?'}→{_iata(e.get('arr')) or '?'}"]
         for k, lbl in (("off", "off"), ("on", "on"), ("eta", "ETA")):
-            v = next((x.get(k) for x in reversed(fresh) if x.get(k)), None)
+            v = next((x.get(k) for x in reversed(fresh) if x.get(k) and not _airline_src(x)), None)
             if v:
                 bits.append(f"{lbl} {v[11:16]}Z")
-        al = next((x for x in reversed(fresh) if x.get("airline") and x.get("src") not in (None, "TFMS")), None)
+        al = next((x for x in reversed(fresh) if x.get("airline") and _airline_src(x)), None)
         if al:
-            bits.append(f"{al['src']} times " + " ".join(f"{k} {(al['airline'].get(k) or '')[11:16]}Z"
-                                                       for k in ("out", "off", "on", "in") if al["airline"].get(k)))
+            a = al["airline"]
+            bits.append(f"{al['src']}: " + " ".join(f"{lbl} {a[k][11:16]}Z" for k, lbl in (
+                ("gate_out", "pushed"), ("runway_off", "off"), ("in", "gate est"), ("gate_in", "in")) if a.get(k)))
+        if any(x.get("route") for x in fresh) and sw.get("route_changed", 0) > seen_at:
+            bits.append("new route")
+        if any(x.get("src") == "TFDM" for x in fresh):
+            bits.append("tower data")
         if any(x.get("diverted") for x in fresh):
             bits.append("diversion flagged")
         saw(L, "FAA SWIM", None, " ".join(bits))
-    for k in ("off", "on", "eta"):
-        v = next((x.get(k) for x in reversed(mine) if x.get(k)), None)
-        if v:
-            out[k] = v
-    al = next((x for x in reversed(mine) if x.get("airline") and x.get("src") not in (None, "TFMS")), None)
-    if al:
-        out["airline"] = dict(al["airline"], src=al["src"], at=al.get("at"))
-    if any(x.get("diverted") for x in mine) and arr and planned and arr != _iata(planned):
+    if not sw.get("seen"):
+        L.pop("swim", None)
+        return out
+    arr = sw.get("arr")
+    if planned and arr and arr != _iata(planned):
         out["diverted_to"] = arr
+    for k in ("off", "on", "eta"):
+        if sw.get(k):
+            out[k] = datetime.fromtimestamp(sw[k], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return out
+
+
+def swim_overlay(L, f, now):
+    """Put the FAA's and the airline's own times over FlightAware's: FAA takeoff and landing, the
+    airline's actual push and gate arrival, the best landing estimate in the air (the tower's at
+    TFDM airports, else the FAA's), the tower's takeoff estimate on the ground, and the route ATC
+    has on file. Adds f['swim'] for the details page."""
+    sw = L.get("swim") or {}
+    if not sw or not f:
+        return
+    t = f.setdefault("times", {})
+    for k in fa.TIME_KEYS:
+        t.setdefault(k, {"scheduled": None, "estimated": None, "actual": None})
+    if sw.get("off"):
+        t["off"]["actual"] = sw["off"]
+    if sw.get("on"):
+        t["on"]["actual"] = sw["on"]
+    a = sw.get("airline") or {}
+    if a.get("gate_out") and a["gate_out"] <= now + 60:
+        t["out"]["actual"] = a["gate_out"]
+    if a.get("gate_in") and a["gate_in"] <= now + 60:
+        t["in"]["actual"] = a["gate_in"]
+    td_dep, td_arr = sw.get("tfdm_dep") or {}, sw.get("tfdm_arr") or {}
+    fresh_tfdm = sw.get("tfdm_eta") and now - (sw.get("tfdm_eta_at") or 0) < 15 * 60
+    fresh_faa = sw.get("eta") and now - (sw.get("eta_at") or 0) < 30 * 60
+    eta_src = None
+    if t["off"].get("actual") and not t["on"].get("actual") and (fresh_tfdm or fresh_faa):
+        eta, eta_src = (sw["tfdm_eta"], "tower") if fresh_tfdm else (sw["eta"], "FAA")
+        on_e, in_e = t["on"].get("estimated"), t["in"].get("estimated")
+        taxi = ((td_arr.get("arrivalTaxiTime") or {}).get("totalEstimatedTaxiInTime") or 0) * 60
+        gap = (in_e - on_e) if on_e and in_e else taxi or 8 * 60
+        t["on"]["estimated"] = eta
+        if not t["in"].get("actual"):
+            t["in"]["estimated"] = eta + max(2 * 60, min(45 * 60, gap))
+    est_off = (td_dep.get("runwayDepartureTime") or {}).get("estimated")
+    if est_off and not t["off"].get("actual"):
+        t["off"]["estimated"] = _ts(est_off)
+    if sw.get("route"):
+        if f.get("route_source") != "FAA":
+            f["route_flightaware"] = f.get("route")
+        f["route"], f["route_source"] = sw["route"], "FAA"
+    delay = td_dep.get("departureDelay") or {}
+    taxi_out = (td_dep.get("departureTaxiTime") or {}).get("totalEstimatedTaxiOutTime")
+    f["swim"] = {
+        "route_at": sw.get("route_at"), "route_prev": sw.get("route_prev"), "route_changed": sw.get("route_changed"),
+        "off": sw.get("off"), "on": sw.get("on"), "eta_src": eta_src,
+        "airline": {k: a.get(k) for k in ("src", "gate_out", "in", "gate_in", "status", "at")} if a else None,
+        "dep": {"runway": td_dep.get("runwayAssigned") or td_dep.get("runwayPredicted"), "fix": td_dep.get("departureFix"),
+                "delay": delay.get("predictedDelay") if delay.get("predictedDelay") is not None else delay.get("currentDelay"),
+                "est_off": _ts(est_off), "taxi": taxi_out,
+                "spot": td_dep.get("predictedDepartureSpot")} if td_dep else None,
+        "arr": {"runway": td_arr.get("runwayAssigned") or td_arr.get("runwayPredicted"),
+                "est_on": sw.get("tfdm_eta"), "at": sw.get("tfdm_eta_at"),
+                "taxi": (td_arr.get("arrivalTaxiTime") or {}).get("totalEstimatedTaxiInTime")} if td_arr else None,
+        "state": sw.get("tfdm_state"),
+    }
 
 
 def route_end(route):
@@ -1626,7 +1783,8 @@ def update_leg(browser, lid):
             sw = swim_check(L, flight, planned)
             if sw.get("new"):
                 used.append("FAA SWIM")
-            fa.fix_diversion(flight, planned, route_end(flight.get("route")) or sw.get("diverted_to"))
+            swim_overlay(L, flight, now)
+            fa.fix_diversion(flight, planned, sw.get("diverted_to") or route_end(flight.get("route")))
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
                 # a diversion keeps the airport you planned as the leg's arrival
@@ -1645,6 +1803,11 @@ def update_leg(browser, lid):
             if not flight.get("tail") and ti.get("tail") and fa.phase(flight, now) != "scheduled":
                 flight["tail"], flight["tail_source"] = ti["tail"], ti.get("source")
             L["flight"], L["source"] = flight, source
+        elif L.get("flight") and watched(L, now):
+            # no fresh page this time: the FAA's messages still move the saved flight along
+            if swim_check(L, L["flight"], planned_arr(L)).get("new"):
+                used.append("FAA SWIM")
+            swim_overlay(L, L["flight"], now)
         if L.get("extra") and not L.get("flight") and (L.get("aero") or {}).get("at"):
             note = not_found_note(L)  # page check came up empty too: keep the clear "not found" story
         L["note"] = note
@@ -2031,6 +2194,7 @@ def worker():
             forced = set()
             while not REFRESH_Q.empty():
                 forced.add(REFRESH_Q.get_nowait())
+            forced |= swim_news(now)
             if now - last_sched > 300 or "all" in forced or "schedule" in forced:
                 reload_schedule(force="all" in forced or "schedule" in forced)
                 check_schedule_stale(now)
@@ -2071,6 +2235,36 @@ def worker():
 # --------------------------------------------------------------------------
 # web
 # --------------------------------------------------------------------------
+
+def api_surface(lid, now):
+    """Live surface positions (FAA STDDS) at the airport where this flight is on the ground: the
+    departure airport until takeoff, the arrival airport once it's landing. Only for flights
+    you're watching, and only while STDDS is connected."""
+    with LOCK:
+        L = STATE["legs"].get(lid)
+        if not L or swim.STDDS_STATE.get("status") != "connected" or not watched(L, now):
+            return {"targets": []}
+        f = L.get("flight") or {}
+        ph = fa.phase(f, now) if f else "scheduled"
+        t = f.get("times") or {}
+        dest = f.get("diverted_to") or (f.get("destination") or {}).get("iata") or L.get("arr")
+        on_e = fa.best_time(t, "on") if t else None
+        if ph in ("scheduled", "taxi_out"):
+            code = L.get("dep")
+        elif ph == "landed" or (ph == "airborne" and on_e and on_e - now < 6 * 60):
+            code = dest
+        else:
+            return {"targets": [], "phase": ph}
+        ident = (L.get("ident") or "").upper()
+    ap = airports.get(code) or {}
+    icao = (ap.get("icao") or "").upper()
+    targets = swim.surface(icao)
+    for x in targets:
+        x["mine"] = bool(ident) and x.get("cs") == ident
+        x.pop("t", None)
+    return {"airport": ap.get("iata") or code, "icao": icao, "phase": ph,
+            "center": [ap["lat"], ap["lon"]] if ap.get("lat") is not None else None, "targets": targets}
+
 
 def leg_summary(L, now, nas, full=False):
     f = L.get("flight")
@@ -2163,6 +2357,7 @@ def api_state():
             "aeroapi": aero_on(),
             "swim": {k: swim.STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
             "tfdm": {k: swim.TFDM_STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
+            "stdds": {k: swim.STDDS_STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
         }
     data["backup"] = backup_brief()
     return data
@@ -2418,6 +2613,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/alerts":
             with LOCK:
                 return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
+        m = re.match(r"^/api/surface/([\w-]+)$", path)
+        if m:
+            return self._send(200, api_surface(m.group(1), time.time()))
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             d = api_leg(m.group(1))
@@ -2635,6 +2833,7 @@ def main():
     find_ingress()
     threading.Thread(target=worker, daemon=True, name="tracker").start()
     threading.Thread(target=backup_loop, daemon=True, name="backup").start()
+    swim.ON_NEWS = lambda acid: WAKE.set()
     swim.start(CFG)
     log.info("Flight Tracker %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)

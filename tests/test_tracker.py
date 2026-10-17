@@ -1,3 +1,4 @@
+from unittest import mock
 from datetime import datetime, timezone
 """Run with: python3 -m unittest discover -s tests"""
 
@@ -1401,9 +1402,13 @@ class Swim(unittest.TestCase):
         self.assertEqual(len(swim._feeds({"swim_username": "u", "swim_password": "p", "swim_queue": "q1"})), 1)
         swim.WATCH.clear(); swim.WATCH.add("UAL2127")
         n = swim.TFDM_STATE["matched"]
-        swim.handle_tfdm('<?xml version="1.0"?><ns2:TfdmFlight xmlns:ns2="x"><callsign>UAL2127</callsign></ns2:TfdmFlight>')
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tfdm_2127.xml")) as fh:
+            swim.handle_tfdm(fh.read())
         self.assertEqual(swim.TFDM_STATE["matched"], n + 1)
-        self.assertIn("TfdmFlight", swim.TFDM_TYPES)
+        self.assertIn("NasMessage", swim.TFDM_TYPES)
+        ev = [e for e in swim.events("UAL2127") if e.get("src") == "TFDM"][-1]
+        self.assertEqual((ev["dep"], ev["arr"], ev["tfdm"]["arr"]["runwayArrivalTime"]["estimated"]),
+                         ("KMDT", "KEWR", "2026-10-17T02:49:57Z"))
 
     def test_real_2127_continuation_departure(self):
         """Captured live: UA2127 MDT→EWR (after the LAX→EWR diversion) wheels-up 02:19Z, original igtd 17:15Z."""
@@ -1420,6 +1425,73 @@ class Swim(unittest.TestCase):
         sw = server.swim_check(L, f, "EWR")
         self.assertEqual((sw.get("off"), sw.get("eta"), sw.get("diverted_to")),
                          ("2026-10-17T02:19:00Z", "2026-10-17T02:57:30Z", None))
+
+    def test_real_2127_overlay(self):
+        """The live UA2127 MDT→EWR sequence: FAA takeoff, United's push time, the tower's landing
+        estimate and ATC's shortcut all land on the flight; the route shows ATC's amended one."""
+        import server
+        import swim
+        here = os.path.dirname(os.path.abspath(__file__))
+        swim.STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("UAL2127")
+        swim.EVENTS.clear()
+        for name in ("swim_2127_departure.xml", "swim_2127_united.xml", "tfdm_2127.xml", "swim_2127_reroute.xml"):
+            with open(os.path.join(here, name)) as fh:
+                (swim.handle_tfdm if name.startswith("tfdm") else swim.handle)(fh.read())
+        so = datetime(2026, 10, 17, 1, 27, tzinfo=timezone.utc).timestamp()
+        now = datetime(2026, 10, 17, 2, 31, tzinfo=timezone.utc).timestamp()
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="MDT", dest="EWR"))
+        f["route"] = "KMDT GAAPP SEG FQM FQM3 KEWR"
+        L = {"id": "s5", "ident": "UAL2127", "dep": "MDT", "arr": "EWR", "sched_out": so}
+        with mock.patch.object(server.time, "time", return_value=now):
+            server.swim_check(L, f, "EWR")
+            server.swim_overlay(L, f, now)
+        z = lambda iso: datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+        t = f["times"]
+        self.assertEqual(t["off"]["actual"], z("2026-10-17T02:19:00Z"))
+        self.assertEqual(t["out"]["actual"], z("2026-10-17T01:53:00Z"))      # United's gateDeparture
+        self.assertEqual(t["on"]["estimated"], z("2026-10-17T02:49:57Z"))    # Newark tower's estimate
+        self.assertGreater(t["in"]["estimated"], t["on"]["estimated"])
+        self.assertEqual(f["route"], "KMDT LVZ245023 RACKI FQM3 KEWR")
+        self.assertEqual(f["route_source"], "FAA")
+        self.assertEqual(f["swim"]["eta_src"], "tower")
+        self.assertEqual(f["swim"]["airline"]["src"], "UAL")
+        self.assertIn("UAL2127", swim.PENDING)
+        # saved on the leg: a later check with no new messages keeps it all
+        swim.EVENTS.clear()
+        g, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="MDT", dest="EWR"))
+        server.swim_check(L, g, "EWR")
+        server.swim_overlay(L, g, now)
+        self.assertEqual(g["times"]["off"]["actual"], z("2026-10-17T02:19:00Z"))
+        self.assertEqual(g["route"], "KMDT LVZ245023 RACKI FQM3 KEWR")
+
+    def test_tfdm_departure_side(self):
+        import swim
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "tfdm_las.xml")) as fh:
+            ev = [e for e in swim.parse_tfdm(fh.read()) if e["dep"] == "KLAS"][0]
+        d = ev["tfdm"]["dep"]
+        self.assertEqual((d["runwayAssigned"], d["departureFix"], d["departureDelay"]["predictedDelay"],
+                          d["runwayDepartureTime"]["estimated"], d["departureTaxiTime"]["totalEstimatedTaxiOutTime"]),
+                         ("01R", "SSKEE", 8.0, "2026-10-17T13:32:00Z", 23.0))
+
+    def test_surface_positions(self):
+        import swim
+        xml = """<ns2:asdexMsg xmlns:ns2="urn:x"><airport>KEWR</airport>
+          <positionReport full="true"><track>101</track><position><latitude>40.69</latitude><longitude>-74.17</longitude></position>
+          <movement><speed>12</speed><heading>40</heading></movement><flightId><aircraftId>UAL2127</aircraftId></flightId>
+          <flightInfo><tgtType>aircraft</tgtType><acType>B752</acType></flightInfo></positionReport>
+          <positionReport full="false"><track>102</track><position><latitude>40.68</latitude><longitude>-74.18</longitude></position></positionReport>
+          </ns2:asdexMsg>"""
+        swim.WATCH_AIRPORTS.clear(); swim.WATCH_AIRPORTS.add("KEWR")
+        swim.SURFACE.clear()
+        swim.handle_stdds(xml)
+        swim.handle_stdds(xml.replace("<latitude>40.69</latitude>", "<latitude>40.70</latitude>").replace(' full="true"', ' full="false"'))
+        got = {t["track"]: t for t in swim.surface("KEWR")}
+        self.assertEqual((got["101"]["lat"], got["101"]["cs"], got["101"]["type"]), (40.70, "UAL2127", "B752"))
+        swim.WATCH_AIRPORTS.clear()
+        swim.handle_stdds(xml.replace("40.69", "41.0"))
+        self.assertEqual(swim.surface("KEWR")[0]["lat"] in (40.70, 40.68), True)  # not watched: ignored
 
     def test_amendment_marks_diversion(self):
         import server

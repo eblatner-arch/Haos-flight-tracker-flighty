@@ -40,6 +40,19 @@ def _apt(code):
     return (code or "").strip().upper() or None
 
 
+_AIRLINE_ATTRS = {"out": "airlineOutTime", "off": "airlineOffTime", "on": "airlineOnTime", "in": "airlineInTime",
+                  "gate_out": "gateDeparture", "runway_off": "runwayDeparture",
+                  "gate_in": "gateArrival", "runway_on": "runwayArrival",
+                  "sched_out": "originalDeparture", "sched_in": "originalArrival"}
+
+
+def route_text(legacy):
+    """FAA legacy route -> readable tokens: 'KMDT./.LVZ245023..RACKI.FQM3.KEWR/0258' ->
+    'KMDT LVZ245023 RACKI FQM3 KEWR' (the '/0258' is the arrival estimate; './.' is 'from here')."""
+    s = _re.sub(r"/\d{4}$", "", (legacy or "").strip())
+    return " ".join(t for t in _re.split(r"\.+", s) if t and t != "/") or None
+
+
 def parse(xml_text):
     """Flight-data messages in one TFMS payload -> [{acid, dep, arr, type, at, igtd, gufi, off, on, eta, diverted,
     src, trigger, status, airline}]. airline = {out, off, on, in} as the airline itself filed them (CDM).
@@ -74,9 +87,15 @@ def parse(xml_text):
                         ev["on"] = ev["on"] or sub.get("timeValue")
                     else:
                         ev["eta"] = sub.get("timeValue")
-                elif n == "flightTimeData" and sub.get("airlineOutTime"):
-                    # The airline's own gate/runway times (CDM): only from messages the airline sent.
-                    ev["airline"] = {k: sub.get(f"airline{k.title()}Time") for k in ("out", "off", "on", "in")}
+                elif n == "flightTimeData" and any(sub.get(a) for a in _AIRLINE_ATTRS.values()):
+                    # The airline's own times (CDM). Seen from United: gateDeparture (actual push),
+                    # runwayDeparture, airlineInTime (its gate-arrival estimate), originalDeparture/Arrival
+                    # (schedule). Only trusted from messages the airline itself sent (src UAL, AAL…).
+                    ev["airline"] = {k: sub.get(a) for k, a in _AIRLINE_ATTRS.items() if sub.get(a)}
+                elif n in ("newRouteOfFlight", "routeOfFlight") and sub.get("legacyFormat"):
+                    ev["route"] = sub.get("legacyFormat")
+                elif n == "remarksKeywords" and txt:
+                    ev["remarks"] = txt
                 elif n == "flightStatus" and txt:
                     ev["status"] = txt
                 elif n == "diversionIndicator" and txt and txt != "NO_DIVERSION":
@@ -135,10 +154,9 @@ def handle(xml_text):
         if ev["acid"] in WATCH:
             hit = True
             ev["got"] = time.time()
-            with LOCK:
-                lst = EVENTS.setdefault(ev["acid"], [])
-                lst.append(ev)
-                del lst[:-KEEP]
+            _keep(ev)
+            if ev.get("trigger") != "UPDATE_DEPARTURE_TIMEOUT":
+                _news(ev)
             STATE["matched"] += 1
     if hit:
         MATCHED_RAW.append({"at": time.time(), "xml": xml_text[:200000]})
@@ -148,17 +166,124 @@ def handle(xml_text):
 TFDM_STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "matched": 0,
               "last_message": None, "rate": 0.0}
 TFDM_TYPES = {}
+STDDS_STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "matched": 0,
+               "last_message": None, "rate": 0.0}
+STDDS_TYPES = {}
+STDDS_RAW = []           # last few surface messages for your airports
+WATCH_AIRPORTS = set()   # ICAO codes of your watched flights' airports (KEWR …), set by the server
+SURFACE = {}             # airport -> track id -> latest surface position
+PENDING = set()          # callsigns with news worth an immediate refresh (takeoff, landing, diversion)
+ON_NEWS = None           # set by the server: called when PENDING gets a callsign
 _ROOT_RE = _re.compile(r'<(?![?!])(?:[\w.-]+:)?([\w.-]+)')
+_DUR_RE = _re.compile(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?")
+
+
+def _minutes(iso):
+    """ISO duration -> minutes: PT8M -> 8, PT1H2M30S -> 62.5."""
+    m = _DUR_RE.fullmatch((iso or "").strip())
+    if not m or not any(m.groups()):
+        return None
+    d, h, mi, se = (float(x) if x else 0 for x in m.groups())
+    return round(d * 1440 + h * 60 + mi + se / 60, 1)
+
+
+_TIME_KINDS = ("initial", "estimated", "actual", "earliest", "target", "scheduled", "controlled")
+
+
+def _tfdm_side(el):
+    """A TFDM departure/arrival block -> {name: value}: times as {kind: iso}, runways as designators,
+    fixes as names, delays and taxi times in minutes."""
+    out = {}
+    for c in el:
+        n = _local(c.tag)
+        kids = list(c)
+        if c.get("runwayDesignator"):
+            out[n] = c.get("runwayDesignator")
+        elif n.endswith("Fix"):
+            out[n] = " ".join("".join(k.itertext()).strip() for k in kids) or (c.text or "").strip() or None
+        elif n.endswith("Delay") or n.endswith("TaxiTime"):
+            out[n] = {_local(k.tag): _minutes(k.text) for k in kids}
+        elif n == "predictedDepartureSpot" or c.get("spotRegion"):
+            out[n] = c.get("spotRegion") or (c.text or "").strip()
+        elif kids and any(_local(k.tag) in _TIME_KINDS or any(_local(g.tag) == "time" for g in k.iter())
+                          for k in kids):
+            times = {}
+            for k in kids:
+                t = next((g for g in k.iter() if _local(g.tag) == "time"), None)
+                v = (t.text if t is not None else k.text) or ""
+                if v.strip():
+                    times[_local(k.tag)] = v.strip()
+            out[n] = times
+        elif not kids and (c.text or "").strip():
+            out[n] = c.text.strip()
+    return out
+
+
+def parse_tfdm(xml_text):
+    """TFDM (tower) flight messages -> [{acid, dep, arr, igtd, type, at, src: 'TFDM', tfdm: {dep, arr, state}}].
+    These are FIXM NasMessage documents; a message can carry several flights."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    mtype = None
+    for el in root.iter():
+        if _local(el.tag) == "metadata" and el.get("messageType"):
+            mtype = el.get("messageType")
+    out = []
+    for fl in root.iter():
+        if _local(fl.tag) != "flight":
+            continue
+        ident = next((c for c in fl.iter() if _local(c.tag) == "flightIdentification"), None)
+        if ident is None or not ident.get("aircraftIdentification"):
+            continue
+        dep_el = next((c for c in fl if _local(c.tag) == "departure"), None)
+        arr_el = next((c for c in fl if _local(c.tag) == "arrival"), None)
+        dep = _tfdm_side(dep_el) if dep_el is not None else {}
+        arr = _tfdm_side(arr_el) if arr_el is not None else {}
+        state = next((c.get("value") for c in fl.iter() if _local(c.tag) == "tfdmFlightState"), None)
+        stamps = [(c.text or "").strip() for c in fl.iter() if _local(c.tag) == "reportedTimestamp"]
+        creator = next((c.get("locationIndicator") for c in fl.iter() if _local(c.tag) == "tfdmIdCreatorAirport"), None)
+        out.append({"acid": ident.get("aircraftIdentification").upper(),
+                    "dep": _apt(dep_el.get("departurePointText")) if dep_el is not None else None,
+                    "arr": _apt(arr_el.get("destinationPointText")) if arr_el is not None else None,
+                    "igtd": (dep.get("offBlockTime") or {}).get("initial") if isinstance(dep.get("offBlockTime"), dict) else None,
+                    "type": f"TFDM {mtype or 'message'}", "at": max(stamps) if stamps else None, "src": "TFDM",
+                    "tfdm": {"dep": dep, "arr": arr, "state": state, "airport": creator}})
+    return out
+
+
+def _keep(ev):
+    with LOCK:
+        lst = EVENTS.setdefault(ev["acid"], [])
+        lst.append(ev)
+        del lst[:-KEEP]
+
+
+def _news(ev):
+    """Takeoff, landing, a diversion flag or a new destination: worth refreshing the flight now."""
+    t = ev.get("tfdm") or {}
+    if (ev.get("off") or ev.get("on") or ev.get("diverted")
+            or ev.get("type") in ("departureInformation", "arrivalInformation")
+            or ((t.get("dep") or {}).get("offBlockTime") or {}).get("actual")
+            or ((t.get("dep") or {}).get("runwayDepartureTime") or {}).get("actual")
+            or ((t.get("arr") or {}).get("runwayArrivalTime") or {}).get("actual")):
+        PENDING.add(ev["acid"])
+        if ON_NEWS:
+            try:
+                ON_NEWS(ev["acid"])
+            except Exception:
+                pass
 
 
 def handle_tfdm(xml_text):
-    """TFDM (tower surface data): not parsed yet. Count and sample each kind, and keep the raw
-    messages that mention your flights, so the parser can be built from the real feed."""
+    """TFDM (tower data at airports that have it: EWR, LAX, LAS …): runway assignments, predicted
+    delays, estimated takeoff and landing times for your flights. Everything is counted and sampled."""
     TFDM_STATE["messages"] += 1
     TFDM_STATE["last_message"] = time.time()
     head = xml_text[:200000]
     try:
-        types = _TYPE_RE.findall(head) or _ROOT_RE.findall(head)[:1] or ["unknown"]
+        types = _TYPE_RE.findall(head[:3000]) or _ROOT_RE.findall(head[:400])[:1] or ["unknown"]
         for t in set(types):
             TFDM_TYPES[t] = TFDM_TYPES.get(t, 0) + 1
             lst = SAMPLES.setdefault("TFDM_" + t, [])
@@ -166,10 +291,112 @@ def handle_tfdm(xml_text):
                 lst.append(head)
     except Exception:
         pass
-    if WATCH and any(cs in xml_text for cs in WATCH):
+    if not WATCH or not any(cs in xml_text for cs in WATCH):
+        return
+    hit = False
+    for ev in parse_tfdm(xml_text):
+        if ev["acid"] in WATCH:
+            hit = True
+            ev["got"] = time.time()
+            _keep(ev)
+            _news(ev)
+    if hit:
         TFDM_STATE["matched"] += 1
         MATCHED_RAW.append({"at": time.time(), "xml": head, "feed": "TFDM"})
         del MATCHED_RAW[:-40]
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_surface(xml_text):
+    """STDDS surface movement (ASDE-X / ASSC) -> (airport, [{track, lat, lon, hdg, kt, cs, type, kind, full}]).
+    Delta reports carry only what changed; the caller merges them by track id."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return None, []
+    airport = None
+    for el in root.iter():
+        if _local(el.tag) == "airport" and (el.text or "").strip():
+            airport = el.text.strip().upper()
+            break
+    out = []
+    for rep in root.iter():
+        if _local(rep.tag) != "positionReport":
+            continue
+        r = {"full": rep.get("full") == "true"}
+        for c in rep.iter():
+            n = _local(c.tag)
+            v = (c.text or "").strip()
+            if not v:
+                continue
+            if n == "track":
+                r["track"] = v
+            elif n == "latitude":
+                r["lat"] = _num(v)
+            elif n == "longitude":
+                r["lon"] = _num(v)
+            elif n == "heading":
+                r["hdg"] = _num(v)
+            elif n == "speed":
+                r["kt"] = _num(v)
+            elif n == "aircraftId":
+                r["cs"] = v.upper()
+            elif n == "acType":
+                r["type"] = v
+            elif n == "tgtType":
+                r["kind"] = v.lower()
+            elif n == "mode3ACode":
+                r["squawk"] = v
+        if r.get("track"):
+            out.append(r)
+    return airport, out
+
+
+def handle_stdds(xml_text):
+    """STDDS: only surface positions at your watched flights' airports are kept (latest per target);
+    everything else is counted and sampled, then dropped."""
+    STDDS_STATE["messages"] += 1
+    STDDS_STATE["last_message"] = time.time()
+    try:
+        t = (_ROOT_RE.findall(xml_text[:400]) or ["unknown"])[0]
+        STDDS_TYPES[t] = STDDS_TYPES.get(t, 0) + 1
+        lst = SAMPLES.setdefault("STDDS_" + t, [])
+        if len(lst) < 3:
+            lst.append(xml_text[:200000])
+    except Exception:
+        pass
+    if not WATCH_AIRPORTS or not any(ap in xml_text for ap in WATCH_AIRPORTS):
+        return
+    airport, reps = parse_surface(xml_text)
+    if not airport or airport not in WATCH_AIRPORTS or not reps:
+        return
+    now = time.time()
+    with LOCK:
+        tracks = SURFACE.setdefault(airport, {})
+        for r in reps:
+            cur = {} if r.get("full") else tracks.get(r["track"], {})
+            cur = {**cur, **{k: v for k, v in r.items() if v is not None and k != "full"}, "t": now}
+            tracks[r["track"]] = cur
+        for k in [k for k, v in tracks.items() if now - v["t"] > 30]:
+            del tracks[k]
+    STDDS_STATE["matched"] += 1
+    if any(cs in xml_text for cs in WATCH):
+        STDDS_RAW.append(xml_text[:200000])
+        del STDDS_RAW[:-10]
+
+
+def surface(airport, max_age=15):
+    """Targets moving or parked on this airport's surface right now (positions newer than max_age s)."""
+    now = time.time()
+    with LOCK:
+        return [dict(v) for v in (SURFACE.get((airport or "").upper()) or {}).values()
+                if now - v["t"] <= max_age and v.get("lat") is not None and v.get("lon") is not None]
 
 
 def events(callsign):
@@ -182,8 +409,8 @@ def configured(cfg):
 
 
 def _feeds(cfg):
-    """The subscriptions to read: TFMS (flight data) and, when its queue is set, TFDM (tower).
-    TFDM uses the TFMS username/password unless its own are given."""
+    """The subscriptions to read: TFMS (flight data) and, when their queues are set, TFDM (tower data)
+    and STDDS (surface movement). Each uses the TFMS username/password unless given its own."""
     out = []
     if configured(cfg):
         out.append({"name": "TFMS", "state": STATE, "handle": handle, "queue": cfg["swim_queue"],
@@ -196,6 +423,13 @@ def _feeds(cfg):
             out.append({"name": "TFDM", "state": TFDM_STATE, "handle": handle_tfdm, "queue": cfg["swim_tfdm_queue"],
                         "host": cfg.get("swim_tfdm_host") or "tcps://ems3.swim.faa.gov:55443",
                         "vpn": cfg.get("swim_tfdm_vpn") or "TFDM", "user": user, "password": pw})
+    if (cfg.get("swim_stdds_queue") or "").strip():
+        user = cfg.get("swim_stdds_username") or cfg.get("swim_username")
+        pw = cfg.get("swim_stdds_password") or cfg.get("swim_password")
+        if user and pw:
+            out.append({"name": "STDDS", "state": STDDS_STATE, "handle": handle_stdds, "queue": cfg["swim_stdds_queue"],
+                        "host": cfg.get("swim_stdds_host") or "tcps://ems2.swim.faa.gov:55443",
+                        "vpn": cfg.get("swim_stdds_vpn") or "STDDS", "user": user, "password": pw})
     return out
 
 
@@ -342,14 +576,7 @@ def _session(feed):
     class H(MessageHandler):
         def on_message(self, msg):
             try:
-                body = msg.get_payload_as_string()
-                if body is None:
-                    raw = msg.get_payload_as_bytes() or b""
-                    if raw[:2] == b"\x1f\x8b":
-                        import gzip
-                        raw = gzip.decompress(raw)
-                    body = raw.decode("utf-8", "replace")
-                feed["handle"](body)
+                feed["handle"](_body(msg))
             except Exception as e:
                 log.debug("SWIM message: %s", e)
             finally:
@@ -379,6 +606,26 @@ def _session(feed):
     raise RuntimeError("connection dropped")
 
 
+def _body(msg):
+    """A message's text. Some arrive as bytes (sometimes gzip) with a near-empty text part, so take
+    whichever is the real payload."""
+    try:
+        body = msg.get_payload_as_string()
+    except Exception:
+        body = None
+    if body is None or len(body.strip()) < 16:
+        try:
+            raw = msg.get_payload_as_bytes() or b""
+        except Exception:
+            raw = b""
+        if raw[:2] == b"\x1f\x8b":
+            import gzip
+            raw = gzip.decompress(raw)
+        if len(raw) > len(body or ""):
+            body = raw.decode("utf-8", "replace")
+    return body or ""
+
+
 def samples_zip():
     """Examples of each message type seen, the last messages for your flights, and counts."""
     import io
@@ -388,10 +635,15 @@ def samples_zip():
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.json", json.dumps({"state": STATE, "watching": sorted(WATCH), "types": TYPE_COUNTS, "airline_sent": SOURCE_COUNTS,
                                                "tfdm": {"state": TFDM_STATE, "types": TFDM_TYPES},
+                                               "stdds": {"state": STDDS_STATE, "types": STDDS_TYPES,
+                                                         "airports": sorted(WATCH_AIRPORTS),
+                                                         "targets": {k: len(v) for k, v in SURFACE.items()}},
                                                "events": {k: v for k, v in EVENTS.items()}}, indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):
                 z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for i, m in enumerate(MATCHED_RAW, 1):
             z.writestr(f"your_flights/{i:02d}{'_' + m['feed'] if m.get('feed') else ''}.xml", m["xml"])
+        for i, x in enumerate(STDDS_RAW, 1):
+            z.writestr(f"your_flights/surface_{i:02d}.xml", x)
     return buf.getvalue()

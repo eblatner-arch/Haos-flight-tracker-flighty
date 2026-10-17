@@ -346,8 +346,11 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
 
     # Route
     if f.get("route"):
-        rk = f"{f['route']}|{f.get('filed_altitude') or ''}"
-        if nt.get("route") and rk != nt["route"] and ph == "scheduled":
+        # The key carries where the route came from: switching from FlightAware's copy to the FAA's
+        # own (SWIM) is not a new route; a change within either one is.
+        rk = f"{f.get('route_source') or 'FlightAware'}|{f['route']}|{f.get('filed_altitude') or ''}"
+        old_src = (nt.get("route") or "").split("|")[0] if (nt.get("route") or "").count("|") >= 2 else "FlightAware"
+        if nt.get("route") and rk != nt["route"] and ph == "scheduled" and old_src == (f.get("route_source") or "FlightAware"):
             alt = f.get("filed_altitude")
             add("route_change", f"{ident} new filed route",
                 f"{f['route']}" + (f" · FL{int(alt / (100 if alt > 1000 else 1)):03d}" if alt else ""))

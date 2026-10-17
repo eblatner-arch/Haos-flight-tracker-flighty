@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.14.0
+- FAA SWIM now takes priority: the FAA's takeoff and landing times, United's own push time and gate-arrival estimate, and in the air the best landing estimate (the tower's at TFDM airports like EWR, else the FAA's).
+- Route: the details show the route ATC has on file (with amendments like a shortcut, and the previous route), replacing FlightAware's copy.
+- A SWIM takeoff, landing or diversion refreshes the flight and alerts right away instead of waiting for the next check.
+- TFDM tower data in the details: departure runway, departure fix, predicted delay, estimated takeoff and taxi time; arrival runway and landing estimate.
+- STDDS (optional third subscription): live surface traffic on the flight's map while it's on the ground at an airport with surface radar; a runway button zooms to the airport.
+- SWIM facts are saved on the flight, so they survive restarts and long flights.
+
 ## 3.13.1
 - TFDM: its own connection URL (ems3) and password fields.
 

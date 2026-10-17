@@ -83,3 +83,18 @@ configuration:
   swim_tfdm_password:
     name: FAA SWIM TFDM password
     description: The TFDM subscription's own "Connection Password" (each subscription has its own). Blank uses the TFMS one.
+  swim_stdds_queue:
+    name: FAA SWIM STDDS queue (optional)
+    description: Your STDDS subscription's "Queue Name". Surface positions at your flights' airports show on the flight's map. Blank leaves STDDS off.
+  swim_stdds_vpn:
+    name: FAA SWIM STDDS message VPN
+    description: The STDDS subscription's "Message VPN" (STDDS).
+  swim_stdds_host:
+    name: FAA SWIM STDDS connection URL
+    description: The STDDS subscription's "JMS Connection URL". Default tcps://ems2.swim.faa.gov:55443.
+  swim_stdds_username:
+    name: FAA SWIM STDDS username
+    description: Only if it differs from the TFMS one.
+  swim_stdds_password:
+    name: FAA SWIM STDDS password
+    description: The STDDS subscription's own "Connection Password". Blank uses the TFMS one.

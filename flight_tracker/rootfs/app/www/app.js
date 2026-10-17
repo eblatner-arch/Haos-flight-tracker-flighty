@@ -291,6 +291,20 @@
         },
       });
       map.addControl(new Btn());
+      const Apt = L.Control.extend({
+        options: { position: "topright" },
+        onAdd() {
+          const b = L.DomUtil.create("button", "map-center");
+          b.type = "button"; b.title = "Airport surface"; b.setAttribute("aria-label", "Show airport surface traffic");
+          b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M10 2h4v20h-4zM11.3 4h1.4v3h-1.4zm0 5h1.4v3h-1.4zm0 5h1.4v3h-1.4zM3 9h5v2H3zm13 4h5v2h-5z"/></svg>';
+          b.style.display = "none"; b.style.marginTop = "6px";
+          L.DomEvent.disableClickPropagation(b);
+          L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); if (entry.airport) map.setView(entry.airport, 15); });
+          entry.aptBtn = b;
+          return b;
+        },
+      });
+      map.addControl(new Apt());
     }
     if (interactive) oneFingerZoom(map, el);
     paintMap(entry, leg, true);
@@ -349,6 +363,59 @@
     el.addEventListener("touchcancel", end, { capture: true, passive: false });
   }
 
+
+  // Live surface traffic (FAA STDDS) on a flight's map while it's on the ground at an airport with
+  // surface radar: everything on the field, your flight highlighted. Polls only while that
+  // flight's page is open: every 3 s while there's traffic to show, every 20 s otherwise.
+  const SURF = { id: null, timer: null, zoomed: false };
+  function stopSurface() {
+    if (SURF.timer) clearTimeout(SURF.timer);
+    SURF.timer = null; SURF.id = null;
+    for (const m of Object.values(MAPS)) { if (m.surface) m.surface.clearLayers(); if (m.aptBtn) m.aptBtn.style.display = "none"; }
+  }
+  function surfaceWatch(leg) {
+    if (!STATE || !STATE.stdds || STATE.stdds.status !== "connected") { stopSurface(); return; }
+    if (SURF.id !== leg.id) { stopSurface(); SURF.id = leg.id; SURF.zoomed = false; }
+    if (SURF.timer) return;
+    const id = leg.id;
+    const tick = async () => {
+      SURF.timer = null;
+      if (SURF.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (SURF.id === id) stopSurface(); return; }
+      let d = null;
+      try { d = await api(`api/surface/${encodeURIComponent(id)}`); } catch {}
+      if (SURF.id !== id) return;
+      const entry = MAPS[`leg-${id}`];
+      if (entry) paintSurface(entry, d || {});
+      SURF.timer = setTimeout(tick, d && d.targets && d.targets.length ? 3000 : 20000);
+    };
+    SURF.timer = setTimeout(tick, 0);
+  }
+  function paintSurface(entry, d) {
+    if (!entry.surface) entry.surface = L.layerGroup().addTo(entry.map);
+    entry.surface.clearLayers();
+    const tg = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
+    entry.airport = tg.length && d.center ? d.center : null;
+    if (entry.aptBtn) entry.aptBtn.style.display = entry.airport ? "" : "none";
+    if (!tg.length) return;
+    const route = css("--route"), muted = css("--muted");
+    for (const t of tg) {
+      const label = [t.cs, t.type].filter(Boolean).join(" · ") || (t.kind === "vehicle" ? "Vehicle" : "Unidentified");
+      if (!t.mine && (t.kind === "vehicle" || (!t.cs && !t.type))) {
+        entry.surface.addLayer(L.circleMarker([t.lat, t.lon], { radius: 2.5, color: muted, fillColor: muted, fillOpacity: 0.8, weight: 0 }).bindTooltip(label));
+        continue;
+      }
+      const sz = t.mine ? 22 : 15;
+      const icon = L.divIcon({ className: "surf-icon", iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
+        html: `<div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : muted};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>` });
+      const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 }).bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: !!t.mine });
+      entry.surface.addLayer(m);
+    }
+    if (!SURF.zoomed && entry.interactive && ["taxi_out", "landed"].includes(d.phase)) {
+      const me = tg.find((t) => t.mine);
+      entry.map.setView(me ? [me.lat, me.lon] : entry.airport, 15);
+      SURF.zoomed = true;
+    }
+  }
 
   function paintMap(entry, leg, fit) {
     const { layer, interactive } = entry;
@@ -1186,6 +1253,7 @@
     try { leg = await api(`api/leg/${id}`); } catch { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Flight not found</b>It may have dropped off your schedule.</div>`; return; }
     LEGS[id] = leg;
     const f = leg.flight || { times: { out: {}, off: {}, on: {}, in: {} } };
+    const sw = f.swim || {};
     const tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
     const cell = (lbl, t, tz) => {
       const v = t ? (t.actual || t.estimated || t.scheduled) : null;
@@ -1201,7 +1269,17 @@
       ["Aircraft", [f.aircraft_name || f.aircraft_type, f.tail].filter(Boolean).join(" · ")],
       ["Tail from", f.tail_source || (leg.phase === "scheduled" ? "not known yet" : "")],
       ["Aircraft's day", (leg.chain || []).length ? leg.chain.map((c) => `${c.ident} ${c.route} (${c.phase === "scheduled" ? "not flown yet" : c.phase.replace("_", " ")})`).join(" ← ") : ""],
-      ["Filed route", f.route],
+      [f.route_source === "FAA" ? "Route (ATC)" : "Filed route", f.route ? f.route + (sw.route_changed ? ` · amended ${hm(sw.route_changed, tzA)}` : "") : ""],
+      ["Previous route", sw.route_prev || ""],
+      ["United", sw.airline ? [sw.airline.gate_out && `pushed ${hm(sw.airline.gate_out, tzA)}`, sw.airline.in && `gate arrival est. ${hm(sw.airline.in, tzB)}`,
+        sw.airline.gate_in && `at gate ${hm(sw.airline.gate_in, tzB)}`, `updated ${ago(sw.airline.at)}`].filter(Boolean).join(" · ") : ""],
+      [`Departure (${leg.dep} tower)`, sw.dep && !(f.times.off || {}).actual ? [sw.dep.runway && `runway ${sw.dep.runway}`, sw.dep.fix && `via ${sw.dep.fix}`,
+        sw.dep.est_off && `est. takeoff ${hm(sw.dep.est_off, tzA)}`, sw.dep.delay ? `${Math.round(sw.dep.delay)} min predicted delay` : "",
+        sw.dep.taxi && `${Math.round(sw.dep.taxi)} min taxi`].filter(Boolean).join(" · ") : ""],
+      [`Arrival (${leg.arr} tower)`, sw.arr && (sw.arr.runway || sw.arr.est_on) ? [sw.arr.runway && `runway ${sw.arr.runway}`,
+        sw.arr.est_on && `est. landing ${fmt(sw.arr.est_on, tzB, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}`,
+        sw.arr.taxi && `${Math.round(sw.arr.taxi)} min taxi in`, sw.arr.at && `updated ${ago(sw.arr.at)}`].filter(Boolean).join(" · ") : ""],
+      ["Landing estimate from", sw.eta_src === "tower" ? `${leg.arr} tower (TFDM)` : sw.eta_src === "FAA" ? "FAA (TFMS)" : ""],
       ["Filed altitude", f.filed_altitude ? `FL${String(Math.round(f.filed_altitude / (f.filed_altitude > 1000 ? 100 : 1))).padStart(3, "0")}` : ""],
       ["Filed speed", f.filed_speed ? `${Math.round(f.filed_speed)} kt` : ""],
       ["Distance", f.distance_nm ? `${Math.round(f.distance_nm)} nm` : ""],
@@ -1262,6 +1340,7 @@
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
     drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
+    surfaceWatch(leg);
     const ab = document.getElementById("leg-aero");
     if (ab) ab.onclick = async () => {
       if (!confirm("Ask AeroAPI about this flight now? It's one paid query (about half a cent), counted in your monthly budget.")) return;
@@ -1505,9 +1584,9 @@
         <b>${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.swim.status] || STATE.swim.status)}</b>
         ${STATE.swim.status === "connected" ? ` · ${nm(STATE.swim.rate || 0)} messages a minute · ${STATE.swim.matched || 0} for your flights` : ""}
         ${STATE.swim.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.swim.error)}</p>` : ""}
-        ${STATE.tfdm && STATE.tfdm.status !== "off" ? `<p style="margin:8px 0 0"><b>TFDM: ${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.tfdm.status] || STATE.tfdm.status)}</b>${STATE.tfdm.status === "connected" ? ` · ${nm(STATE.tfdm.rate || 0)} a minute · ${STATE.tfdm.matched || 0} for your flights` : ""}</p>
-        ${STATE.tfdm.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.tfdm.error)}</p>` : ""}` : ""}
-        <p class="faint" style="margin:8px 0 0">The FAA's live flight plans and amendments (TFMS). A flight plan amended to a new destination marks a diversion right away.</p>
+        ${[["tfdm", "TFDM", "for your flights"], ["stdds", "STDDS", "for your airports"]].map(([k, name, what]) => STATE[k] && STATE[k].status !== "off" ? `<p style="margin:8px 0 0"><b>${name}: ${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE[k].status] || STATE[k].status)}</b>${STATE[k].status === "connected" ? ` · ${nm(STATE[k].rate || 0)} a minute · ${STATE[k].matched || 0} ${what}` : ""}</p>
+        ${STATE[k].error ? `<p class="err" style="margin:6px 0 0">${esc(STATE[k].error)}</p>` : ""}` : "").join("")}
+        <p class="faint" style="margin:8px 0 0">TFMS: the FAA's flight plans, amendments, takeoffs and landings, and the times United itself files. TFDM: tower data (runways, predicted delays, landing estimates) at airports that have it. STDDS: live surface positions, shown on a flight's map while it's on the ground.</p>
         <p style="margin:10px 0 0"><a class="btn" href="api/swim/samples.zip" download>Download sample messages</a></p>
         <p class="faint" style="margin:6px 0 0">A zip with a few messages of each type the feed has sent, and the last ones for your flights, to check they're read right.</p></div>`) : ""}
       <p class="small faint" style="margin:-4px 4px 14px">Alerts are on the bell page. Schedule file, notify service and API keys are in the add-on's Configuration tab in Home Assistant.</p>
