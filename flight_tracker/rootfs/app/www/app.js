@@ -232,27 +232,34 @@
     return L.marker(pos, { icon, title, zIndexOffset: 1000 });
   }
 
-  // Free basemaps, no API key: CARTO's OpenStreetMap tiles (kept current: new terminals, taxiways;
-  // detailed to zoom 20), falling back to OpenStreetMap's own if they won't load.
+  // Basemaps: CARTO's OpenStreetMap tiles (kept current: new terminals, taxiways; detailed to zoom 20).
   function addTiles(map, dark) {
     // CARTO now watermarks tiles fetched without its free key. With your key (add-on Configuration)
     // tiles come from its keyed address (?key=…); a tile address of your own wins: {style} becomes
-    // dark_all or light_all, {key} your key.
+    // dark_all or light_all, {key} your key. If tiles keep failing it steps down: keyless CARTO,
+    // then Esri's gray map (OpenStreetMap's own servers refuse apps like this one).
     const mt = (STATE && STATE.map_tiles) || {};
     const style = dark ? "dark_all" : "light_all";
-    let url = `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`;
-    if (mt.url) url = mt.url.replace("{style}", style).replace("{key}", encodeURIComponent(mt.key || ""));
-    else if (mt.key) url = `https://basemaps.cartocdn.com/rastertiles/${style}/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(mt.key)}`;
-    const base = L.tileLayer(url,
-      { maxZoom: 20, subdomains: "abcd", attribution: "&copy; OpenStreetMap contributors &copy; CARTO" }).addTo(map);
-    let errors = 0, switched = false;
-    base.on("tileerror", () => {
-      if (switched || ++errors < 4) return;
-      switched = true;
-      map.removeLayer(base);
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        { maxZoom: 20, maxNativeZoom: 19, className: dark ? "osm-dark" : "", attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
-    });
+    const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
+    const carto = "&copy; OpenStreetMap contributors &copy; CARTO";
+    const chain = [];
+    if (mt.url) chain.push([mt.url.replace("{style}", style).replace("{key}", encodeURIComponent(mt.key || "")), { maxZoom: 20, subdomains: "abcd", attribution: carto }]);
+    else if (mt.key) chain.push([`https://basemaps.cartocdn.com/rastertiles/${style}/{z}/{x}/{y}.png?key=${encodeURIComponent(mt.key)}`, { maxZoom: 20, attribution: carto }]);
+    chain.push([`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`, { maxZoom: 20, subdomains: "abcd", attribution: carto }]);
+    chain.push([esri(dark ? "World_Dark_Gray_Base" : "World_Light_Gray_Base"), { maxZoom: 20, maxNativeZoom: 16, attribution: "Tiles &copy; Esri" }]);
+    let i = 0, layer = null, errors = 0, loaded = 0;
+    const use = () => {
+      if (layer) map.removeLayer(layer);
+      const [url, opts] = chain[i];
+      errors = 0; loaded = 0;
+      layer = L.tileLayer(url, opts).addTo(map);
+      layer.on("tileload", () => { loaded++; });
+      layer.on("tileerror", () => {
+        // a few bad tiles happen; give up on a source only when it loads nothing
+        if (++errors >= 4 && loaded === 0 && i < chain.length - 1) { i++; use(); }
+      });
+    };
+    use();
   }
 
   // Airport layout labels: zoomed in on one of the flight's airports, runways, terminals, taxiways

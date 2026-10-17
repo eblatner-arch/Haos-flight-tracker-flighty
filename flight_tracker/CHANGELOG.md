@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.9
+- Maps: never fall back to OpenStreetMap's own tile servers (they block apps: "Access blocked"). If CARTO tiles won't load the map steps down to keyless CARTO, then Esri's gray map. A source is only abandoned when it loads nothing, not on a few bad tiles. The keyed CARTO address no longer asks for retina tiles.
+
 ## 3.15.8
 - Surface traffic shows whenever you zoom the flight's map in on its departure or arrival airport (zoom 13+), at any phase of the flight, and loads right away when you get there.
 
