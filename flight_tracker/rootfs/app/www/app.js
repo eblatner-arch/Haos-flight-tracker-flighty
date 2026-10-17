@@ -266,6 +266,7 @@
   // and gates are labelled (OpenStreetMap data, fetched once per airport by the add-on). Smaller
   // things appear as you zoom further: runways and terminals from 14, taxiways 15, gates 16.
   const LAYOUTS = {};
+  const LOG_ALL = new Set();   // flights whose whole lookup log you asked to see
   function kmBetween(a, b) {
     const R = Math.PI / 180, x = (b[1] - a[1]) * R * Math.cos((a[0] + b[0]) / 2 * R), y = (b[0] - a[0]) * R;
     return Math.hypot(x, y) * 6371;
@@ -814,7 +815,7 @@
 
   async function aircraftView(id, n) {
     let leg;
-    try { leg = await api(`api/leg/${id}`); } catch { go("#/"); return; }
+    try { leg = await api(`api/leg/${id}?rotation=1`); } catch { go("#/"); return; }
     const rot = (leg.rotation || []).length ? leg.rotation : (leg.inbound ? [leg.inbound] : []);
     n = Math.max(0, Math.min(n, rot.length - 1));
     const h = rot[n];
@@ -1574,7 +1575,7 @@
 
   async function legView(id) {
     let leg;
-    try { leg = await api(`api/leg/${id}`); } catch { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Flight not found</b>It may have dropped off your schedule.</div>`; return; }
+    try { leg = await api(`api/leg/${id}${LOG_ALL.has(id) ? "?log=1" : ""}`); } catch { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Flight not found</b>It may have dropped off your schedule.</div>`; return; }
     LEGS[id] = leg;
     const f = leg.flight || { times: { out: {}, off: {}, on: {}, in: {} } };
     const sw = f.swim || {};
@@ -1675,11 +1676,16 @@
           ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
             : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
           ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
-        </div>`).join("")}</div>` : ""}
+        </div>`).join("")}${leg.history_more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${leg.history_more} older</button>` : ""}</div>` : ""}
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
     drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
     surfaceWatch(leg);
+    const lm = document.getElementById("log-more");
+    if (lm) lm.onclick = async () => {
+      lm.disabled = true; lm.textContent = "Loading…";
+      try { LOG_ALL.add(leg.id); await render(true); } catch { lm.disabled = false; }
+    };
     const ab = document.getElementById("leg-aero");
     if (ab) ab.onclick = async () => {
       if (!confirm("Ask AeroAPI about this flight now? It's one paid query (about half a cent), counted in your monthly budget.")) return;
@@ -2090,9 +2096,13 @@
   // (maps keep their zoom and pan). Views with forms aren't redrawn under your fingers.
   const LIVE_VIEW = () => !/^#\/(add|notify|tools|hist)/.test(ROUTE);
   let pending = null;
+  // SWIM can change a flight every few seconds; one redraw every 2.5 s at most keeps the phone
+  // responsive (and scrolling smooth) without missing anything
+  let lastLive = 0;
   function liveRefresh() {
     if (pending || document.hidden || !LIVE_VIEW()) return;
-    pending = setTimeout(async () => { pending = null; await render(true); }, 400);
+    const wait = Math.max(400, 2500 - (Date.now() - lastLive));
+    pending = setTimeout(async () => { pending = null; lastLive = Date.now(); await render(true); }, wait);
   }
   let es = null;
   const $live = document.getElementById("live");

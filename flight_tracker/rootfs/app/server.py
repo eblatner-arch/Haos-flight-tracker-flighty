@@ -2727,19 +2727,27 @@ def artcc_boundaries():
             return None
 
 
-def leg_summary(L, now, nas, full=False):
+LOG_SHOWN = 40   # lookup-log entries sent with a flight page; the rest on request
+
+
+def leg_summary(L, now, nas, full=False, rotation_tracks=False, log_all=False):
     f = L.get("flight")
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra", "kind",
                                   "sched_out", "sched_in", "summary", "source", "note", "error", "updated",
                                   "next_check", "shot", "fa_id", "date", "manual", "tail_info", "chain")}
     if full:
-        out["history"] = list(reversed(L.get("history") or []))
+        hist = list(reversed(L.get("history") or []))
+        out["history"] = hist if log_all else hist[:LOG_SHOWN]
+        out["history_more"] = max(0, len(hist) - len(out["history"]))
         out["rotation"] = []
         for i, h in enumerate(L.get("rotation") or []):
             if not h:
                 continue
-            r = {k: v for k, v in h.items() if k != "track"}
-            r["track"] = h.get("track") or []
+            # the airplane's earlier legs' tracks only for the aircraft page (they're big)
+            r = {k: v for k, v in h.items() if k not in ("track", "waypoints")}
+            if rotation_tracks:
+                r["track"] = h.get("track") or []
+                r["waypoints"] = h.get("waypoints") or []
             r["phase"] = fa.phase(h, now)
             r["status"] = alerting.PHASE_LABEL[r["phase"]]
             r["dep_delay"] = fa.delay_minutes(h)
@@ -2768,7 +2776,10 @@ def leg_summary(L, now, nas, full=False):
             out[side]["tz"] = TZNAME
     out["nas"] = alerting.nas_for(L, nas)
     if f:
-        fl = {k: v for k, v in f.items() if k not in ("track", "waypoints")}
+        # the list only needs what its cards show: the route drawing, SWIM details and per-time
+        # sources go with the flight page
+        fl = {k: v for k, v in f.items() if k not in ("track", "waypoints") and
+              (full or k not in ("swim_route", "swim", "time_src", "route_flightaware"))}
         if full:
             fl["track"] = f.get("track") or []
             fl["waypoints"] = f.get("waypoints") or []
@@ -2906,11 +2917,12 @@ def api_history_flight(fid):
     return out
 
 
-def api_leg(lid):
+def api_leg(lid, rotation_tracks=False, log_all=False):
     now = time.time()
     with LOCK:
         L = STATE["legs"].get(lid)
-        out = leg_summary(L, now, list(STATE["nas"]), full=True) if L else None
+        out = leg_summary(L, now, list(STATE["nas"]), full=True, rotation_tracks=rotation_tracks,
+                          log_all=log_all) if L else None
     if out:
         same = [x for x in history.flights() if x.get("dep") == L.get("dep") and x.get("arr") == L.get("arr")]
         if same:
@@ -3088,7 +3100,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, api_surface(m.group(1), time.time(), want))
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
-            d = api_leg(m.group(1))
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            d = api_leg(m.group(1), rotation_tracks="rotation" in qs, log_all="log" in qs)
             if d:
                 d.pop("now", None)
                 return self._send_json_tagged(d)

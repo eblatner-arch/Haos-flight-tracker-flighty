@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.19.3
+- Faster loading: the flights list no longer carries each flight's SWIM route drawing, clearance text and time sources (the flight page loads them); a flight page no longer downloads the tracks of the airplane's earlier legs (only the aircraft page does) and shows the latest 40 lookup-log entries with a "Show older" button. A typical flight page is about a third of its old size.
+- Live updates redraw at most every 2.5 s, so frequent SWIM changes don't make the phone stutter.
+
 ## 3.19.2
 - A ground stop or delay program the FAA cancels (SWIM) now disappears right away and stays gone: the NAS status page lags several minutes and was bringing it back. A new program at that airport still shows.
 - Fix: back swipe after opening a program map could land on that map again (the map link changed the page address); it's now an in-app step like every other link. The program map draws on canvas, so it no longer stalls while loading.
