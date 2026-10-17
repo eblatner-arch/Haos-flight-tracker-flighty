@@ -515,3 +515,5 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
 .leaflet-tooltip-top.surf-tip::before { border-top-color: var(--line); }
 .map-center.xpdr { font: 800 9px/1 -apple-system, system-ui, sans-serif; color: var(--muted); letter-spacing: .03em; }
 .map-center.xpdr.on { color: var(--route); border-color: var(--route); }
+.leaflet-tooltip.surf-tip.surf-id { font-size: 9.5px; padding: 1px 4px; background: color-mix(in srgb, var(--card) 85%, transparent); box-shadow: none; }
+.leaflet-tooltip-right.surf-id::before { display: none; }

@@ -399,6 +399,24 @@
         },
       });
       map.addControl(new Xp());
+      const Id = L.Control.extend({
+        options: { position: "topright" },
+        onAdd() {
+          const b = L.DomUtil.create("button", "map-center xpdr");
+          b.type = "button"; b.setAttribute("aria-label", "Show callsigns");
+          b.textContent = "ID";
+          b.style.display = "none"; b.style.marginTop = "6px";
+          L.DomEvent.disableClickPropagation(b);
+          L.DomEvent.on(b, "click", (e) => {
+            L.DomEvent.preventDefault(e);
+            try { localStorage.setItem("ft-surf-ids", localStorage.getItem("ft-surf-ids") === "1" ? "0" : "1"); } catch {}
+            if (entry.lastSurface) paintSurface(entry, entry.lastSurface);
+          });
+          entry.idBtn = b;
+          return b;
+        },
+      });
+      map.addControl(new Id());
     }
     if (interactive) {
       oneFingerZoom(map, el);
@@ -468,7 +486,7 @@
   function stopSurface() {
     if (SURF.timer) clearTimeout(SURF.timer);
     SURF.timer = null; SURF.id = null;
-    for (const m of Object.values(MAPS)) { if (m.surface) m.surface.clearLayers(); if (m.aptBtn) m.aptBtn.style.display = "none"; if (m.xpdrBtn) m.xpdrBtn.style.display = "none"; }
+    for (const m of Object.values(MAPS)) { if (m.surface) m.surface.clearLayers(); if (m.aptBtn) m.aptBtn.style.display = "none"; if (m.xpdrBtn) m.xpdrBtn.style.display = "none"; if (m.idBtn) m.idBtn.style.display = "none"; }
   }
   function surfaceWatch(leg) {
     if (!STATE || !STATE.stdds || STATE.stdds.status !== "connected") { stopSurface(); return; }
@@ -490,12 +508,17 @@
   function paintSurface(entry, d) {
     if (!entry.surface) entry.surface = L.layerGroup().addTo(entry.map);
     entry.surface.clearLayers();
-    let only = true;
-    try { only = localStorage.getItem("ft-surf-all") !== "1"; } catch {}
+    let only = true, ids = false;
+    try { only = localStorage.getItem("ft-surf-all") !== "1"; ids = localStorage.getItem("ft-surf-ids") === "1"; } catch {}
+    if (entry.idBtn) {
+      entry.idBtn.classList.toggle("on", ids);
+      entry.idBtn.title = ids ? "Hide callsigns" : "Show callsigns";
+    }
     const all = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
     const tg = only ? all.filter((t) => t.mine || (t.xpdr && t.kind !== "vehicle")) : all;
     if (entry.xpdrBtn) {
       entry.xpdrBtn.style.display = all.length ? "" : "none";
+      if (entry.idBtn) entry.idBtn.style.display = all.length ? "" : "none";
       entry.xpdrBtn.classList.toggle("on", only);
       entry.xpdrBtn.title = only ? "Showing aircraft with transponders on (tap for everything)" : "Showing everything on the surface (tap for transponders only)";
     }
@@ -516,7 +539,10 @@
       const sz = t.mine ? 22 : 15;
       const icon = L.divIcon({ className: "surf-icon", iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
         html: `<div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : muted};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>` });
-      const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 }).bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: !!t.mine, className: "surf-tip" });
+      const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 });
+      if (t.mine) m.bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: true, className: "surf-tip" });
+      else if (ids && (t.cs || t.squawk)) m.bindTooltip(t.cs || t.squawk, { direction: "right", offset: [sz / 2, 0], permanent: true, className: "surf-tip surf-id" });
+      else m.bindTooltip(label, { direction: "top", offset: [0, -sz / 2], className: "surf-tip" });
       entry.surface.addLayer(m);
     }
     if (!SURF.zoomed && entry.interactive && ["taxi_out", "landed"].includes(d.phase)) {
