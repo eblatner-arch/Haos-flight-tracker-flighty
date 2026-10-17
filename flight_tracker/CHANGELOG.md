@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.8.5
+- "Check AeroAPI now" on a flight's page: one paid query on demand (counted in the monthly budget, always allowed past the per-flight limit). Its answer goes in the lookup log and a full check follows
+- After a diversion every message uses the real route (LAX→MDT), not the planned one
+- A flight that picks up a new FlightAware record mid-trip (a diversion) keeps its tail number
+- Lookup log shows a source's note next to the tail it gave
+
 ## 3.8.4
 - Diversions are also caught from the filed route: when ATC amends it to end at another airport ("KLAX DCT RIC261040 DCT KMDT" on a flight planned to EWR), it counts as diverted even before FlightAware changes the destination. Routes that end at an arrival procedure are left alone
 

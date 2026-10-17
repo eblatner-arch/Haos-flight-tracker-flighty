@@ -1267,3 +1267,22 @@ class RouteDiversion(unittest.TestCase):
         g, _ = fa.flights_from_bootstrap(boot(out_s=T0, origin="LAX", dest="EWR", off_a=T0 + 600))
         fa.fix_diversion(g, "EWR", server.route_end("KLAX DCT KEWR"))
         self.assertIsNone(g.get("diverted_to"))
+
+
+class ManualAero(unittest.TestCase):
+    def test_manual_check(self):
+        import server
+        L = {"id": "ma", "ident": "UAL2127", "display": "UA 2127", "dep": "LAX", "arr": "EWR", "sched_out": T0,
+             "sched_in": T0 + 5 * H, "aero": {"calls": 99}}
+        server.STATE["legs"] = {"ma": L}
+        real_on, real_call = server.aero_on, server.aero_call
+        server.aero_on = lambda: True
+        server.aero_call = lambda L, now, reason, **k: {"status_text": "En Route", "tail": "N21108",
+                                                        "destination": {"iata": "MDT"}}
+        try:
+            code, body = server.manual_aero("ma")
+            self.assertEqual((code, body["tail"]), (200, "N21108"))
+            seen = server.STATE["legs"]["ma"]["history"][-1]["seen"][0]
+            self.assertEqual((seen["tail"], seen["note"]), ("N21108", "En Route · to MDT"))
+        finally:
+            server.aero_on, server.aero_call = real_on, real_call

@@ -483,6 +483,41 @@ def route_end(route):
     return (ap.get("iata") or None) if ap and ap.get("icao") == last else None
 
 
+def manual_aero(lid):
+    """Settings-free 'ask AeroAPI now' for one flight (counts against the monthly budget like any call,
+    but not the per-flight limit)."""
+    if not aero_on():
+        return 400, {"error": "AeroAPI isn't set up (add aeroapi_key in the add-on Configuration)."}
+    with LOCK:
+        L = STATE["legs"].get(lid)
+        if not L:
+            return 404, {"error": "not found"}
+        L = json.loads(json.dumps(L))
+    now = time.time()
+    a = L.setdefault("aero", {})
+    limit = int(CFG.get("aeroapi_max_per_leg") or 6)
+    a["calls"] = min(a.get("calls", 0), limit - 1)  # a manual check always gets through
+    prev = snapshot(L)
+    got = aero_call(L, now, "manual check")
+    if not got:
+        return 502, {"error": (L.get("aero") or {}).get("error") or "AeroAPI didn't return this flight."}
+    with LOCK:
+        cur = STATE["legs"].get(lid)
+        if cur is None:
+            return 404, {"error": "not found"}
+        cur["aero"] = L["aero"]
+        if L.get("tail_info"):
+            cur["tail_info"] = L["tail_info"]
+        log_lookup(cur, snapshot(cur), now, ["AeroAPI"],
+                   seen=[{"src": "AeroAPI · manual check", "tail": (got.get("tail") or "").upper() or None,
+                          "note": " · ".join(x for x in (got.get("status_text"), (got.get("destination") or {}).get("iata") and
+                                                         f"to {(got.get('destination') or {}).get('iata')}") if x) or None}])
+    REFRESH_Q.put(lid)  # fold it into a full check right away
+    WAKE.set()
+    bump()
+    return 200, {"ok": True, "status": got.get("status_text"), "tail": got.get("tail")}
+
+
 def planned_arr(L):
     """Where this flight was supposed to go: your calendar's arrival, or what you entered when you
     added it (a followed flight's arrival is otherwise overwritten by wherever it actually goes)."""
@@ -1461,6 +1496,11 @@ def update_leg(browser, lid):
                     and old_track[0][4] < flight["track"][0][4] and L.get("fa_id") == flight.get("fa_id"):
                 flight["track"] = [p for p in old_track if p[4] and p[4] < flight["track"][0][4]] + flight["track"]
                 flight["track"] = fa.thin(flight["track"], 1500)
+            # A diversion (or any new flight record mid-trip) can come without the registration: the
+            # airplane hasn't changed in the air, so keep the tail we already had.
+            ti = L.get("tail_info") or {}
+            if not flight.get("tail") and ti.get("tail") and fa.phase(flight, now) != "scheduled":
+                flight["tail"], flight["tail_source"] = ti["tail"], ti.get("source")
             L["flight"], L["source"] = flight, source
         if L.get("extra") and not L.get("flight") and (L.get("aero") or {}).get("at"):
             note = not_found_note(L)  # page check came up empty too: keep the clear "not found" story
@@ -1976,6 +2016,7 @@ def api_state():
                                              "airline_icao", "live_positions")},
             "notify_target": CFG.get("notify_service") or "persistent notification",
             "gemini": bool(CFG.get("gemini_api_key")),
+            "aeroapi": aero_on(),
         }
     data["backup"] = backup_brief()
     return data
@@ -2405,6 +2446,9 @@ class Handler(BaseHTTPRequestHandler):
                                  "message": f"Notifications work. Sent {datetime.now(HOME_TZ):%H:%M} via "
                                             f"{CFG.get('notify_service') or 'persistent notification'}."})
             return self._send(200 if ok else 502, {"ok": ok, "detail": detail})
+        m = re.match(r"^/api/aero/([\w-]+)$", path)
+        if m:
+            return self._send(*manual_aero(m.group(1)))
         m = re.match(r"^/api/refresh(?:/([\w-]+))?$", path)
         if m:
             REFRESH_Q.put(m.group(1) or "all")

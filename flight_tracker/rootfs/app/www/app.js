@@ -1245,6 +1245,7 @@
         ${leg.note ? `<p class="small muted">${esc(leg.note)}</p>` : ""}${leg.error ? `<p class="err">${esc(leg.error)}</p>` : ""}
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
           ${leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
+          ${STATE.aeroapi ? '<button class="btn" id="leg-aero">Check AeroAPI now</button>' : ""}
           ${leg.manual ? `<button class="btn" id="leg-kind">${leg.kind === "manual" ? "Make it a friend's flight" : "It's my flight"}</button><button class="btn" id="leg-remove">Remove</button>` : ""}
           ${leg.fa_id ? `<a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a>` : leg.ident ? `<a class="btn" href="https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div></div>
@@ -1253,7 +1254,7 @@
       ${(leg.history || []).length ? `<h2 class="section">Lookup log</h2><div class="card">${leg.history.map((h) => `<div class="hist">
           <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
             ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B|adsb/.test(x) ? "adsb" : /Flightradar24/.test(x) ? "fr24" : ""}">${esc(x)}</span>`).join("")}</div>
-          ${(h.seen || []).length ? `<div class="hist-seen">${h.seen.map((x) => `<div><span class="faint">${esc(x.src)}</span> ${x.tail ? `<b>${esc(x.tail)}</b>` : `<span class="faint">${esc(x.note || "no tail")}</span>`}</div>`).join("")}</div>` : ""}
+          ${(h.seen || []).length ? `<div class="hist-seen">${h.seen.map((x) => `<div><span class="faint">${esc(x.src)}</span> ${x.tail ? `<b>${esc(x.tail)}</b>${x.note ? ` <span class="faint">· ${esc(x.note)}</span>` : ""}` : `<span class="faint">${esc(x.note || "no tail")}</span>`}</div>`).join("")}</div>` : ""}
           ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
             : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
           ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
@@ -1261,6 +1262,18 @@
       ${leg.shot ? `<h2 class="section">Latest screenshot</h2><div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('.card').previousElementSibling.remove();this.closest('.card').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>` : ""}
     `;
     drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
+    const ab = document.getElementById("leg-aero");
+    if (ab) ab.onclick = async () => {
+      if (!confirm("Ask AeroAPI about this flight now? It's one paid query (about half a cent), counted in your monthly budget.")) return;
+      ab.disabled = true; ab.textContent = "Asking AeroAPI…";
+      try {
+        const r = await fetch(`api/aero/${encodeURIComponent(leg.id)}`, { method: "POST" });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || r.status);
+        ab.textContent = `AeroAPI: ${d.status || "answered"}${d.tail ? " · " + d.tail : ""}`;
+        setTimeout(() => render(true), 1500);
+      } catch (e) { ab.textContent = "AeroAPI: " + e.message; ab.disabled = false; }
+    };
     const rb = document.getElementById("leg-refresh");
     if (rb) rb.onclick = async (e) => {
       e.target.textContent = "Refreshing…";

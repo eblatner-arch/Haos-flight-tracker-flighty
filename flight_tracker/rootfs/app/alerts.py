@@ -209,6 +209,8 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
     f, inb = leg.get("flight"), leg.get("inbound")
     ident = leg.get("display") or leg.get("ident") or "Flight"
     dep, arr = leg.get("dep") or "", leg.get("arr") or ""
+    if (f or {}).get("diverted_to"):
+        arr = f["diverted_to"]  # after a diversion every message is about where it's really going
     dep_tz = tz_for(dep, (f or {}).get("origin"))
     arr_tz = tz_for(arr, (f or {}).get("destination"))
     route = f"{dep}→{arr}"
