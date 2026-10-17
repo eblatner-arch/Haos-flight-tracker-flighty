@@ -764,16 +764,25 @@ def swim_check(L, f, planned):
                     bits.append(f"{ap_} surface radar: {w}{' ' + e['runway'] if e.get('runway') and e['event'] in ('on', 'off') else ''} {hm(e['at'], tz_)}")
             pd = x.get("pdc")
             if pd:
-                parts = [f"cleared to {pd['cleared_to']}" if pd.get("cleared_to") else None,
-                         pd.get("departure") and f"via {pd['departure']}",
-                         pd.get("altitude") and (pd["altitude"] if not pd["altitude"].isdigit() else f"maintain {pd['altitude']}"),
-                         pd.get("expect_alt") and f"expect FL{pd['expect_alt']}",
-                         pd.get("runway") and f"runway {pd['runway']}",
-                         pd.get("gate") and f"gate {pd['gate']}",
-                         pd.get("dep_freq") and f"departure {pd['dep_freq']}",
-                         pd.get("edct") and f"EDCT {pd['edct']}Z",
-                         pd.get("tail") and f"airplane {pd['tail']}", pd.get("response") and pd["response"].lower()]
-                bits.append(f"{dep} clearance by datalink: " + ", ".join(p for p in parts if p))
+                parts = [("cleared_to", pd.get("cleared_to") and f"cleared to {pd['cleared_to']}"),
+                         ("departure", pd.get("departure") and f"via {pd['departure']}"),
+                         ("altitude", pd.get("altitude") and (pd["altitude"] if not pd["altitude"].isdigit() else f"maintain {pd['altitude']}")),
+                         ("expect_alt", pd.get("expect_alt") and f"expect FL{pd['expect_alt']}"),
+                         ("runway", pd.get("runway") and f"runway {pd['runway']}"),
+                         ("gate", pd.get("gate") and f"gate {pd['gate']}"),
+                         ("dep_freq", pd.get("dep_freq") and f"departure {pd['dep_freq']}"),
+                         ("edct", pd.get("edct") and f"EDCT {pd['edct']}Z"),
+                         ("tail", pd.get("tail") and f"airplane {pd['tail']}"),
+                         ("response", pd.get("response") and f"crew answered {pd['response'].lower()}")]
+                # a later message repeats the clearance with one thing added (the crew's ROGER, a new
+                # EDCT): log only what's new
+                done = sw.setdefault("pdc_logged", {})
+                new = [txt for k, txt in parts if txt and done.get(k) != txt]
+                for k, txt in parts:
+                    if txt:
+                        done[k] = txt
+                if new:
+                    bits.append(f"{dep} clearance by datalink: " + ", ".join(new))
             tw = x.get("tower")
             if tw and tw.get("clearance"):
                 bits.append(f"{dep} tower: departure clearance {hm(tw['clearance'], tza)}" + (f", gate {tw['gate']}" if tw.get("gate") else ""))

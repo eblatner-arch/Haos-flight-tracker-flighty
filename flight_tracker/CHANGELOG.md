@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.21.5
+- Lookup log: a clearance message that repeats the clearance with one thing added (the crew's ROGER, a revised EDCT) logs only that ("MCO clearance by datalink: crew answered roger").
+
 ## 3.21.4
 - Datalink clearances are matched to your flight by the clearance text too (UAL1643 or UA1643), not only by the message's aircraft field: UA1643's MCO clearance never reached the flight while the airline's delivery note did.
 - Every clearance message for your flights is kept apart (last 30) and included in the SWIM samples download as your_flights/clearance_NN.xml, so they're not pushed out by the busy tower feed.
