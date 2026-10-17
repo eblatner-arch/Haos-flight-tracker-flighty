@@ -1,7 +1,7 @@
 # Changelog
 
-## 3.22.2
-- Airport layouts download in the background for every upcoming flight (not only flights being watched now), so a map opened days ahead already has its runways, taxiways and gates.
+## 3.22.3
+- Airport layouts download in the background for every upcoming flight, however far out, not only the next 7 days.
 
 ## 3.22.2
 - Airport layouts download in the background for every flight in the next 7 days (not only flights being watched now), so a map opened days ahead already has its runways, taxiways and gates.
