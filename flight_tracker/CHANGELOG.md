@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.19.1
+- Fix: the ground stop / delay program map broke with "Map container is already initialized" when a live update re-drew the page; the map is now kept across updates.
+
 ## 3.19.0
 - Ground stop and delay program cards open a map ("Map ›"): the en-route centers whose departures it holds are shaded (red for a ground stop, amber for a delay program) with their names, the program airport is marked, and your departure (or your inbound's) shows held, not held or airborne. Center boundaries come from the FAA's aeronautical data, fetched once and kept for 90 days.
 

@@ -1503,13 +1503,25 @@
       <p class="small faint" id="nas-map-note" style="margin:-6px 4px 10px" hidden></p>
       ${nasAlert(g).replace("tappable", "")}
       <div class="card small muted">Shaded: the en-route centers whose departures this ${n.kind === "gs" ? "ground stop" : "program"} holds. ${(n.scope || []).filter((c) => !/^Z[A-Z]{2}$/.test(c)).length ? `Also: ${esc(n.scope.filter((c) => !/^Z[A-Z]{2}$/.test(c)).join(" "))}.` : ""}</div>`;
-    const el = document.getElementById("nas-map");
+    let el = document.getElementById("nas-map");
     if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
+    // a live update re-draws this page: keep the map you're looking at instead of starting over
+    const have = MAPS.nas;
+    if (have && have.key === key) {
+      if (have.el !== el) el.replaceWith(have.el);
+      usedMaps.add("nas");
+      setTimeout(() => have.map.invalidateSize(), 30);
+      return;
+    }
+    if (have) { try { have.map.remove(); } catch {} delete MAPS.nas; }
+    if (el.classList.contains("leaflet-container") || el._leaflet_id) {
+      const f = document.createElement("div"); f.id = el.id; f.className = "detail-map"; el.replaceWith(f); el = f;
+    }
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: true, attributionControl: true, worldCopyJump: true });
     if (map.attributionControl) map.attributionControl.setPrefix("");
     addTiles(map, dark);
-    MAPS.nas = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive: true };
+    MAPS.nas = { el, map, key, layer: L.layerGroup().addTo(map), bounds: [], interactive: true };
     usedMaps.add("nas");
     oneFingerZoom(map, el);
     const hot = n.kind === "gs" ? css("--red") : css("--amber");
