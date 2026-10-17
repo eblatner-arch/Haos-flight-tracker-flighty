@@ -26,6 +26,8 @@ MATCHED_RAW = []     # the last raw messages that matched your flights
 TYPE_COUNTS = {}
 import re as _re
 _TYPE_RE = _re.compile(r'msgType="([^"]+)"')
+_SRC_RE = _re.compile(r'sourceFacility="([A-Z0-9]{2,3})"')  # airline-sent (CDM) messages: AAL, SKW, UAL…
+SOURCE_COUNTS = {}
 _thread = None
 _cfg = {}
 
@@ -109,6 +111,12 @@ def _sample(xml_text):
         lst = SAMPLES.setdefault(t, [])
         if len(lst) < 3:
             lst.append(xml_text[:200000])
+    for src in set(_SRC_RE.findall(xml_text[:200000])):
+        SOURCE_COUNTS[src] = SOURCE_COUNTS.get(src, 0) + 1
+        if src == "UAL":
+            lst = SAMPLES.setdefault("from_UAL", [])
+            if len(lst) < 5:
+                lst.append(xml_text[:200000])
 
 
 def handle(xml_text):
@@ -327,7 +335,7 @@ def samples_zip():
     import zipfile
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("summary.json", json.dumps({"state": STATE, "watching": sorted(WATCH), "types": TYPE_COUNTS,
+        z.writestr("summary.json", json.dumps({"state": STATE, "watching": sorted(WATCH), "types": TYPE_COUNTS, "airline_sent": SOURCE_COUNTS,
                                                "events": {k: v for k, v in EVENTS.items()}}, indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.9
+- FAA SWIM samples: counts messages sent by each airline itself and keeps up to five sent by United.
+
 ## 3.12.8
 - FAA SWIM: the flight on after a diversion (UA2127 MDT→EWR) now matches. The FAA keeps the original departure time on it, which the 6-hour check used to reject.
 
