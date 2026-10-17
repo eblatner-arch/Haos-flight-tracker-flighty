@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.21.4
+- Datalink clearances are matched to your flight by the clearance text too (UAL1643 or UA1643), not only by the message's aircraft field: UA1643's MCO clearance never reached the flight while the airline's delivery note did.
+- Every clearance message for your flights is kept apart (last 30) and included in the SWIM samples download as your_flights/clearance_NN.xml, so they're not pushed out by the busy tower feed.
+
 ## 3.21.3
 - Airport layouts download in the background for every airport of a flight being watched (yours, its destination, the inbound's origin), one at a time, so a map opens with its runways and gates already there. Saved layouts are read without waiting on a download in progress, and one airport's download no longer holds up another's.
 

@@ -23,6 +23,7 @@ LOCK = threading.Lock()
 KEEP = 40            # events per callsign
 SAMPLES = {}         # message type -> a few raw messages, to check the parser against the real feed
 MATCHED_RAW = []     # the last raw messages that matched your flights
+PDC_RAW = []         # every datalink clearance message that mentions one of your flights (kept apart)
 TYPE_COUNTS = {}
 import re as _re
 _TYPE_RE = _re.compile(r'msgType="([^"]+)"')
@@ -731,7 +732,8 @@ def handle_stdds(xml_text):
         _pdc_sample(xml_text)
     if WATCH and root in ("TATrackAndFlightPlan", "SurfaceMovementEventMessage", "TowerDepartureEventMessage",
                           "TDLSCSPMessage") \
-            and any(cs in xml_text for cs in WATCH):
+            and (any(cs in xml_text for cs in WATCH)
+                 or (root == "TDLSCSPMessage" and any(_flight_no(cs) and _re.search(r"\b" + _flight_no(cs) + r"\b", xml_text) for cs in WATCH))):
         try:
             _stdds_flight(root, xml_text)
         except Exception as e:
@@ -769,6 +771,16 @@ def _txt(el, name):
     return (c.text or "").strip() if c is not None and c.text else None
 
 
+_AIRLINE_2 = {"UAL": "UA", "AAL": "AA", "DAL": "DL", "SWA": "WN", "JBU": "B6", "ASA": "AS", "SKW": "OO",
+              "RPA": "YX", "ENY": "MQ", "NKS": "NK", "FFT": "F9", "HAL": "HA", "AAY": "G4", "GJS": "G7", "UCA": "C5"}
+
+
+def _flight_no(cs):
+    """UAL1643 -> UA1643 (how airline messages sometimes name a flight)."""
+    m = _re.fullmatch(r"([A-Z]{3})(\d+[A-Z]?)", cs or "")
+    return _AIRLINE_2[m.group(1)] + m.group(2) if m and m.group(1) in _AIRLINE_2 else None
+
+
 def _stdds_flight(kind, xml_text):
     """STDDS messages about your flights: approach radar positions (with the transponder address,
     so the N-number), surface events (landed, runway exit, ramp in/out, takeoff) and the tower's
@@ -798,6 +810,16 @@ def _stdds_flight(kind, xml_text):
             STDDS_STATE["matched"] += 1
         return
     acid = (_txt(root, "callsign") or _txt(root, "aircraftID") or "").upper()
+    if kind == "TDLSCSPMessage":
+        body = _txt(root, "dataBody") or ""
+        if acid not in WATCH:
+            # a clearance whose header field names the flight differently (or not at all): the
+            # callsign is in the clearance text itself
+            acid = next((cs for cs in WATCH if _re.search(r"\b" + cs + r"\b", body)
+                         or (_flight_no(cs) and _re.search(r"\b" + _flight_no(cs) + r"\b", body))), acid)
+        if acid in WATCH:
+            PDC_RAW.append({"at": time.time(), "xml": xml_text[:50000]})
+            del PDC_RAW[:-30]
     if acid not in WATCH:
         return
     if kind == "TDLSCSPMessage":
@@ -1195,6 +1217,8 @@ def samples_zip():
                     z.writestr(f"samples/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for i, m in enumerate(MATCHED_RAW, 1):
             z.writestr(f"your_flights/{i:02d}{'_' + m['feed'] if m.get('feed') else ''}.xml", m["xml"])
+        for i, m in enumerate(PDC_RAW, 1):
+            z.writestr(f"your_flights/clearance_{i:02d}.xml", m["xml"])
         for i, x in enumerate(STDDS_RAW, 1):
             z.writestr(f"your_flights/surface_{i:02d}.xml", x)
     return buf.getvalue()

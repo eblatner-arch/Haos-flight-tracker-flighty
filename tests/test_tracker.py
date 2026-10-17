@@ -1830,6 +1830,20 @@ class Swim(unittest.TestCase):
         self.assertEqual(len(z["rings"]), 2)
         self.assertTrue(all(server._ring_area(r) > 0 for r in z["rings"]))
 
+    def test_pdc_matched_by_text_when_the_field_differs(self):
+        """A clearance whose aircraftID field doesn't carry the callsign is matched by the text, and
+        kept in its own raw list for the samples download."""
+        import swim
+        swim.WATCH.clear(); swim.WATCH.add("UAL1643"); swim.EVENTS.clear(); swim.PDC_RAW.clear()
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "stdds_pdc_sfo.xml")) as fh:
+            x = fh.read().replace("<aircraftID>UAL444</aircraftID>", "<aircraftID>UA1643</aircraftID>").replace("UAL444", "UA1643")
+        swim.handle_stdds(x)
+        ev = swim.events("UAL1643")
+        self.assertTrue(ev and ev[0]["pdc"]["cleared_to"] == "KSAN")
+        self.assertEqual(len(swim.PDC_RAW), 1)
+        swim.WATCH.clear(); swim.EVENTS.clear(); swim.PDC_RAW.clear()
+
     def test_pdc_formats_across_towers(self):
         """Clearances and delivery notes captured live from 40 towers: the airplane, gate and destination."""
         import swim
