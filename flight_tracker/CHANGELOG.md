@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.15.14
+- After landing, the arrival time holds the last estimate (or takes United's gate time once United updates after landing) instead of jumping back to FlightAware's.
+- Lookup log: SWIM lines only show what's new since the previous line; no more "update, nothing new" or the same estimate every minute.
+- Tower states in plain words ("taxiing in" instead of "ama taxi in").
+
 ## 3.15.13
 - Airport map restyled for contrast: taxiway labels look like taxiway location signs (yellow on black, boxed), runway labels like runway signs (white on red), taxiway pavement in neutral gray with the yellow centerline only at zoom 17+, and surface aircraft brighter.
 

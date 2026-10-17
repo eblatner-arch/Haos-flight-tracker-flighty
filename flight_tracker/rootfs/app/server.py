@@ -642,6 +642,13 @@ def _swim_take(sw, ev):
             u["remarks"] = ev["remarks"]
 
 
+def _tower_state(state):
+    """TFDM flight state -> words: AMA_TAXI_IN -> 'taxiing in' (AMA/NMA: movement / ramp area)."""
+    s = re.sub(r"^(AMA|NMA)_", "", state or "").lower().replace("_", " ")
+    return {"taxi in": "taxiing in", "taxi out": "taxiing out", "on final": "on final", "en route": "en route",
+            "in block": "at the gate", "out block": "pushed back"}.get(s, s)
+
+
 def swim_check(L, f, planned):
     """Read this leg's new SWIM messages into its saved SWIM facts (L['swim'], kept across restarts
     and however long the flight), log what came in, and report a diversion.
@@ -697,7 +704,7 @@ def swim_check(L, f, planned):
             elif ed.get("estimated"):
                 bits.append(f"{dep} tower: takeoff est. {hm(ed['estimated'], tza)}")
             if td.get("state"):
-                bits.append(f"tower status {td['state'].replace('_', ' ').lower()}")
+                bits.append(f"tower status {_tower_state(td['state'])}")
             break
         for x in fresh:
             for e in (x.get("surface") or {}).get("events") or []:
@@ -715,7 +722,12 @@ def swim_check(L, f, planned):
             bits.append("FAA: diversion flagged")
         if sw.get("arr") and planned and sw["arr"] != _iata(planned):
             bits.append(f"FAA: now going to {sw['arr']}")
-        saw(L, "FAA SWIM", None, "; ".join(dict.fromkeys(bits)) or "update, nothing new")
+        # only what's new since the last line: the same estimate every minute isn't news
+        last = set(sw.get("logged") or [])
+        new_bits = [b for b in dict.fromkeys(bits) if b not in last]
+        sw["logged"] = list(dict.fromkeys(bits))[-20:]
+        if new_bits:
+            saw(L, "FAA SWIM", None, "; ".join(new_bits))
     if not sw.get("seen"):
         L.pop("swim", None)
         return out
@@ -787,6 +799,16 @@ def swim_overlay(L, f, now):
             sw["in_shown"] = new_in
             t["in"]["estimated"] = new_in
             src["in"]["estimated"] = f"{who} + taxi"
+    if t["on"].get("actual") and not t["in"].get("actual"):
+        # Landed, taxiing in: the airline's gate estimate once it has updated after landing (United's
+        # was right to the minute at IAD), else hold the last arrival we showed rather than drop
+        # back to FlightAware's (which jumped 00:15 → 00:18 → 00:15 there).
+        land = t["on"]["actual"]
+        if a.get("in") and (a.get("at") or 0) >= land - 60 and a["in"] >= land:
+            t["in"]["estimated"], src["in"]["estimated"] = a["in"], airline
+        elif sw.get("in_shown") and sw["in_shown"] >= land:
+            t["in"]["estimated"] = sw["in_shown"]
+            src["in"]["estimated"] = (src.get("in") or {}).get("estimated") or "estimate before landing"
     for side, key, slot in ((td_dep, "offBlockTime", "out"), (td_arr, "inBlockTime", "in")):
         v = _ts(((side.get(key) or {}) if isinstance(side.get(key), dict) else {}).get("actual"))
         if v and v <= now + 60 and not t[slot].get("actual"):

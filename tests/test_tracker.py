@@ -447,6 +447,22 @@ class SurfaceWanted(unittest.TestCase):
             self.assertNotIn("airport", server.api_surface("sw1", now, "ORD"))      # not this flight's airport
         del server.STATE["legs"]["sw1"]
 
+
+class AfterLanding(unittest.TestCase):
+    def test_taxi_in_keeps_estimate_and_takes_airline_gate_time(self):
+        import server
+        land = T0
+        f, _ = fa.flights_from_bootstrap(boot(out_s=land - 2 * H, origin="EWR", dest="IAD", off_a=land - H))
+        f["times"]["in"]["estimated"] = land + 7 * 60          # FlightAware's own guess
+        L = {"id": "al", "ident": "UAL1784", "dep": "EWR", "arr": "IAD",
+             "swim": {"seen": 1, "on": land, "in_shown": land + 4 * 60}}
+        server.swim_overlay(L, f, land + 60)
+        self.assertEqual(f["times"]["in"]["estimated"], land + 4 * 60)   # held, not FlightAware's
+        L["swim"]["airline"] = {"src": "UAL", "in": land + 5 * 60, "at": land + 30}
+        server.swim_overlay(L, f, land + 90)
+        self.assertEqual((f["times"]["in"]["estimated"], f["time_src"]["in"]["estimated"]), (land + 5 * 60, "United"))
+        self.assertEqual(server._tower_state("AMA_TAXI_IN"), "taxiing in")
+
 class AirportLayout(unittest.TestCase):
     def test_osm_to_features(self):
         import server
