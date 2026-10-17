@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.12.3
+- FAA SWIM: the first connection gives up after three tries and shows why (with a hint for login, certificate, network or queue problems) instead of sitting at "Connecting…"; it then tries again after a pause. Reconnecting after a drop still never gives up
+
 ## 3.12.2
 - Settings → FAA SWIM → Download sample messages: a zip with up to three raw messages of every type the feed has sent, the last 20 that matched your flights, and a summary of counts and what was read from them
 

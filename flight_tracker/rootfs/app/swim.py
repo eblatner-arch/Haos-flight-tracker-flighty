@@ -184,6 +184,9 @@ def _session():
         # SCDS presents a Let's Encrypt certificate; Debian's store has its root (ISRG Root X1)
         # in the hashed-directory form the Solace library expects.
         tls = TLS.create().with_certificate_validation(True, False, _cert_dir())
+    # The first connection gives up after a few tries so its error is shown (forever would keep
+    # retrying silently); once connected, reconnecting after a drop never gives up.
+    first = RetryStrategy.parametrized_retry(3, 5000)
     retry = RetryStrategy.forever_retry(retry_interval=5000)
     STATE.update(status="connecting", error=None)
     svc = (MessagingService.builder()
@@ -193,19 +196,39 @@ def _session():
                "solace.messaging.authentication.scheme.basic.username": _cfg["swim_username"].strip(),
                "solace.messaging.authentication.scheme.basic.password": _cfg["swim_password"].strip(),
            })
-           .with_connection_retry_strategy(retry)
+           .with_connection_retry_strategy(first)
            .with_reconnection_retry_strategy(retry)
            .with_transport_security_strategy(tls)
            .build())
-    svc.connect()
+    STATE["attempt_at"] = time.time()
+    try:
+        svc.connect()
+    except Exception as e:
+        msg = str(e).replace("\n", " ")[:300]
+        hint = ""
+        low = msg.lower()
+        if "auth" in low or "login" in low or "401" in low or "unauthor" in low:
+            hint = " (check the SWIM username and the subscription's Connection Password)"
+        elif "cert" in low or "ssl" in low or "tls" in low or "handshake" in low:
+            hint = " (certificate problem: try 'Skip SWIM certificate check' in the Configuration)"
+        elif "timed out" in low or "unreachable" in low or "refused" in low or "resolve" in low:
+            hint = " (can't reach the FAA server from your network on port 55443)"
+        raise RuntimeError(msg + hint)
     dropped = threading.Event()
     try:
         svc.add_service_interruption_listener(lambda *_: dropped.set())
     except Exception:
         pass
-    receiver = svc.create_persistent_message_receiver_builder().build(
-        Queue.durable_exclusive_queue(_cfg["swim_queue"].strip()))
-    receiver.start()
+    try:
+        receiver = svc.create_persistent_message_receiver_builder().build(
+            Queue.durable_exclusive_queue(_cfg["swim_queue"].strip()))
+        receiver.start()
+    except Exception as e:
+        try:
+            svc.disconnect()
+        except Exception:
+            pass
+        raise RuntimeError(f"connected, but the queue didn't open: {str(e)[:250]} (check the SWIM queue name)")
 
     class H(MessageHandler):
         def on_message(self, msg):
