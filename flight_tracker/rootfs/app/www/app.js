@@ -323,7 +323,7 @@
     }
     // Runways drawn on top of the basemap, about their real width (45 m) at every zoom, with a
     // dashed centerline, so they stand out from the taxiways on the dark map.
-    const rwys = [];
+    const rwys = [], twys = [];
     for (const f of features) {
       if (f.k !== "runway" || !Array.isArray(f.g[0])) continue;
       const body = L.polyline(f.g, { color: css("--text"), opacity: 0.22, weight: 8, lineCap: "butt", interactive: false });
@@ -335,11 +335,16 @@
       const mpp = 156543.03 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
       const w = Math.max(3, Math.min(60, 45 / mpp));
       rwys.forEach((r) => r.setStyle({ weight: w }));
+      // taxiways about 23 m wide, with the yellow centerline painted on them
+      const tw = Math.max(2, Math.min(30, 23 / mpp));
+      twys.forEach((r) => r.setStyle({ weight: tw }));
     };
     for (const f of features) {
       if (f.k === "runway" && f.ref) lbl(mid(f.g)[0], f.ref.replace(/^0/, "").replace(/\/0/, "/"), "ap-rwy");
       else if (f.k === "taxiway" && f.ref) {
-        g.addLayer(L.polyline(f.g, { color: faint, weight: 1, opacity: 0.5, interactive: false }));
+        const body = L.polyline(f.g, { color: css("--text"), opacity: 0.12, weight: 4, lineJoin: "round", interactive: false });
+        g.addLayer(body); twys.push(body);
+        g.addLayer(L.polyline(f.g, { color: css("--amber"), opacity: 0.55, weight: 1, interactive: false }));
         const [p, len] = mid(f.g);
         if (len < 0.08 || near(f.ref, p, 0.35)) continue;
         (placed[f.ref] = placed[f.ref] || []).push(p);

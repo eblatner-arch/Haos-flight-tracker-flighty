@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.15.12
+- Airport map: taxiways drawn at their real width (about 75 ft) with a yellow centerline, like the paint on the ground.
+
 ## 3.15.11
 - Airport map: runways are drawn lighter, at their real width at every zoom, with a dashed centerline.
 
