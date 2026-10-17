@@ -743,6 +743,17 @@ class Followed(unittest.TestCase):
         imp = [n for n in alerts.nas_for({"dep": "BOS", "arr": "EWR"}, items) if n["kind"] == "gs"][0]["impact"]
         self.assertEqual([(i["who"], i["hit"]) for i in imp], [("you", False)])   # ZBW isn't in scope: still shown
 
+    def test_same_program_new_key_no_second_push(self):
+        """The same ground stop back under another key (SWIM vs the NAS page, or after a restart) isn't pushed again."""
+        L = {"id": "x", "dep": "BOS", "arr": "EWR", "display": "UA 1", "extra": True, "sched_out": T0 + H,
+             "sched_in": T0 + 2 * H, "notified": {"watch": True}}
+        L["flight"], _ = fa.flights_from_bootstrap(boot(origin="BOS", dest="EWR", out_s=T0 + H))
+        items = _near_t0(sources.parse_events(self.EVENTS))
+        self.assertTrue(any("Ground stop" in a["title"] for a in alerts.evaluate(L, CFG, T0, items)))
+        for i in items:
+            i["key"] = i["key"] + "-swim"
+        self.assertEqual([a for a in alerts.evaluate(L, CFG, T0 + 600, items) if "Ground stop" in a["title"]], [])
+
     def test_delay_trend_direction(self):
         items = sources.parse_events([{"airportId": "ORD", "departureDelay": {"reason": "VOL:Volume", "averageDelay": "15",
                                        "arrivalDeparture": {"type": "Departure", "min": "1", "max": "2", "trend": "Increasing"}}},

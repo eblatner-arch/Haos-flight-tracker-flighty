@@ -472,6 +472,7 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
     if ph in ("scheduled", "taxi_out"):
         seen = set(nt.get("nas") or [])
         ext = nt.get("nas_ext") or {}
+        live = dict(nt.get("nas_live") or {})
         cur = {}
         for n in nas_for(leg, nas_items):
             if n["kind"] in ("gs", "gdp") and n.get("here") == "dep" and n["airport"] != arr:
@@ -487,9 +488,16 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
             atz = dep_tz if n["airport"] == dep else arr_tz
             hit = any(i["hit"] for i in n.get("impact") or [])
             level = "critical" if hit and n["kind"] in ("gs", "closure") else "warn"
-            prev = ext.get(n["key"])
-            cur[n["key"]] = {"end": n.get("end"), "scope": n.get("scope") or []}
-            if n["key"] not in seen:
+            # The same program can come back under another key (from the FAA's SWIM feed or the NAS
+            # status page, or rebuilt after a restart): one program per airport and kind that's been
+            # seen in the last 2 h is the same program, not news.
+            ident = f"{n['airport']}|{n['kind']}"
+            prev = ext.get(n["key"]) or ext.get(ident)
+            cur[n["key"]] = cur[ident] = {"end": n.get("end"), "scope": n.get("scope") or []}
+            known = n["key"] in seen or now - (live.get(ident) or 0) < 2 * 3600 \
+                or (ident not in live and any(k.startswith(ident + "|") for k in seen))
+            live[ident] = now
+            if not known:
                 seen.add(n["key"])
                 add(ev, f"{n['airport']}: {n['label']}", f"{ident} {route}: {nas_text(n, atz)}", level)
             elif prev and n["kind"] in ("gs", "gdp"):
@@ -501,7 +509,11 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
                 if added and prev.get("scope"):
                     add(ev, f"{n['airport']}: {n['label'].lower()} expanded",
                         f"{ident} {route}: now also {' '.join(added)} · {nas_text(n, atz)}", level)
+        for k in cur:
+            if "|" in k and k.count("|") == 1:
+                seen.add(k)
         nt["nas"] = sorted(seen)
+        nt["nas_live"] = {k: v for k, v in live.items() if now - v < 24 * 3600}
         # keep what we knew about a program through a feed hiccup, so extensions are still compared
         nt["nas_ext"] = {**{k: v for k, v in ext.items() if k in seen}, **cur}
 

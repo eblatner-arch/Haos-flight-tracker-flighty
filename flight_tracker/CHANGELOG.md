@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.21.9
+- No second push for the same ground stop or delay program when it comes back under another key (from the FAA's SWIM feed vs the NAS status page, or rebuilt after a restart): one program per airport and kind seen in the last 2 h is the same program. Extensions and added centers still push.
+
 ## 3.21.8
 - SWIM samples download: for every TFMS message type, the last 4 messages that mention one of your flights (your_flights/by_type/), so what the FAA sends about a flight around an EDCT change can be checked.
 
