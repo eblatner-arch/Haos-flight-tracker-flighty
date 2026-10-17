@@ -226,7 +226,9 @@
   function headingOf(live, track) {
     if (live && live.heading != null) return live.heading;
     // newest known position (the live fix or the track's last point, whichever is later), and the
-    // direction from a point at least ~2 km before it in time: never from a point that came after it
+    // direction from a point at least ~15 km before it in time, never from a point that came after
+    // it. The track mixes sources (FlightAware's ADS-B, FAA center radar a minute behind): over a
+    // couple of km their disagreement can point the airplane backwards; over 15 km it can't.
     const pts = (track || []).filter((p) => p && p[0] != null);
     let pos = live ? [live.lat, live.lon] : null, t = live ? live.at || 0 : -Infinity;
     const last = pts[pts.length - 1];
@@ -235,8 +237,12 @@
     for (let i = pts.length - 1; i >= 0; i--) {
       const p = pts[i];
       if (p === pos || (p[4] && t !== Infinity && p[4] >= t)) continue;
-      if (Math.abs(p[0] - pos[0]) + Math.abs(p[1] - pos[1]) > 0.02) return bearing(p, pos);
+      const dy = p[0] - pos[0], dx = (p[1] - pos[1]) * Math.cos(pos[0] * Math.PI / 180);
+      if (Math.hypot(dx, dy) > 0.135) return bearing(p, pos);   // ~15 km
     }
+    // a short track: the farthest point back, if it's at least ~2 km away
+    const far = pts.filter((p) => p !== pos && !(p[4] && t !== Infinity && p[4] >= t))[0];
+    if (far && Math.abs(far[0] - pos[0]) + Math.abs(far[1] - pos[1]) > 0.02) return bearing(far, pos);
     return 0;
   }
   // the newest of the live fix and the track's last point
