@@ -221,6 +221,28 @@
     const x = Math.cos(p[0] * R) * Math.sin(q[0] * R) - Math.sin(p[0] * R) * Math.cos(q[0] * R) * Math.cos((q[1] - p[1]) * R);
     return (Math.atan2(y, x) / R + 360) % 360;
   }
+  // Which way the airplane points: its own reported heading, else the direction from the last track
+  // point at least ~2 km back (FAA center radar sends no heading).
+  function headingOf(live, track) {
+    if (live && live.heading != null) return live.heading;
+    const pos = live ? [live.lat, live.lon] : track && track.length ? track[track.length - 1] : null;
+    if (!pos || !track) return 0;
+    for (let i = track.length - 1; i >= 0; i--) {
+      const p = track[i];
+      if (p && p[0] != null && Math.abs(p[0] - pos[0]) + Math.abs(p[1] - pos[1]) > 0.02) return bearing(p, pos);
+    }
+    return 0;
+  }
+  // Where the airplane is now, carried forward from its last fix at its speed and heading (at most
+  // 2 min): moves smoothly between radar reports that only come about once a minute en route.
+  function aheadOf(live, hdg, now) {
+    const age = now / 1000 - (live.at || 0);
+    if (!(live.gs_kt > 60) || age < 3 || age > 120) return null;
+    const R = Math.PI / 180, d = (live.gs_kt * age / 3600) / 3440.065, b = hdg * R, la = live.lat * R, lo = live.lon * R;
+    const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
+    const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+    return [la2 / R, lo2 / R];
+  }
   const ll = (ap) => ap && ap.lat != null && ap.lon != null ? [ap.lat, ap.lon] : null;
 
   function planeMarker(pos, heading, color, title) {
@@ -557,7 +579,11 @@
           const add = (arr, pts) => { const last = arr.length ? arr[arr.length - 1][4] || 0 : 0; for (const p of pts || []) if ((p[4] || 0) > last) { arr.push(p); moved = true; } };
           if (cur.flight) { cur.flight.track = cur.flight.track || []; add(cur.flight.track, d.track); }
           if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
-          if (moved && MAPS[key]) paintMap(MAPS[key], withChain(cur), false);
+          const m = MAPS[key];
+          if (moved && m) paintMap(m, withChain(cur), false);
+          // between fixes, carry the airplane forward along its heading
+          if (m && m.ownMarker && cur.live && cur.phase === "airborne") { const a = aheadOf(cur.live, m.ownHdg || 0, Date.now()); if (a) m.ownMarker.setLatLng(a); }
+          if (m && m.inbMarker && cur.inbound_live && cur.inbound && cur.inbound.phase === "airborne") { const a = aheadOf(cur.inbound_live, m.inbHdg || 0, Date.now()); if (a) m.inbMarker.setLatLng(a); }
         } catch {} finally { if (stop) clearTimeout(stop); }
       }
       LIVEW.timer = setTimeout(tick, 5000);
@@ -668,6 +694,7 @@
     entry.leg = leg;
     layer.clearLayers();
     const add = (x) => x.addTo(layer);
+    entry.inbMarker = null;
     const route = css("--route"), violet = css("--violet"), muted = css("--faint");
     const bounds = [];
     const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
@@ -720,9 +747,9 @@
       if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
       let ip = null, ih = 0;
-      if (leg.inbound_live) { ip = [leg.inbound_live.lat, leg.inbound_live.lon]; ih = leg.inbound_live.heading; }
-      else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = itr.length > 1 ? bearing(itr[itr.length - 2], ip) : 0; }
-      if (ip) { add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); ibounds.push([ip[0], ip[1]]); }
+      if (leg.inbound_live) { ip = [leg.inbound_live.lat, leg.inbound_live.lon]; ih = headingOf(leg.inbound_live, itr); }
+      else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
+      if (ip) { entry.inbMarker = add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); entry.inbHdg = ih; ibounds.push([ip[0], ip[1]]); }
       if (ia && interactive) { ibounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
     }
     // Earlier legs of the same airplane that still matter (not yet arrived), fainter the further back.
@@ -747,13 +774,14 @@
       add(L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label">${esc(ap.iata || "")}</span>`, iconSize: null, iconAnchor: [-6, 8] }) }));
     }
     let pos = null, hdg = 0;
-    if (leg.live) { pos = [leg.live.lat, leg.live.lon]; hdg = leg.live.heading; }
+    if (leg.live) { pos = [leg.live.lat, leg.live.lon]; hdg = headingOf(leg.live, track); }
     else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && track.length) {
-      pos = track[track.length - 1]; hdg = track.length > 1 ? bearing(track[track.length - 2], pos) : 0;
+      pos = track[track.length - 1]; hdg = headingOf(null, track);
     } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
     // on the airport surface radar, that (more exact) target is your airplane: don't draw it twice
     entry.ownMarker = pos && !(entry.surfaceMine && Date.now() - entry.surfaceMine < 10000)
       ? add(planeMarker([pos[0], pos[1]], hdg, route, leg.display)) : null;
+    entry.ownHdg = hdg;
     entry.bounds = bounds;
     if (fit || !interactive) entry.center();
   }

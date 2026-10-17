@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.20.3
+- The airplane points the way it's flying when the position comes from FAA center radar (which sends no heading): the direction is taken from its track.
+- Between the FAA's once-a-minute en-route fixes, the map carries the airplane forward at its speed and heading (up to 2 min), so it moves smoothly without extra lookups.
+- adsb.lol is asked only when the FAA radar has nothing from the last 90 s (outside the US, or a gap), at most once a minute per airplane.
+
 ## 3.20.2
 - EDCTs are kept for every flight, not only the ones being watched. The FAA assigns them once, when a ground delay program is issued (UA444 SFO→SAN got its EDCT from the SAN GDP at 06:51 PDT, before it was being watched), and doesn't send them again. Kept on disk for 12 h (written at most every 2 min), so a restart doesn't lose them; a flight you start watching picks up its EDCT at once.
 - EDCTs also read from flight-data messages that carry a controlled departure time.

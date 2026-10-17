@@ -1636,7 +1636,7 @@ def choose_live(cands, fl):
 
 
 LIVE_EVERY = 5          # s between position refreshes for flights moving now
-ADSB_EVERY = 30        # s between adsb.lol asks when the FAA radar has nothing fresh
+ADSB_EVERY = 60        # s between adsb.lol asks, only when the FAA radar has nothing in the last 90 s
 
 
 def live_tick(now):
@@ -1677,9 +1677,11 @@ def live_tick(now):
             continue
         if cands:
             _set_live(lid, who, choose_live(cands, fl))   # center radar meanwhile
-        if now - polled >= ADSB_EVERY and (lid, who) not in ADSB_ASKING:
-            # en route the FAA's center radar only reports about once a minute: ask adsb.lol, on its
-            # own thread so a slow answer never holds up the radar positions of other flights
+        fresh = any(now - (a.get("at") or 0) < 90 for a in cands)
+        if not fresh and now - polled >= ADSB_EVERY and (lid, who) not in ADSB_ASKING:
+            # the FAA has nothing recent (outside the US, or a gap): ask adsb.lol, on its own thread
+            # so a slow answer never holds up the radar positions of other flights. Between the
+            # FAA's once-a-minute center radar fixes the page carries the airplane forward itself.
             with LOCK:
                 L = STATE["legs"].get(lid)
                 if L is not None:
