@@ -1405,6 +1405,22 @@ class Swim(unittest.TestCase):
         self.assertEqual(swim.TFDM_STATE["matched"], n + 1)
         self.assertIn("TfdmFlight", swim.TFDM_TYPES)
 
+    def test_real_2127_continuation_departure(self):
+        """Captured live: UA2127 MDT→EWR (after the LAX→EWR diversion) wheels-up 02:19Z, original igtd 17:15Z."""
+        import server
+        import swim
+        swim.STATE["status"] = "connected"
+        swim.WATCH.clear(); swim.WATCH.add("UAL2127")
+        swim.EVENTS.clear()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "swim_2127_departure.xml")) as fh:
+            swim.handle(fh.read())
+        so = datetime(2026, 10, 17, 0, 30, tzinfo=timezone.utc).timestamp()
+        f, _ = fa.flights_from_bootstrap(boot(out_s=so, origin="MDT", dest="EWR"))
+        L = {"id": "s4", "ident": "UAL2127", "dep": "MDT", "arr": "EWR", "sched_out": so}
+        sw = server.swim_check(L, f, "EWR")
+        self.assertEqual((sw.get("off"), sw.get("eta"), sw.get("diverted_to")),
+                         ("2026-10-17T02:19:00Z", "2026-10-17T02:57:30Z", None))
+
     def test_amendment_marks_diversion(self):
         import server
         import swim
