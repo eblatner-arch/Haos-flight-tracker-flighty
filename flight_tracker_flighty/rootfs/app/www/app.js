@@ -485,8 +485,13 @@
       <p class="small faint" style="margin:4px 4px 10px">${h.fetched ? `Data from FlightAware, fetched ${ago(h.fetched)}${finished ? "" : " · refreshes every 10 min"}` : "Data from FlightAware with your flight's last check"}</p>
       ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}</section>`;
     const earlier = h.phase === "scheduled" ? chainFrom(rot, n + 1) : [];
-    showMap(`ac-${id}-${n}`, paintLeg, { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
+    // surface traffic at this leg's airports too: where the airplane is on the ground (its departure
+    // before takeoff, its arrival once landed), or whichever of them you zoom in on
+    const surf = { key: `ac-${id}-${n}`, lid: id, route: `#/aircraft/${id}/${n}`, view: `ac-${id}-${n}`, ident: (h.ident || h.display_ident || "").replace(/\s/g, ""),
+      ap: () => ["scheduled", "taxi_out"].includes(h.phase) ? o.iata : ["landed", "arrived"].includes(h.phase) ? d.iata : null };
+    showMap(`ac-${id}-${n}`, paintLeg, { id: surf.key, _surf: surf, dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
       chain: [], live: null, display: h.display_ident }, { kind: "leg" });
+    surfaceWatch({ id: surf.key }, surf);
   }
 
   function problemBanners(leg) {
@@ -2546,19 +2551,24 @@
     GL.lastSurface = null; GL.surfaceMine = 0;
     if (GL.ctl) GL.ctl.classList.remove("has-surf");
   }
-  function surfaceWatch(leg) {
+  // o (an inbound leg's page): {key, lid, route, view, ident, ap()} — the airport to watch when
+  // you're not zoomed in on one (where that airplane is on the ground), and whose flight to highlight
+  function surfaceWatch(leg, o) {
     if (!STATE || !STATE.stdds || STATE.stdds.status !== "connected") { stopSurface(); return; }
-    if (SURF.id !== leg.id) { stopSurface(); SURF.id = leg.id; SURF.zoomed = false; }
+    o = o || {};
+    const id = o.key || leg.id, lid = o.lid || leg.id, route = o.route || `#/leg/${lid}`, view = o.view || `leg-${lid}`;
+    if (SURF.id !== id) { stopSurface(); SURF.id = id; SURF.zoomed = false; }
     if (SURF.timer) return;
-    const id = leg.id;
     const tick = async () => {
       SURF.timer = null;
-      if (SURF.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (SURF.id === id) stopSurface(); return; }
+      if (SURF.id !== id || ROUTE.split("?")[0] !== route && !(route.startsWith("#/leg/") && ROUTE.startsWith(route))) { if (SURF.id === id) stopSurface(); return; }
       let d = null;
-      const ap = zoomedAirport(12);
-      try { d = await api(`api/surface/${encodeURIComponent(id)}${ap ? `?ap=${encodeURIComponent(ap)}` : ""}`); } catch {}
+      const ap = zoomedAirport(12) || (o.ap ? o.ap() : null);
+      const q = [ap && `ap=${encodeURIComponent(ap)}`, o.ident && `ident=${encodeURIComponent(o.ident)}`].filter(Boolean).join("&");
+      if (o.key && !ap) d = { targets: [] };   // an inbound leg in the air: nothing on the ground to show
+      else try { d = await api(`api/surface/${encodeURIComponent(lid)}${q ? `?${q}` : ""}`); } catch {}
       if (SURF.id !== id) return;
-      if (GL.view === `leg-${id}`) paintSurface(d || {});
+      if (GL.view === view) paintSurface(d || {});
       SURF.timer = setTimeout(tick, d && d.targets && d.targets.length ? 3000 : 20000);
     };
     SURF.timer = setTimeout(tick, 0);
@@ -2568,7 +2578,9 @@
     const leg = GL.leg;
     if (!GL.map || !leg || GL.map.getZoom() < z) return null;
     const c = GL.map.getCenter(), here = [c.lat, c.lng];
-    const a = [leg.dep_ap, leg.arr_ap].find((a) => a && ll(a) && kmBetween(here, ll(a)) < 8);
+    // this flight's airports, and the airports of the inbound legs drawn with it
+    const more = [leg.inbound, ...(leg.chain || []), ...(leg.rotation || [])].filter(Boolean).flatMap((r) => [r.origin, r.destination]);
+    const a = [leg.dep_ap, leg.arr_ap, ...more].find((a) => a && ll(a) && kmBetween(here, ll(a)) < 8);
     return a ? a.iata || a.icao : null;
   }
   // zoomed in on an airport: look for surface traffic now rather than at the next 20 s poll
@@ -2580,7 +2592,7 @@
     SURF.timer = null;
     const l = GL.leg;
     SURF.id = null;
-    surfaceWatch(l);
+    surfaceWatch(l, l._surf);
   }
   function paintSurface(d) {
     const only = pref("ft-surf-all", "0") !== "1", ids = pref("ft-surf-ids", "0") === "1";

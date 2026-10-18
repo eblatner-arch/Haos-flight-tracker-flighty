@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.18.0
+- Surface traffic on inbound legs: an inbound leg's page (and every earlier inbound) shows live ground traffic at that leg's airports. It shows the departure airport while that airplane is still there and the arrival once it lands, with that flight highlighted, plus whichever of the two you zoom in on. On your own flight's page, zooming in on an inbound leg's airport shows its traffic too. Needs STDDS, and covers airports with FAA surface radar.
+
 ## 4.17.5
 - Zooming far out (center button from an airport) now pulls back like a camera: the zoom eases out while the center moves only as fast as the view widens, so the airport stays put at first and the view settles over your routes as it opens up. (4.17.3's fly-to slid sideways first, then zoomed out.) Zooming in to an airport still flies, which already looked right. Touching the map stops it.
 

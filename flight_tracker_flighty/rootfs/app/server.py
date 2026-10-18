@@ -2933,7 +2933,7 @@ def worker():
 # web
 # --------------------------------------------------------------------------
 
-def api_surface(lid, now, want=None):
+def api_surface(lid, now, want=None, want_ident=None):
     """Live surface positions (FAA STDDS) at the airport where this flight is on the ground: the
     departure airport until takeoff, the arrival airport once it's landing. Only for flights
     you're watching, and only while STDDS is connected."""
@@ -2946,8 +2946,13 @@ def api_surface(lid, now, want=None):
         t = f.get("times") or {}
         dest = f.get("diverted_to") or (f.get("destination") or {}).get("iata") or L.get("arr")
         on_e = fa.best_time(t, "on") if t else None
-        if want and want.upper() in {(c or "").upper() for c in (L.get("dep"), L.get("arr"), dest)}:
-            code = want.upper()   # you've zoomed in on one of this flight's airports
+        # the airplane's earlier legs (its inbound and the inbound's inbound): their airports too
+        rot_aps = set()
+        for r in (L.get("rotation") or []) + ([L["inbound"]] if L.get("inbound") else []):
+            for side in ("origin", "destination"):
+                rot_aps.add(((r.get(side) or {}).get("iata") or "").upper())
+        if want and want.upper() in {(c or "").upper() for c in (L.get("dep"), L.get("arr"), dest)} | (rot_aps - {""}):
+            code = want.upper()   # one of this flight's (or its inbound legs') airports
         elif ph in ("scheduled", "taxi_out"):
             code = L.get("dep")
         elif ph == "landed" or (ph == "airborne" and on_e and on_e - now < 6 * 60):
@@ -2955,6 +2960,8 @@ def api_surface(lid, now, want=None):
         else:
             return {"targets": [], "phase": ph}
         ident = (L.get("ident") or "").upper()
+        if want_ident:   # an inbound leg's page: highlight that flight
+            ident = want_ident.upper()
     ap = airports.get(code) or {}
     icao = (ap.get("icao") or "").upper()
     allt = swim.surface(icao)
@@ -3737,8 +3744,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, d) if d else self._send(404, {"error": "not found"})
         m = re.match(r"^/api/surface/([\w-]+)$", path)
         if m:
-            want = (urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("ap") or [None])[0]
-            return self._send(200, api_surface(m.group(1), time.time(), want))
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            want = (qs.get("ap") or [None])[0]
+            return self._send(200, api_surface(m.group(1), time.time(), want, (qs.get("ident") or [None])[0]))
         m = re.match(r"^/api/leg/([\w-]+)$", path)
         if m:
             qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
