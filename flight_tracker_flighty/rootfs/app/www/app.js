@@ -2096,13 +2096,35 @@
     } catch {}
     camTo({ center: c, zoom: z, padding }, dur);
   }
-  // Short moves glide; big zoom changes (from an airport out to your routes) fly: the camera rises
-  // in an arc and comes back down, instead of sliding the center while the zoom drops, which on
-  // the globe looked like falling through the earth.
+  // Short moves glide. Zooming far out (from an airport back to your routes) pulls back like a
+  // camera: the zoom eases out while the center travels in step with how much of the earth comes
+  // into view, so the airport stays roughly put at first and the view settles over your routes as
+  // it widens (a fly-to slid sideways first; a plain glide looked like passing through the globe).
+  // Zooming far in still flies, which already looks right.
+  let camAnim = 0;
   function camTo(o, dur) {
     const map = GL.map;
-    if (dur && Math.abs((o.zoom ?? map.getZoom()) - map.getZoom()) > 2.5) map.flyTo({ ...o, duration: Math.min(2200, Math.max(1300, dur * 1.6)), curve: 1.42, essential: true });
-    else map.easeTo({ ...o, duration: dur });
+    cancelAnimationFrame(camAnim); camAnim = 0;
+    const z0 = map.getZoom(), z1 = o.zoom ?? z0;
+    if (!dur || Math.abs(z1 - z0) <= 2.5) { map.easeTo({ ...o, duration: dur }); return; }
+    if (z1 > z0) { map.flyTo({ ...o, duration: Math.min(2200, Math.max(1300, dur * 1.6)), curve: 1.42, essential: true }); return; }
+    const M = maplibregl.MercatorCoordinate, a = M.fromLngLat(map.getCenter()), bC = M.fromLngLat(o.center);
+    const p0 = map.getPadding(), p1 = { ...p0, ...(o.padding || {}) };
+    const s0 = 2 ** -z0, s1 = 2 ** -z1, T = Math.min(1800, Math.max(1100, dur * 1.4)), t0 = performance.now();
+    const ease = (t) => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    map.stop();
+    const stopOnTouch = () => { cancelAnimationFrame(camAnim); camAnim = 0; };
+    map.once("dragstart", stopOnTouch); map.once("zoomstart", (e) => { if (e.originalEvent) stopOnTouch(); });
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / T), e = ease(t), z = z0 + (z1 - z0) * e;
+      const f = (2 ** -z - s0) / (s1 - s0);   // how far the view has widened, 0 to 1
+      const x = a.x + (bC.x - a.x) * f, y = a.y + (bC.y - a.y) * f;
+      const pad = {}; for (const k of ["top", "bottom", "left", "right"]) pad[k] = p0[k] + (p1[k] - p0[k]) * e;
+      map.jumpTo({ center: new M(x, y).toLngLat(), zoom: z, padding: pad });
+      if (t < 1) camAnim = requestAnimationFrame(step);
+      else { camAnim = 0; map.fire("moveend"); }
+    };
+    camAnim = requestAnimationFrame(step);
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
   // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.
@@ -2179,7 +2201,7 @@
     // labels by zoom (airport codes, route fixes, taxiways, gates), in the old map's zoom numbers
     const zc = () => { const z = map.getZoom() + 1; for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
     map.on("zoom", zc); zc();
-    map.on("moveend", () => { layoutCheck(); surfaceNow(); gAttr(); });
+    map.on("moveend", () => { if (camAnim) return; layoutCheck(); surfaceNow(); gAttr(); });
     // The globe keeps its size as you drag north or south by lowering the zoom number (by
     // log2 cos(latitude)), and tiles are picked from that number: halfway across, the map switched
     // to the next coarser tiles, so the picture went soft and baked-in labels jumped bigger. Scaling
@@ -2197,7 +2219,7 @@
       }
     };
     map.on("move", latFix);
-    map.on("moveend", () => placeZoomFix());
+    map.on("moveend", () => { if (!camAnim) placeZoomFix(); });
     setTimeout(warmWorld, 8000);
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });

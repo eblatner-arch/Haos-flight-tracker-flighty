@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.17.5
+- Zooming far out (center button from an airport) now pulls back like a camera: the zoom eases out while the center moves only as fast as the view widens, so the airport stays put at first and the view settles over your routes as it opens up. (4.17.3's fly-to slid sideways first, then zoomed out.) Zooming in to an airport still flies, which already looked right. Touching the map stops it.
+
 ## 4.17.4
 - No black screen when zooming all the way out from an airport: the soft backdrop under the map now always uses the whole world's coarsest imagery (zoom 0-3, 85 tiles, about 2 MB), downloaded once and kept on the phone. Mid-flight from an airport out to your routes there's always earth underneath, sharpening as tiles arrive, instead of black where nothing was loaded yet.
 
