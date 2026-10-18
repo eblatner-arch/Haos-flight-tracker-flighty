@@ -9,11 +9,9 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<!-- fonts load without holding up the first draw -->
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet"></noscript>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css">
+<!-- the map library is served by the add-on (cached on the phone for a year), from the CDN only if
+     it's missing; it loads in the background and never holds up the first draw -->
+<link rel="stylesheet" href="maplibre-gl.css" onerror="this.onerror=null;this.href='https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css'">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -33,7 +31,7 @@
   </div>
   <a class="tab-search" href="#/history/find" data-tab="search" aria-label="Search"><svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM15.5 15.5 20 20"/></svg></a>
 </nav>
-<script defer src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
+<script async src="maplibre-gl.js" onload="window.__mapReady&&__mapReady()" onerror="var s=document.createElement('script');s.src='https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js';s.onload=function(){window.__mapReady&&__mapReady()};document.head.appendChild(s)"></script>
 <script defer src="app.js"></script>
 </body>
 </html>

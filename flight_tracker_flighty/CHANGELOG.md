@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.4.0
+- The My Flights map shows every upcoming flight's route (it was only the next two weeks, 16 at most). It frames the coming week.
+- The sheet has a top stop: let go between the middle and the top and it settles on the nearer one, like peeking and the middle.
+- Weak signal:
+  - The map library is now served by the add-on (cached on the phone for a year) instead of an outside CDN, and loads in the background: the flight list draws without waiting for it.
+  - A flight opens at once from what's already on the phone, and fills in the track, inbound and weather when the add-on answers.
+  - Passport, Flight Stats, Search and Airports draw the copy kept on the phone first, then update in place. They still open with no signal at all.
+  - Requests give up after 15 s with a message instead of hanging.
+  - Data saver (Settings): a quarter of the map imagery downloads, no radar, live position every 15 s instead of 5.
+  - No web font download.
+
 ## 4.3.0
 - One map for the whole app. It's made once and stays up: going between My Flights, a flight, Passport, Airports or a ground stop only swaps what's drawn on it, and the camera glides to the new page's routes. Imagery already loaded stays loaded.
 - Flights are on the globe too: zoomed out it's the earth, zoomed in it flattens into a normal map with the airport diagram (runways, taxiways, gates) and live surface traffic, as before.

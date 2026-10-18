@@ -168,11 +168,35 @@
   document.addEventListener("touchcancel", () => { if (sw) unstyle(sw.el); sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
   async function api(path, opts) {
-    // GETs revalidate (the add-on answers "not changed" with a tiny 304); changes always go through
-    const r = await fetch(path, { cache: opts && opts.method && opts.method !== "GET" ? "no-store" : "no-cache", ...opts });
+    // GETs revalidate (the add-on answers "not changed" with a tiny 304); changes always go through.
+    // A GET gives up after 15 s on a weak signal instead of hanging the page.
+    const get = !(opts && opts.method && opts.method !== "GET");
+    let ctl = null, to = null;
+    if (get && !(opts && opts.signal) && window.AbortController) { ctl = new AbortController(); to = setTimeout(() => ctl.abort(), 15000); }
+    let r;
+    try { r = await fetch(path, { cache: get ? "no-cache" : "no-store", ...(ctl ? { signal: ctl.signal } : {}), ...opts }); }
+    catch (e) { throw new Error(e && e.name === "AbortError" ? "timed out (weak signal?)" : "offline or unreachable"); }
+    finally { if (to) clearTimeout(to); }
     if (!r.ok) throw new Error(`${r.status}`);
     if (opts && opts.method === "POST") changed(path);
     return r.json();
+  }
+  // Stale-while-revalidate: draw the copy kept on the phone at once, then fetch and redraw in place
+  // (only if it changed). On a weak signal the page is there immediately, and stays if the fetch fails.
+  async function swr(path, draw) {
+    const key = "ft-c:" + path, route0 = ROUTE;
+    let c = null;
+    try { c = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
+    if (c && !morphing) draw(c);
+    let d;
+    try { d = await api(path); } catch (e) { if (!c) throw e; return; }
+    if (ROUTE !== route0) return;
+    const txt = JSON.stringify(d);
+    try { if (txt.length < 1500000) localStorage.setItem(key, txt); } catch {}
+    if (c && !morphing && JSON.stringify(c) === txt) return;
+    const was = morphing;
+    morphing = morphing || !!c;
+    try { draw(d); } finally { morphing = was; }
   }
   // Anything you change here turns the Drive pill amber right away (the server confirms and uploads ~15 s later).
   function changed(path) {
@@ -612,9 +636,10 @@
     };
   }
 
-  async function historyView(year) {
-    destroyMaps();
-    const d = await api(`api/history${year ? `?year=${year}` : ""}`);
+  function historyView(year) {
+    return swr(`api/history${year ? `?year=${year}` : ""}`, (d) => drawPassport(d, year));
+  }
+  function drawPassport(d, year) {
     let h = `<div class="sheet-gap pass"></div><section class="sheet">
       <div class="sheet-head"><h1>Passport</h1><div class="sh-btns">${avatar()}</div></div>
       <div class="ypills">${["", ...d.years].map((y) => `<a class="yp ${y === (year || "") ? "on" : ""}" href="#/history${y ? "/" + y : ""}">${y || "All-Time"}</a>`).join("")}</div>`;
@@ -624,7 +649,7 @@
     $app.innerHTML = h;
     wireImport();
     const pl = document.getElementById("pass-list");
-    if (pl) pl.addEventListener("click", (e) => {
+    if (pl) pl.onclick = (e) => {
       const b = e.target.closest("[data-psort]"), all = e.target.closest("[data-pall]");
       if (b) {
         const k = b.dataset.psort;
@@ -632,7 +657,7 @@
         setPref("ft-pass-sort", JSON.stringify(PASS_SORT));
         pl.innerHTML = passList(d);
       } else if (all) { PASS_ALL = true; pl.innerHTML = passList(d); }
-    });
+    };
     showMap(`pass-${year || "all"}`, paintPass, globeData(d));
   }
 
@@ -645,9 +670,10 @@
   }
   // a link to Search with these filters (and the year being viewed)
   const findLink = (year, f) => "#/history/find?" + new URLSearchParams({ ...(year ? { year } : {}), ...f }).toString();
-  async function statsView(year) {
-    destroyMaps();
-    const d = await api(`api/history${year ? `?year=${year}` : ""}`);
+  function statsView(year) {
+    return swr(`api/history${year ? `?year=${year}` : ""}`, (d) => drawStats(d, year));
+  }
+  function drawStats(d, year) {
     const st = d.stats;
     let h = histTabs("stats", year) + yearChips(year || "", d.years, "#/history/stats");
     if (!st.flights) { $app.innerHTML = h + `<div class="card empty"><b>No flights yet</b>Import your Flighty history on the Flights tab.</div>`; return; }
@@ -779,7 +805,11 @@
   async function findView(route) {
     destroyMaps();
     const P = new URLSearchParams(route.split("?")[1] || "");
-    if (!FIND_CACHE || Date.now() - FIND_CACHE.at > 60000 || !morphing) FIND_CACHE = { at: Date.now(), d: await api("api/history") };
+    if (!FIND_CACHE || Date.now() - FIND_CACHE.at > 60000 || !morphing) {
+      let d = null;
+      try { d = await api("api/history"); } catch (e) { try { d = JSON.parse(localStorage.getItem("ft-c:api/history") || "null"); } catch {} if (!d) throw e; }
+      FIND_CACHE = { at: Date.now(), d };
+    }
     const all = FIND_CACHE.d.flights;
     const uniq = (fn) => [...new Set(all.map(fn).filter(Boolean))].sort();
     const opt = (k, vals, label, fmtOpt) => `<label class="ff"><span>${label}</span><select data-k="${k}"><option value="">Any</option>${vals.map((v) => `<option value="${esc(v)}" ${P.get(k) === String(v) ? "selected" : ""}>${esc(fmtOpt ? fmtOpt(v) : v)}</option>`).join("")}</select></label>`;
@@ -1125,7 +1155,8 @@
   const ESRI_IMG = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
   const ESRI_LBL = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
   const mapStyle = () => pref("ft-mapstyle", "satellite");
-  const radarOn = () => pref("ft-radar", "0") === "1";
+  const lowData = () => pref("ft-lowdata", "0") === "1";
+  const radarOn = () => pref("ft-radar", "0") === "1" && !lowData();
   let RADAR = null;
   // Where the sun is overhead (and the numbers the night-side outline needs).
   function subsolar(date) {
@@ -1484,21 +1515,25 @@
   // out into a normal map, with the airport diagram and live surface traffic.
   // ================================================================================================
   const MAP_EL = document.getElementById("map");
+  // index.html loads the map library without holding up the app; this runs when it arrives
+  window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
   const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [], layMarks: [], surf: [],
     bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, leg: null, ctl: null };
   const CARTO_DARK = ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png`);
   function glStyle() {
-    const sat = mapStyle() === "satellite";
+    const sat = mapStyle() === "satellite", low = lowData();
+    // data saver: each imagery tile covers 4x the area (a quarter of the downloads, a little softer)
+    const ts = low ? 512 : 256;
     return {
       version: 8,
       projection: { type: "globe" },
       sources: sat
-        ? { base: { type: "raster", tiles: [ESRI_IMG], tileSize: 256, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
+        ? { base: { type: "raster", tiles: [ESRI_IMG], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
             lbl: { type: "raster", tiles: [ESRI_LBL], tileSize: 256, maxzoom: 19 } }
-        : { base: { type: "raster", tiles: CARTO_DARK, tileSize: 256, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
+        : { base: { type: "raster", tiles: CARTO_DARK, tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
       layers: [
         { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
-        ...(sat ? [{ id: "lbl", type: "raster", source: "lbl", paint: { "raster-fade-duration": 120 } }] : []),
+        ...(sat ? [{ id: "lbl", type: "raster", source: "lbl", minzoom: low ? 3 : 0, paint: { "raster-fade-duration": 120 } }] : []),
       ],
     };
   }
@@ -1697,7 +1732,7 @@
   // (a live update) only redraws, leaving the map where you put it.
   function showMap(view, paint, data, opts) {
     opts = opts || {};
-    if (!glInit()) return;
+    if (!glInit()) { GL.queued = [view, paint, data, opts]; return; }
     const changed = GL.view !== view;
     if (changed) { clearLayout(); stopSurface(); GL.leg = null; GL.globeView = null; }
     GL.view = view; GL.paint = paint; GL.data = data; GL.opts = opts;
@@ -1713,14 +1748,16 @@
   // My Flights: every route in the next two weeks, airports, the airplanes in the air.
   function paintHome(data, fit) {
     GL.leg = null;
-    const routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [];
+    const routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [], soon = [];
+    const nowS = Date.now() / 1000;
     for (const l of data.legs) {
       const A = ll(l.dep_ap), B = ll(l.arr_ap);
       if (!A || !B) continue;
       const k = [l.dep, l.arr].sort().join("-");
-      if (!seen.has(k)) { seen.add(k); routes.push(lineF(gcPoints(A, B))); }
+      if (!seen.has(k)) { seen.add(k); routes.push(lineF(gcPoints(A, B, 40))); }
       aps.set(l.dep, A); aps.set(l.arr, B);
       bounds.push(A, B);
+      if (((l.flight && best(l.flight.times, "out")) || l.sched_out) - nowS < 7 * 86400) soon.push(A, B);
     }
     const f = data.focus;
     for (const l of data.legs) {
@@ -1741,7 +1778,7 @@
     glSet({ routes, track, aps: [...aps.values()].map((p) => ptF(p)) });
     const mk = glMarkers(marks);
     GL.ownMarker = own >= 0 ? mkHandle(mk[own]) : null; GL.inbMarker = null;
-    GL.bounds = bounds; GL.maxZoom = 6.5;
+    GL.bounds = soon.length ? soon : bounds; GL.maxZoom = 6.5;
     fitNow(fit);
   }
   // Passport: everything you've flown; airport codes once you zoom in.
@@ -1976,9 +2013,9 @@
           if (GL.inbMarker && cur.inbound_live && cur.inbound && cur.inbound.phase === "airborne" && fresh(cur.inbound_live, cur.inbound.track)) { const a = aheadOf(cur.inbound_live, GL.inbHdg || 0, Date.now()); if (a) GL.inbMarker.setLatLng(a); }
         } catch {} finally { if (stop) clearTimeout(stop); }
       }
-      LIVEW.timer = setTimeout(tick, 5000);
+      LIVEW.timer = setTimeout(tick, lowData() ? 15000 : 5000);
     };
-    LIVEW.timer = setTimeout(tick, 5000);
+    LIVEW.timer = setTimeout(tick, lowData() ? 15000 : 5000);
   }
 
   // ---------- live surface traffic (FAA STDDS) ----------
@@ -2098,8 +2135,7 @@
     destroyMaps();
     $app.innerHTML = h;
     // the map: every route in the next two weeks, and the airplane you're on (or about to be)
-    const onMap = live.filter((l) => sortKey(l) - nowS < 14 * 86400).slice(0, 16);
-    const data = (full) => ({ legs: onMap.length ? onMap : live.slice(0, 1), focus: full ? withChain(full) : null });
+    const data = (full) => ({ legs: live, focus: full ? withChain(full) : null });
     showMap("home", paintHome, data(focus && LEGS[focus.id]), { kind: "home" });
     if (focus && moving(focus)) {
       api(`api/leg/${focus.id}`).then((full) => {
@@ -2111,10 +2147,10 @@
 
   let APTS = null;   // last airport-status answer, for the program map
   const issueRank = (a) => a.items.some((n) => ["gs", "closure"].includes(n.kind)) ? 0 : a.items.some((n) => n.kind === "gdp") ? 1 : 2;
-  async function airportsView() {
-    destroyMaps();
-    let d;
-    try { d = await api("api/airports/status"); } catch (e) { d = { airports: [], error: e.message }; }
+  function airportsView() {
+    return swr("api/airports/status", drawAirports).catch((e) => drawAirports({ airports: [], error: e.message }));
+  }
+  function drawAirports(d) {
     APTS = d;
     const list = [...d.airports].sort((a, b) => issueRank(a) - issueRank(b) || (b.mine - a.mine) || a.code.localeCompare(b.code));
     const major = list.filter((a) => issueRank(a) < 2), minor = list.filter((a) => issueRank(a) === 2);
@@ -2208,9 +2244,22 @@
   }
 
   async function legView(id) {
+    const route0 = ROUTE;
+    const quick = !morphing && (LEGS[id] || ((STATE && STATE.legs) || []).find((l) => l.id === id));
+    if (quick) drawLeg(id, quick);
     let leg;
-    try { leg = await api(`api/leg/${id}${LOG_ALL.has(id) ? "?log=1" : ""}`); } catch { $app.innerHTML = `<a class="back" href="#/">‹ Flights</a><div class="card empty"><b>Flight not found</b>It may have dropped off your schedule.</div>`; return; }
+    try { leg = await api(`api/leg/${id}${LOG_ALL.has(id) ? "?log=1" : ""}`); }
+    catch (e) {
+      if (!quick) $app.innerHTML = `<div class="sheet-gap"></div><section class="sheet">${sheetHead("Flight not found", "", "#/")}<div class="card empty"><b>Couldn't load this flight</b>${esc(e.message)}. It may have dropped off your schedule.</div></section>`;
+      return;
+    }
+    if (ROUTE !== route0) return;
     LEGS[id] = leg;
+    const was = morphing;
+    morphing = morphing || !!quick;
+    try { drawLeg(id, leg); } finally { morphing = was; }
+  }
+  function drawLeg(id, leg) {
     const f = leg.flight || { times: { out: {}, off: {}, on: {}, in: {} } };
     const sw = f.swim || {};
     const tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
@@ -2573,6 +2622,7 @@
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
+        <label class="gl-row"><span>Data saver<small class="gl-sub">Lighter map imagery, no radar, live position every 15 s</small></span><span class="switch"><input type="checkbox" id="p-low" ${lowData() ? "checked" : ""}><span></span></span></label>
       </div>
       <h2 class="section"><span>Add-on</span><span id="s-msg" class="small"></span></h2>
       ${[...new Set(st.settings.map((x) => x.group || "Tracking"))].map((g, i) =>
@@ -2631,6 +2681,7 @@
       $refresh.click();
     };
     document.getElementById("p-radar").onchange = (e) => setPref("ft-radar", e.target.checked ? "1" : "0");
+    document.getElementById("p-low").onchange = (e) => { setPref("ft-lowdata", e.target.checked ? "1" : "0"); restyleAll(); };
     $app.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => {
       setPref("ft-mapstyle", b.dataset.ms);
       $app.querySelectorAll("[data-ms]").forEach((x) => x.classList.toggle("on", x === b));
@@ -2770,8 +2821,9 @@
     clearTimeout(settleT);
     settleT = setTimeout(() => {
       if (touching || !document.body.classList.contains("sheetmode")) return;
-      const m = midY(), y = window.scrollY;
+      const m = midY(), y = window.scrollY, g = document.querySelector(".sheet-gap"), top = g ? g.offsetHeight : 0;
       if (m > 0 && y > 2 && y < m - 2) window.scrollTo({ top: y < m * 0.5 ? 0 : m, behavior: "smooth" });
+      else if (top > m && y > m + 2 && y < top - 2) window.scrollTo({ top: y < (m + top) / 2 ? m : top, behavior: "smooth" });
     }, 140);
   };
   window.addEventListener("scroll", settle, { passive: true });

@@ -3320,7 +3320,7 @@ STATIC = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=
 # phone keeps those for a year and only re-checks index.html (a 304 when nothing changed).
 _FILES = {}
 _COMPRESSIBLE = ("text/", "application/json", "application/manifest+json", "image/svg+xml")
-_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
+_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|maplibre-gl\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
 
 
 def static_file(full):
