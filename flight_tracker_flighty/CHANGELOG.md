@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.17.1
+- No gray flash when the Home Screen app opens: iOS shows a launch image while the app starts. It showed gray because there wasn't one; now it's black, for every current iPhone size. The app's manifest colors are black too. iOS reads these when the app is added to the Home Screen, so remove the Flighty icon and add it again from Safari once.
+
 ## 4.17.0
 - Map shape: Settings → Map shape → Globe or Flat. Flat is lighter to draw, so dragging and zooming are smoother. Framing, names, borders, radar and every page work on both; the globe-only adjustments switch off on the flat map. Globe stays the default.
 
