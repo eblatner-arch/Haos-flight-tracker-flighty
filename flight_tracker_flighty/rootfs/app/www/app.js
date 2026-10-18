@@ -1603,6 +1603,90 @@
   // CARTO watermarks tiles fetched without its free key. With your key (add-on Configuration) tiles
   // come from its keyed address; a tile address of your own wins ({style} becomes dark_all, {key}
   // your key, {s} the a-d servers).
+  // ---------- tiles you've seen stay on the phone ----------
+  // Esri and CARTO tiles go through tc://, which answers from the browser's Cache Storage first and
+  // only downloads what isn't there. Kept until there are more than TC_MAX (oldest go first).
+  // Needs a secure page (https: the Home Assistant app, Nabu Casa) for Cache Storage; on plain
+  // http the tiles load directly, as before. Google tiles are never kept (Google's terms).
+  const TC_NAME = "ft-tiles-v1", TC_MAX = 6000;
+  let TC_ON = false;
+  function tcInit() {
+    if (TC_ON || !window.maplibregl || !maplibregl.addProtocol || !window.caches || !window.isSecureContext) return;
+    TC_ON = true;
+    const box = caches.open(TC_NAME).catch(() => null);
+    maplibregl.addProtocol("tc", async (params, ac) => {
+      const url = "https://" + params.url.slice(5);
+      const c = await box;
+      if (c) {
+        try { const hit = await c.match(url); if (hit) return { data: await hit.arrayBuffer() }; } catch {}
+      }
+      const r = await fetch(url, { signal: ac.signal });
+      if (!r.ok) throw new Error(`tile ${r.status}`);
+      const buf = await r.arrayBuffer();
+      if (c && buf.byteLength > 0) c.put(url, new Response(buf.slice(0), { headers: { "content-type": r.headers.get("content-type") || "image/jpeg" } })).catch(() => {});
+      return { data: buf };
+    });
+    // once a session, after things settle: trim to the newest TC_MAX
+    setTimeout(async () => {
+      try { const c = await box; if (!c) return; const keys = await c.keys(); for (const k of keys.slice(0, Math.max(0, keys.length - TC_MAX))) await c.delete(k); } catch {}
+    }, 30000);
+  }
+  const tc = (u) => TC_ON ? u.replace(/^https:\/\//, "tc://") : u;
+  async function tileCacheInfo() {
+    try { const c = await caches.open(TC_NAME); const n = (await c.keys()).length; const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null; return { n, bytes: est ? est.usage : null }; } catch { return null; }
+  }
+  async function tileCacheClear() { try { await caches.delete(TC_NAME); } catch {} }
+
+  // ---------- Google satellite (with your Maps API key) ----------
+  // Map Tiles API: one session (good for about two weeks), then 2D tiles. 512 px "high DPI" tiles
+  // laid out at 256: sharp on a Retina screen without drawing more tiles. Roads and place names
+  // come baked in (satellite + roadmap layer). Each tile is a billable request after Google's free
+  // monthly allowance.
+  const gKey = () => ((STATE && STATE.map_tiles) || {}).google || "";
+  const GSESS = { s: null, exp: 0, key: "", pending: null, err: "" };
+  try { Object.assign(GSESS, JSON.parse(localStorage.getItem("ft-gsess") || "{}"), { pending: null, err: "" }); } catch {}
+  function gReady() { return GSESS.s && GSESS.key === gKey() && GSESS.exp > Date.now() / 1000 + 3600; }
+  function gSession() {
+    const key = gKey();
+    if (!key || gReady() || GSESS.pending) return GSESS.pending;
+    GSESS.pending = fetch(`https://tile.googleapis.com/v1/createSession?key=${encodeURIComponent(key)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mapType: "satellite", language: navigator.language || "en-US", region: "US", scale: "scaleFactor2x", highDpi: true, layerTypes: ["layerRoadmap"] }),
+    }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.session) throw new Error((j.error && j.error.message) || `Google said ${r.status}`);
+      Object.assign(GSESS, { s: j.session, exp: +j.expiry || Date.now() / 1000 + 86400, key, err: "" });
+      try { localStorage.setItem("ft-gsess", JSON.stringify({ s: GSESS.s, exp: GSESS.exp, key })); } catch {}
+      if (mapStyle() === "google") restyleAll();
+    }).catch((e) => { GSESS.err = e.message || String(e); console.warn("Google tiles:", GSESS.err); })
+      .finally(() => { GSESS.pending = null; });
+    return GSESS.pending;
+  }
+  const gTiles = () => `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${encodeURIComponent(GSESS.s)}&key=${encodeURIComponent(gKey())}`;
+  // Google's terms: its logo and the imagery copyright for what's on screen.
+  let gAttrT = 0;
+  function gAttr() {
+    let el = document.getElementById("g-attr");
+    const on = mapStyle() === "google" && gReady() && GL.map;
+    if (!on) { if (el) el.hidden = true; return; }
+    if (!el) {
+      el = document.createElement("div"); el.id = "g-attr";
+      el.innerHTML = '<img alt="Google" src="https://developers.google.com/static/maps/documentation/images/google_on_non_white.png" onerror="this.replaceWith(Object.assign(document.createElement(\'b\'),{textContent:\'Google\'}))"><span></span>';
+      document.body.appendChild(el);
+    }
+    el.hidden = false;
+    clearTimeout(gAttrT);
+    gAttrT = setTimeout(async () => {
+      try {
+        const b = GL.map.getBounds(), z = Math.max(0, Math.round(GL.map.getZoom()));
+        const q = new URLSearchParams({ session: GSESS.s, key: gKey(), zoom: z, north: Math.min(85, b.getNorth()), south: Math.max(-85, b.getSouth()), east: b.getEast(), west: b.getWest() });
+        const j = await (await fetch(`https://tile.googleapis.com/tile/v1/viewport?${q}`)).json();
+        el.querySelector("span").textContent = j.copyright || "";
+      } catch {}
+    }, 800);
+  }
+  const STYLES = () => ["satellite", ...(gKey() ? ["google"] : []), "dark"];
+
   function darkTiles() {
     const mt = (STATE && STATE.map_tiles) || {};
     if (mt.url) {
@@ -1613,24 +1697,35 @@
     return CARTO_DARK;
   }
   function glStyle() {
-    const sat = mapStyle() === "satellite", low = lowData();
-    // data saver: each imagery tile covers 4x the area (a quarter of the downloads, a little softer).
-    // (128 px tiles were Retina-sharp but 4x the tiles: dragging stuttered and showed black holes.)
-    const ts = low ? 512 : 256;
-    // A coarse copy of the same imagery underneath (2 zoom levels lower, at most z8: a handful of
-    // tiles, cached): while you drag, anything not loaded yet shows a softer earth instead of black.
+    let st = mapStyle();
+    if (st === "google" && !gReady()) { gSession(); st = "satellite"; }   // Esri until Google's session is ready
+    if (st === "google" && !gKey()) st = "satellite";
+    const goo = st === "google", sat = st !== "dark", low = lowData();
+    // Image tiles are 256 px. The map picks its tile zoom by rounding, so a tile can be drawn up to
+    // 1.4x its size, and 2x more on a Retina screen: soft, worst when the globe sits halfway between
+    // two tile zooms (dragging north or south crosses one). Laid out at 181 px (256/sqrt 2) the
+    // worst case is 2x and the usual ~1.4x, for twice the tiles; 128 px was sharp but 4x the tiles
+    // (stutter, black holes). Data saver: 512, a quarter of the downloads. Google's tiles are 512 px
+    // pictures already: 256 is sharp.
+    const ts = goo ? 256 : low ? 512 : 181;
+    // A coarse copy of the imagery underneath (2 zoom levels lower, at most z8: a handful of tiles,
+    // cached): while you drag, anything not loaded yet shows a softer earth instead of black.
     const under = (tiles) => ({ type: "raster", tiles, tileSize: 1024, maxzoom: 8 });
+    const img = tc(ESRI_IMG), dark = darkTiles().map(tc);
+    setTimeout(gAttr, 0);
     return {
       version: 8,
       projection: { type: "globe" },
-      sources: sat
-        ? { under: under([ESRI_IMG]), base: { type: "raster", tiles: [ESRI_IMG], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
-            lbl: { type: "raster", tiles: [ESRI_LBL], tileSize: 256, maxzoom: 19 } }
-        : { under: under(darkTiles()), base: { type: "raster", tiles: darkTiles(), tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
+      sources: goo
+        ? { under: under([img]), base: { type: "raster", tiles: [gTiles()], tileSize: ts, maxzoom: 22 } }
+        : sat
+        ? { under: under([img]), base: { type: "raster", tiles: [img], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
+            lbl: { type: "raster", tiles: [tc(ESRI_LBL)], tileSize: 256, maxzoom: 19 } }
+        : { under: under(dark), base: { type: "raster", tiles: dark, tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
       layers: [
         { id: "under", type: "raster", source: "under", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 0 } : { "raster-fade-duration": 0 } },
         { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
-        ...(sat ? [{ id: "lbl", type: "raster", source: "lbl", minzoom: low ? 3 : 0, paint: { "raster-fade-duration": 120 } }] : []),
+        ...(sat && !goo ? [{ id: "lbl", type: "raster", source: "lbl", minzoom: low ? 3 : 0, paint: { "raster-fade-duration": 120 } }] : []),
       ],
     };
   }
@@ -1892,7 +1987,7 @@
           <button type="button" class="map-center xpdr only-surf" data-a="xpdr" aria-label="Transponder filter">XPDR</button>
           <button type="button" class="map-center xpdr only-surf" data-a="ids" aria-label="Show callsigns">ID</button>`;
         const on = (a, f) => { d.querySelector(`[data-a="${a}"]`).onclick = (e) => { e.preventDefault(); f(); }; };
-        on("style", () => { setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite"); restyleAll(); });
+        on("style", () => { const L = STYLES(); setPref("ft-mapstyle", L[(L.indexOf(mapStyle()) + 1) % L.length]); restyleAll(); });
         on("radar", () => {
           const v = !radarOn();
           setPref("ft-radar", v ? "1" : "0");
@@ -1915,6 +2010,7 @@
   function glInit() {
     if (GL.map) return true;
     if (!window.maplibregl || !MAP_EL) return false;
+    tcInit();
     const map = GL.map = new maplibregl.Map({ container: MAP_EL, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
       dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 8,
       pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
@@ -1936,7 +2032,7 @@
     // labels by zoom (airport codes, route fixes, taxiways, gates), in the old map's zoom numbers
     const zc = () => { const z = map.getZoom() + 1; for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
     map.on("zoom", zc); zc();
-    map.on("moveend", () => { layoutCheck(); surfaceNow(); });
+    map.on("moveend", () => { layoutCheck(); surfaceNow(); gAttr(); });
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
     setInterval(() => { const src = GL.ready && map.getSource("night"); if (src) src.updateImage({ url: nightImage(), coordinates: MERC }); }, 600000);
@@ -2877,7 +2973,9 @@
         <a class="gl-row" href="#/add"><span>Add a flight</span>${IC.chev}</a>
         <button type="button" class="gl-row" id="p-refresh"><span>Check all flights now</span><span class="small muted" id="p-refresh-msg"></span></button>
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
-        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Esri"], ...(gKey() ? [["google", "Google"]] : []), ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
+        <div class="gl-row"><span>Saved map tiles<small class="gl-sub" id="tc-info">${TC_ON ? "…" : "Needs the https address (the Home Assistant app)"}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="tc-clear">Clear</button>' : ""}</div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Radar source<small class="gl-sub">NOAA: filtered, US and nearby · RainViewer: worldwide, unfiltered</small></span><div class="seg mini">${[["noaa", "NOAA"], ["rv", "RainViewer"]].map(([k, l]) => `<button type="button" data-rs="${k}" class="${radarSrc() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <label class="gl-row"><span>Data saver<small class="gl-sub">Lighter map imagery, no radar, live position every 15 s</small></span><span class="switch"><input type="checkbox" id="p-low" ${lowData() ? "checked" : ""}><span></span></span></label>
@@ -2948,7 +3046,13 @@
     $app.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => {
       setPref("ft-mapstyle", b.dataset.ms);
       $app.querySelectorAll("[data-ms]").forEach((x) => x.classList.toggle("on", x === b));
+      restyleAll();
     });
+    const tci = document.getElementById("tc-info");
+    const tcShow = () => tileCacheInfo().then((i) => { if (tci && i) tci.textContent = `${i.n.toLocaleString()} tiles kept on this phone${i.bytes ? ` · ${i.bytes < 1048576 ? `${Math.max(1, Math.round(i.bytes / 1024))} KB` : `${Math.round(i.bytes / 1048576)} MB`} stored by the app` : ""}`; });
+    if (TC_ON) tcShow();
+    const tcb = document.getElementById("tc-clear");
+    if (tcb) tcb.onclick = async () => { tcb.disabled = true; await tileCacheClear(); tcb.disabled = false; tcShow(); };
     document.getElementById("t-notify").onclick = async (e) => {
       const msg = document.getElementById("t-msg");
       e.target.disabled = true; msg.className = "small muted"; msg.textContent = "Sending…";

@@ -104,3 +104,6 @@ configuration:
   map_tile_url:
     name: Map tile address (optional)
     description: Advanced. A tile address from your provider, e.g. https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key={key} ({style} becomes dark_all or light_all, {key} the key above).
+  google_maps_api_key:
+    name: Google Maps API key (optional)
+    description: "Adds Google satellite imagery (sharper, with roads and place names) as a map style. In Google Cloud, enable the Map Tiles API, create a key and restrict it to that API. Google's free allowance is 100,000 tiles a month, then $0.60 per 1,000."

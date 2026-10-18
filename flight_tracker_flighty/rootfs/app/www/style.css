@@ -739,14 +739,14 @@ body.sheetmode main > .telem { pointer-events: none; }
 .mapbg .leaflet-top { top: var(--sat); }
 body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 64px); }
 .mapbg .leaflet-right .leaflet-control { margin-right: 12px; }
-.map-stack { display: flex; flex-direction: column; border-radius: 27px; overflow: hidden; background: rgba(40,40,44,.72);
-  backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4); box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+.map-stack { display: flex; flex-direction: column; border-radius: 27px; overflow: hidden; background: rgba(36,36,40,.93);
+  box-shadow: 0 3px 10px rgba(0,0,0,.35); }
 .map-stack button { width: 54px; height: 54px; border: 0; background: transparent; color: #fff; display: grid; place-items: center; cursor: pointer; padding: 0; }
 .map-stack button + button { border-top: 1px solid rgba(255,255,255,.12); }
 .map-stack button svg { width: 25px; height: 25px; }
 .map-stack button.on { color: #5aa9ff; }
-.map-center { width: 54px; height: 54px; border-radius: 50%; border: 0; margin-top: 10px !important; background: rgba(40,40,44,.72);
-  backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4); box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+.map-center { width: 54px; height: 54px; border-radius: 50%; border: 0; margin-top: 10px !important; background: rgba(36,36,40,.93);
+  box-shadow: 0 3px 10px rgba(0,0,0,.35); }
 .map-center svg { width: 23px; height: 23px; fill: #fff; }
 .map-center.xpdr { font-size: 10px; color: #fff; }
 .pbadge-wrap { background: none; border: 0; }
@@ -1039,3 +1039,10 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 /* map: the airport-status button turns amber/red when a program catches one of your flights */
 .map-stack button[data-lvl="amber"] { color: var(--amber); }
 .map-stack button[data-lvl="red"] { color: var(--red); }
+
+/* Google's logo + imagery copyright (required with Google tiles) */
+#g-attr { position: fixed; z-index: 4; left: 10px; top: calc(var(--sat) + 40px); display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.8); pointer-events: none; max-width: 70vw; }
+#g-attr img { height: 16px; }
+#g-attr b { font-size: 13px; color: #fff; }
+body:not(.sheetmode) #g-attr { display: none; }

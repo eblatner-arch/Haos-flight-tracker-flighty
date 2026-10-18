@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.12.0
+- Map tiles you've seen stay on the phone: Esri satellite, labels and the dark map are kept, so places you've already looked at open instantly, even with no signal. In testing, a reload made 0 tile downloads. Up to 6,000 tiles are kept, oldest dropped first. Settings shows the count and has a Clear button. This needs the https address (the Home Assistant app); on a plain http address tiles load as before.
+- Sharper satellite map, including when you drag north or south. The map rounds to the nearest tile zoom, and the globe zooms out slightly as you drag toward the poles, so tiles could be blown up to almost 3x on a Retina screen. Now the worst case is 2x, for about twice the tiles (the 4x version in 4.11.2 stuttered).
+- Google satellite (optional): add a Google Maps API key in the add-on Configuration (Map Tiles API enabled) and the map-style button cycles Esri → Google → Dark. Google's tiles are Retina-sharp with roads and place names built in, and show Google's logo and imagery credit as Google requires. They aren't kept on the phone (Google's terms). Google's free allowance is 100,000 tiles a month, then $0.60 per 1,000. If the key doesn't work, the map stays on Esri and Settings shows Google's error.
+
 ## 4.11.3
 - Smooth dragging again: back to normal-size satellite tiles. The sharper tiles in 4.11.2 meant 4x as many tiles, which made the zoomed-out globe stutter and showed black squares while they loaded.
 - No more black squares while dragging: a coarse copy of the map (a handful of cached tiles) sits underneath, so a spot that hasn't loaded yet shows a softer earth until the sharp tiles arrive.
