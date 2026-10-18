@@ -1529,7 +1529,7 @@
       const u = mt.url.replace("{style}", "dark_all").replace("{key}", encodeURIComponent(mt.key || "")).replace("{r}", "@2x");
       return u.includes("{s}") ? ["a", "b", "c", "d"].map((x) => u.replace("{s}", x)) : [u];
     }
-    if (mt.key) return [`https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png?key=${encodeURIComponent(mt.key)}`];
+    if (mt.key) return [`https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${encodeURIComponent(mt.key)}`];
     return CARTO_DARK;
   }
   function glStyle() {
@@ -1736,15 +1736,16 @@
       layout: { ...SYM(true), "icon-rotate": ["get", "rot"], "icon-rotation-alignment": "map" } });
   }
   // Fit the page's routes into the part of the screen the sheet doesn't cover (at its middle stop).
-  function glFit(animate) {
+  function glFit(animate, now) {
     const map = GL.map;
     if (!map) return;
     const b = GL.bounds;
-    const padding = mapPad(GL.opts.kind === "leg" || GL.opts.kind === "nas");
+    const padding = mapPad(GL.opts.kind === "leg" || GL.opts.kind === "nas", now);
+    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     const dur = animate ? 900 : 0;
     if (GL.globeView || !b.length) {
       const c = GL.globeView || [35, -85];
-      map.easeTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding, duration: dur });
+      map.easeTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, offset: padOffset(padding), duration: dur });
       return;
     }
     let w = 180, e = -180, s = 90, n = -90;
@@ -1754,11 +1755,16 @@
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
   // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.
-  function mapPad(labels) {
+  // now: use where the sheet is right now (pulled down to peek: the bigger map), else its middle stop
+  function mapPad(labels, now) {
     const H = MAP_EL.clientHeight || window.innerHeight;
+    let top = midTop();
+    if (now) { const g = document.querySelector(".sheet-gap"); const t = g ? g.getBoundingClientRect().bottom : top; if (t > top) top = t; }
     return { top: document.getElementById("telem") ? 96 : 64, left: 36, right: labels ? 140 : 80,
-      bottom: Math.max(30, Math.min(H - 170, H - midTop() + 50)) };
+      bottom: Math.max(30, Math.min(H - 170, H - top + 50)) };
   }
+  // shift a centered point into the middle of the part of the map you can see
+  const padOffset = (p) => [(p.left - p.right) / 2, (p.top - p.bottom) / 2];
   function restyleAll() {
     if (!GL.map) return;
     GL.ready = false;
@@ -1785,8 +1791,8 @@
           glRadar(v);
         });
         on("apts", () => go("#/airports"));
-        on("fit", () => glFit(true));
-        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, padding: mapPad(false) }); });
+        on("fit", () => glFit(true, true));
+        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) { GL.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, offset: padOffset(mapPad(false)) }); } });
         on("xpdr", () => { setPref("ft-surf-all", pref("ft-surf-all", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         on("ids", () => { setPref("ft-surf-ids", pref("ft-surf-ids", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         GL.ctl = d;
@@ -1846,8 +1852,7 @@
   // My Flights: every route in the next two weeks, airports, the airplanes in the air.
   function paintHome(data, fit) {
     GL.leg = null;
-    const routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [], soon = [];
-    const nowS = Date.now() / 1000;
+    const routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [];
     for (const l of data.legs) {
       const A = ll(l.dep_ap), B = ll(l.arr_ap);
       if (!A || !B) continue;
@@ -1855,7 +1860,6 @@
       if (!seen.has(k)) { seen.add(k); routes.push(lineF(gcPoints(A, B, 40))); }
       aps.set(l.dep, A); aps.set(l.arr, B);
       bounds.push(A, B);
-      if (((l.flight && best(l.flight.times, "out")) || l.sched_out) - nowS < 7 * 86400) soon.push(A, B);
     }
     const f = data.focus;
     for (const l of data.legs) {
@@ -1876,7 +1880,7 @@
     glSet({ routes, track, aps: [...aps.values()].map((p) => ptF(p)) });
     const mk = glMarkers(marks);
     GL.ownMarker = own >= 0 ? mkHandle(mk[own]) : null; GL.inbMarker = null;
-    GL.bounds = soon.length ? soon : bounds; GL.maxZoom = 6.5;
+    GL.bounds = bounds; GL.maxZoom = 6.5;
     fitNow(fit);
   }
   // Passport: everything you've flown; airport codes once you zoom in.
@@ -2178,7 +2182,8 @@
     const center = all.length && d.center ? d.center : null;
     if (!SURF.zoomed && center && ["taxi_out", "landed"].includes(d.phase)) {
       const me = all.find((t) => t.mine);
-      GL.map.easeTo({ center: me ? [me.lon, me.lat] : [center[1], center[0]], zoom: 14, duration: 900, padding: mapPad(false) });
+      GL.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+      GL.map.easeTo({ center: me ? [me.lon, me.lat] : [center[1], center[0]], zoom: 14, duration: 900, offset: padOffset(mapPad(false)) });
       SURF.zoomed = true;
     }
     // zoomed out past the airport, surface traffic is clutter over the route

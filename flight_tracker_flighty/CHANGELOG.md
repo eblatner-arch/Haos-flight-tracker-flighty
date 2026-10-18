@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.5.1
+- The center button frames every route again. After the airport buttons or Passport, a hidden camera offset was left behind, so later fits came out off-center and zoomed in.
+- My Flights frames all your upcoming routes (4.4.0 framed only the coming week).
+- With the list pulled down, the center button uses the whole bigger map.
+- The Dark map with a CARTO key uses exactly the tile address the old map used.
+
 ## 4.5.0
 - Fixed: the Dark map ignored your CARTO key (and tile address) from the add-on configuration since 4.2, so CARTO stamped "API KEY REQUIRED" over it. It uses them again.
 - Smoother zooming and panning: airport labels, route fixes, airport codes, the airport diagram's runway, taxiway and gate labels, surface traffic and the airplanes are now drawn by the map on the GPU instead of as page elements moved on every frame (hundreds of them zoomed in at a big airport). Taxiway and gate labels that would overlap are thinned out automatically.
