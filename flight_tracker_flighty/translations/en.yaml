@@ -110,3 +110,12 @@ configuration:
   mapbox_token:
     name: Mapbox access token (optional)
     description: "Adds Mapbox satellite (sharp, with roads and place names) as a map style. Use the default public token from account.mapbox.com, ideally restricted to your addresses. Mapbox's free allowance is 200,000 tiles a month."
+  ssl:
+    name: HTTPS on the direct port
+    description: "Serve https on the add-on's own web port with a certificate from /ssl (e.g. the Duck DNS add-on's Let's Encrypt certificate). Open it with the certificate's name, e.g. https://yourname.duckdns.org:<port>/. Plain http keeps working, and the Home Assistant app is unaffected."
+  certfile:
+    name: Certificate file
+    description: The certificate in /ssl (the full chain). Duck DNS and Let's Encrypt add-ons name it fullchain.pem.
+  keyfile:
+    name: Private key file
+    description: The certificate's private key in /ssl. Duck DNS and Let's Encrypt add-ons name it privkey.pem.

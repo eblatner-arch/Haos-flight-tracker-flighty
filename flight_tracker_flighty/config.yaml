@@ -1,5 +1,5 @@
 name: Flight Tracker Flighty
-version: "4.13.0"
+version: "4.14.0"
 slug: flight_tracker_flighty
 description: Flighty-style tracking for your crew schedule — gates, delays, inbound aircraft, NAS status and a live map, with push alerts
 url: https://github.com/eblatner-arch/haos-flight-tracker-flighty
@@ -18,6 +18,7 @@ map:
   - homeassistant_config:ro
   - type: share
     read_only: false
+  - ssl:ro
 ports:
   6081/tcp: 6081
   8099/tcp: null
@@ -36,6 +37,9 @@ options:
   google_client_secret: ""
   drive_folder: Flight Tracker Flighty (Home Assistant)
   enable_viewer: true
+  ssl: false
+  certfile: fullchain.pem
+  keyfile: privkey.pem
   viewer_password: ""
   swim_username: ""
   swim_password: ""
@@ -82,5 +86,8 @@ schema:
   map_tile_url: str?
   google_maps_api_key: password?
   mapbox_token: password?
+  ssl: bool
+  certfile: str
+  keyfile: str
   flight_regex: str?
   home_timezone: str?

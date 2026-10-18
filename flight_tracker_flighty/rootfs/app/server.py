@@ -8,6 +8,8 @@ import logging
 import os
 import queue
 import re
+import socket
+import ssl
 import threading
 import time
 import urllib.parse
@@ -3830,9 +3832,70 @@ def main():
     swim.start(CFG)
     log.info("Flight Tracker Flighty %s on port %d (watch window %sh, home time zone %s)", VERSION, PORT,
              CFG["watch_hours"], TZNAME)
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    srv = DualServer(("0.0.0.0", PORT), Handler)
     srv.daemon_threads = True
+    if srv.tls():
+        log.info("HTTPS on port %d with /ssl/%s (plain http still answers, for Home Assistant's ingress)", PORT, CFG.get("certfile") or "fullchain.pem")
     srv.serve_forever()
+
+
+class DualServer(ThreadingHTTPServer):
+    """One port, both protocols: Home Assistant's ingress (the HA app) talks plain http to this port,
+    and so does http://<box>:<port>/. With ssl on, a browser opening https://<name>:<port>/ starts
+    with a TLS handshake (first byte 0x16): that connection is wrapped with the certificate from /ssl
+    (e.g. the Duck DNS / Let's Encrypt add-on's fullchain.pem + privkey.pem). The certificate is
+    re-read when its file changes (renewals), so no restart is needed."""
+    _ctx = None
+    _ctx_mtime = 0
+    _ctx_err = ""
+
+    def tls(self):
+        if not CFG.get("ssl"):
+            return None
+        cert = os.path.join("/ssl", (CFG.get("certfile") or "fullchain.pem").lstrip("/"))
+        key = os.path.join("/ssl", (CFG.get("keyfile") or "privkey.pem").lstrip("/"))
+        try:
+            m = max(os.path.getmtime(cert), os.path.getmtime(key))
+        except OSError as e:
+            if self._ctx_err != str(e):
+                self._ctx_err = str(e)
+                log.warning("ssl is on but the certificate can't be read (%s): serving http only", e)
+            return self._ctx
+        if self._ctx is None or m != self._ctx_mtime:
+            try:
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+                ctx.load_cert_chain(cert, key)
+                if self._ctx is not None:
+                    log.info("HTTPS certificate reloaded (%s)", cert)
+                self._ctx, self._ctx_mtime, self._ctx_err = ctx, m, ""
+            except Exception as e:
+                if self._ctx_err != str(e):
+                    self._ctx_err = str(e)
+                    log.warning("Couldn't load the HTTPS certificate %s / %s: %s", cert, key, e)
+        return self._ctx
+
+    def finish_request(self, request, client_address):
+        ctx = self.tls()
+        if ctx is not None:
+            try:
+                request.settimeout(15)
+                first = request.recv(1, socket.MSG_PEEK)
+                if not first:
+                    return
+                if first == b"\x16":   # TLS ClientHello
+                    request = ctx.wrap_socket(request, server_side=True)
+                request.settimeout(None)
+            except (OSError, ssl.SSLError) as e:
+                log.debug("TLS handshake from %s failed: %s", client_address[0], e)
+                return
+        super().finish_request(request, client_address)
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

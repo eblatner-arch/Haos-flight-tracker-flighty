@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.14.0
+- HTTPS on the direct port: turn on "HTTPS on the direct port" in the add-on Configuration and the add-on's own web port serves https with your certificate from /ssl (fullchain.pem + privkey.pem by default, the Duck DNS add-on's names). Open it by the certificate's name, e.g. https://yourname.duckdns.org:<port>/. On https the map-tile cache works there too.
+- The same port still answers plain http, so the Home Assistant app (which reaches the add-on that way) is unaffected.
+- Renewed certificates are picked up automatically, no restart.
+
 ## 4.13.0
 - Mapbox satellite (optional): add a Mapbox access token in the add-on Configuration and Mapbox joins the map styles (Esri → Mapbox → Google → Dark, whichever you've set up). Its satellite-streets tiles are Retina-sharp with roads and place names built in, and Mapbox's credits stay on screen while they're showing. Free up to 200,000 tiles a month. Like Google's, they aren't kept on the phone.
 - Fixed: Google's logo and credit could stay on screen after switching away from Google.
