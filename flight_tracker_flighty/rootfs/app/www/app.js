@@ -2341,8 +2341,61 @@
   }
   // A flight: the route ahead (ATC's when the FAA has it, else the filed one), the flown track, the
   // airplane, its inbound, and the airports. Zoomed in on an airport: its diagram and surface traffic.
+  // ---------- warm-up: the first zoom into an airport is as smooth as the second ----------
+  // The first time you zoom into an airport this session, three things happened mid-gesture: its
+  // diagram was downloaded and built, every runway/taxiway/gate label was drawn as a picture, and
+  // the close-up imagery was fetched. Now, a moment after a flight's map opens and while nothing is
+  // moving, all three are done ahead of time in small slices: the diagram built, its labels drawn
+  // into the map, and the imagery around each airport (zoom 12-15) put in the phone's tile store.
+  const WARM = new Set();
+  const idle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 2000 }) : setTimeout(() => fn({ timeRemaining: () => 8 }), 200));
+  function warmAirports(leg) {
+    const aps = [leg.dep_ap, leg.arr_ap, ...[leg.inbound, ...(leg.chain || [])].filter(Boolean).flatMap((r) => [r.origin, r.destination])]
+      .filter((a) => a && (a.iata || a.icao) && ll(a));
+    const seen = new Set();
+    for (const a of aps) {
+      const code = a.iata || a.icao;
+      if (seen.has(code)) continue;
+      seen.add(code);
+      if (WARM.has(code)) continue;
+      WARM.add(code);
+      setTimeout(() => idle(() => warmOne(code, ll(a))), 1500 + seen.size * 1200);
+    }
+  }
+  async function warmOne(code, pos) {
+    if (!LAYOUTS[code]) LAYOUTS[code] = api(`api/airport/${encodeURIComponent(code)}/layout`).then(buildLayout).catch(() => { delete LAYOUTS[code]; return null; });
+    const L_ = await LAYOUTS[code];
+    // label pictures, a few per idle slice
+    const ids = L_ ? [...new Set(L_.labels.features.map((f) => f.properties.img))] : [];
+    const drawSome = (dl) => {
+      const map = GL.map;
+      if (!map || !GL.ready) return;
+      while (ids.length && (dl.timeRemaining() > 2 || ids.length % 8)) {
+        const id = ids.pop();
+        if (!map.hasImage(id)) { try { map.addImage(id, drawImg(JSON.parse(id.slice(2))), { pixelRatio: IMG_R }); } catch {} }
+      }
+      if (ids.length) idle(drawSome);
+    };
+    if (ids.length) idle(drawSome);
+    // close-up imagery around the airport into the tile store (Esri, kept on the phone)
+    if (!TC_ON || lowData() || mapStyle() !== "satellite") return;
+    try {
+      const c = await caches.open(TC_NAME), [la, lo] = pos;
+      for (let z = 12; z <= 15; z++) {
+        const n = 2 ** z, x0 = Math.floor((lo + 180) / 360 * n), R = la * Math.PI / 180;
+        const y0 = Math.floor((1 - Math.log(Math.tan(R) + 1 / Math.cos(R)) / Math.PI) / 2 * n), r = z >= 14 ? 2 : 1;
+        for (let x = x0 - r; x <= x0 + r; x++) for (let y = y0 - r; y <= y0 + r; y++) {
+          const u = ESRI_IMG.replace("{z}", z).replace("{x}", x).replace("{y}", y);
+          if (await c.match(u)) continue;
+          try { const res = await fetch(u); if (res.ok) await c.put(u, res); } catch {}
+          await new Promise((ok) => setTimeout(ok, 30));   // gently, behind everything else
+        }
+      }
+    } catch {}
+  }
   function paintLeg(leg, fit) {
     GL.leg = leg;
+    warmAirports(leg);
     const route = css("--route"), violet = css("--violet"), muted = "#9aa3b3";
     const plan = [], track = [], aps = [], fixes = [], marks = [], bounds = [];
     const A = ll(leg.dep_ap), B = ll(leg.arr_ap);

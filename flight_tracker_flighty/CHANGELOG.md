@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.18.3
+- Smoother first zoom into an airport: a moment after a flight's map opens, while nothing is moving, the app prepares each of its airports (and its inbound legs' airports) in small slices. It builds the airport diagram, draws all the runway/taxiway/gate labels into the map, and saves the close-up satellite imagery (zoom 12–15) on the phone. Before, all of that happened in the middle of your first pinch, which caused the stutter.
+
 ## 4.18.2
 - Fixed: no surface traffic on inbound legs' pages. The add-on only collected FAA surface radar for your own flights' airports. It now also collects it for your inbound legs' airports (until each lands), and follows their callsigns in the SWIM feeds.
 
