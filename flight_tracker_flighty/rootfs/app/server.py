@@ -3330,6 +3330,32 @@ def artcc_boundaries():
 LOG_SHOWN = 40   # lookup-log entries sent with a flight page; the rest on request
 
 
+def rotation_edct(h, now):
+    """An inbound leg's EDCT from the FAA's TFMS feed (it carries every controlled flight, not only
+    yours): matched by callsign, departure airport and that day's departure time. None once it's
+    taken off."""
+    t = h.get("times") or {}
+    if (t.get("off") or {}).get("actual") or not h.get("ident"):
+        return None
+    org = _iata((h.get("origin") or {}).get("iata") or (h.get("origin") or {}).get("icao"))
+    so = fa.best_time(t, "out") or (t.get("out") or {}).get("scheduled") or 0
+    best = None
+    for ev in swim.events(h["ident"]):
+        if ev.get("type") != "EDCT" or not ev.get("edct"):
+            continue
+        e = _ts(ev["edct"])
+        if not e or (org and ev.get("dep") and _iata(ev["dep"]) != org):
+            continue
+        if so and not (so - 2 * HOUR <= e <= so + 10 * HOUR):
+            continue   # another day's flight with the same number
+        if not best or (ev.get("got") or 0) >= best["got"]:
+            best = {"at": e, "cta": _ts(ev.get("cta")) if ev.get("cta") else None,
+                    "for": _iata(ev.get("element")) if ev.get("element") else None, "got": ev.get("got") or 0}
+    if best:
+        best.pop("got", None)
+    return best
+
+
 def leg_summary(L, now, nas, full=False, rotation_tracks=False, log_all=False):
     f = L.get("flight")
     out = {k: L.get(k) for k in ("id", "ident", "display", "airline", "flight_no", "dep", "arr", "dh", "extra", "kind",
@@ -3352,6 +3378,10 @@ def leg_summary(L, now, nas, full=False, rotation_tracks=False, log_all=False):
             r["status"] = alerting.PHASE_LABEL[r["phase"]]
             r["dep_delay"] = fa.delay_minutes(h)
             r["arr_delay"] = fa.arrival_delay_minutes(h)
+            try:
+                r["edct"] = rotation_edct(h, now)
+            except Exception:
+                r["edct"] = None
             out["rotation"].append(r)
     out["status"] = alerting.status_label(L, CFG)
     out["phase"] = fa.phase(f, now)

@@ -475,6 +475,7 @@
           ${o.gate ? `<div class="chip"><div class="k">${esc(o.iata || "")} gate</div><div class="v">${esc(o.gate)}</div></div>` : ""}
           ${d.gate ? `<div class="chip"><div class="k">${esc(d.iata || "")} gate</div><div class="v">${esc(d.gate)}</div></div>` : ""}
           ${h.aircraft_type || h.tail ? `<div class="chip"><div class="k">Aircraft</div><div class="v">${esc([h.aircraft_type, h.tail].filter(Boolean).join(" · "))}</div></div>` : ""}
+          ${h.edct && h.edct.at ? `<div class="chip changed"><div class="k">EDCT</div><div class="v">${hm(h.edct.at, tzA)} ${esc(tzAbbr(h.edct.at, tzA))}${h.edct.for ? ` · ${esc(h.edct.for)}` : ""}</div></div>` : ""}
           ${h.dep_delay ? `<div class="chip ${h.dep_delay >= 15 ? "changed" : ""}"><div class="k">Departure</div><div class="v">${h.dep_delay > 0 ? "+" : ""}${h.dep_delay} min</div></div>` : ""}
         </div>
       </div>
@@ -1425,7 +1426,8 @@
       pill = ph === "taxi_out" ? "Departing" : ph === "landed" ? "Landed" : `En route · ${lateLower(am)}`; ptn = tone(am);
       line = `Your aircraft is ${ph === "taxi_out" ? "leaving" : "flying in from"} ${esc(from)}${inE ? `, at the gate ~${hm(inE, tz)}` : ""}.`;
     } else if (ph === "cancelled" || ph === "diverted") { pill = ph === "cancelled" ? "Cancelled" : "Diverted"; ptn = "red"; line = `The inbound flight was ${ph}.`; }
-    else { pill = "Not departed"; ptn = tone(minsLate(best(it, "out"), (it.out || {}).scheduled), !!((it.out || {}).estimated || (it.out || {}).actual)); line = `Your aircraft is due from ${esc(from)}${inE ? ` at ${hm(inE, tz)}` : ""}.`; }
+    else { pill = "Not departed"; ptn = tone(minsLate(best(it, "out"), (it.out || {}).scheduled), !!((it.out || {}).estimated || (it.out || {}).actual)); line = `Your aircraft is due from ${esc(from)}${inE ? ` at ${hm(inE, tz)}` : ""}.`;
+      if (i0.edct && i0.edct.at) { const oz = (i0.origin || {}).tz; pill = `EDCT ${hm(i0.edct.at, oz)}`; ptn = "amber"; line += ` It has an EDCT out of ${esc((i0.origin || {}).iata || from)}: ${hm(i0.edct.at, oz)} ${esc(tzAbbr(i0.edct.at, oz))}${i0.edct.for ? ` (${esc(i0.edct.for)} program)` : ""}.`; } }
     const T = tms(leg), dm = minsLate(T.out, T.outS);
     const me = leg.phase === "scheduled" ? `Departs ${lateLower(dm)}` : `Departed ${lateLower(dm)}`;
     const turn = leg.turn, minTurn = (STATE.settings || {}).min_turn_minutes || 30;
@@ -1437,7 +1439,7 @@
       const o = r.origin || {}, d = r.destination || {}, rt = r.times || {};
       const rin = best(rt, "in"), rm = minsLate(rin, (rt.in || {}).scheduled), rk = !!((rt.in || {}).actual || (rt.in || {}).estimated);
       const sub = r.phase === "arrived" ? `Arrived ${hm(rin, d.tz)}` : ["airborne", "landed"].includes(r.phase) ? `Arrives ${hm(rin, d.tz)}`
-        : r.phase === "cancelled" ? "Cancelled" : `Departs ${hm(best(rt, "out"), o.tz)}`;
+        : r.phase === "cancelled" ? "Cancelled" : `Departs ${hm(best(rt, "out"), o.tz)}${r.edct && r.edct.at ? ` · EDCT ${hm(r.edct.at, o.tz)}` : ""}`;
       tl += `<div class="tl-node"><i></i>${esc(d.iata || "")}</div>
         <a class="tl-row" href="#/aircraft/${leg.id}/${i}"><div><b>${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}</b><span>${esc(r.display_ident || "")} · ${esc(sub)}</span></div>
           <span class="${tone(rm, rk)}">${r.phase === "cancelled" ? "Cancelled" : lateWord(rm, rk)}</span></a>`;

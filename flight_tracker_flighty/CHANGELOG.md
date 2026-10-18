@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.18.1
+- EDCTs for inbound legs: the FAA's TFMS feed carries every controlled flight, so your inbound (and its inbounds) now show their EDCT too. They're matched by callsign, departure airport and that day's departure time. It shows on the Inbound Aircraft card (an amber "EDCT 4:12 PM" pill and a line saying when), in the inbound timeline, and as a chip on each inbound leg's page. It disappears once that leg takes off. Needs the SWIM TFMS subscription.
+
 ## 4.18.0
 - Surface traffic on inbound legs: an inbound leg's page (and every earlier inbound) shows live ground traffic at that leg's airports. It shows the departure airport while that airplane is still there and the arrival once it lands, with that flight highlighted, plus whichever of the two you zoom in on. On your own flight's page, zooming in on an inbound leg's airport shows its traffic too. Needs STDDS, and covers airports with FAA surface radar.
 
