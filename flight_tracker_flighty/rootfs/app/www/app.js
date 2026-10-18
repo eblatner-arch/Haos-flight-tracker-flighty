@@ -2012,17 +2012,27 @@
     // My Flights: the routes centered on the screen, as wide as it allows (the buttons may overlap a
     // corner; shifting everything left to dodge them made the globe look lopsided)
     if (GL.opts.kind === "home") { padding.left = 26; padding.right = 26; }
-    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     const dur = animate ? 900 : 0;
+    // Face-on, like Flighty: the camera looks straight at the middle of the routes, and the map's
+    // padding slides the whole picture into the part of the screen above the sheet. (fitBounds
+    // instead aimed the camera far south of the routes to make room for the sheet: on the globe that
+    // tilts the view, so the routes sat foreshortened near the top edge of the earth.)
     if (GL.globeView || !b.length) {
       const c = GL.globeView || [35, -85];
-      map.easeTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, offset: padOffset(padding), duration: dur });
+      map.easeTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding, duration: dur });
       return;
     }
     let w = 180, e = -180, s = 90, n = -90;
     for (const [la, lo] of b) { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
-    try { map.fitBounds([[w, s], [e, n]], { padding, maxZoom: GL.maxZoom || 7, duration: dur }); }
-    catch { map.jumpTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 3 }); }
+    const my = (la) => Math.log(Math.tan(Math.PI / 4 + Math.max(-85, Math.min(85, la)) * Math.PI / 360));
+    const cLat = Math.atan(Math.sinh((my(s) + my(n)) / 2)) * 180 / Math.PI, center = [(w + e) / 2, cLat];
+    // the zoom at which the box fills the padded area (Web Mercator: 512 px world at zoom 0); on the
+    // globe the map's zoom number means the same scale at the point it's centered on
+    const W = MAP_EL.clientWidth || window.innerWidth, H = MAP_EL.clientHeight || window.innerHeight;
+    const aw = Math.max(80, W - padding.left - padding.right), ah = Math.max(80, H - padding.top - padding.bottom);
+    const dx = Math.max(1e-6, (e - w) / 360), dy = Math.max(1e-6, (my(n) - my(s)) / (2 * Math.PI));
+    const z = Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)));
+    map.easeTo({ center, zoom: Math.max(0.5, Math.min(z, GL.maxZoom || 7)), padding, duration: dur });
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
   // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.
@@ -2063,7 +2073,7 @@
         });
         on("apts", () => go("#/airports"));
         on("fit", () => glFit(true, true));
-        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) { GL.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, offset: padOffset(mapPad(false)) }); } });
+        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, padding: mapPad(false) }); });
         on("xpdr", () => { setPref("ft-surf-all", pref("ft-surf-all", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         on("ids", () => { setPref("ft-surf-ids", pref("ft-surf-ids", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         GL.ctl = d;
@@ -2472,8 +2482,7 @@
     const center = all.length && d.center ? d.center : null;
     if (!SURF.zoomed && center && ["taxi_out", "landed"].includes(d.phase)) {
       const me = all.find((t) => t.mine);
-      GL.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
-      GL.map.easeTo({ center: me ? [me.lon, me.lat] : [center[1], center[0]], zoom: 14, duration: 900, offset: padOffset(mapPad(false)) });
+      GL.map.easeTo({ center: me ? [me.lon, me.lat] : [center[1], center[0]], zoom: 14, duration: 900, padding: mapPad(false) });
       SURF.zoomed = true;
     }
     // zoomed out past the airport, surface traffic is clutter over the route

@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.15.1
+- The globe is framed face-on, like Flighty: the camera looks straight at the middle of your routes and the picture slides up above the sheet, zooming out as far as needed (a whole globe for Passport). Before, it aimed the camera far south of the routes to make room for the sheet, which tilted the view: routes looked squashed near the top edge of the earth (worst on Passport, after deleting a flight, and on a flight with its inbound leg), and closing a flight came back a little low.
+- Returning to My Flights frames it the same way every time.
+
 ## 4.15.0
 - Esri map: plain satellite imagery ("Imagery", not "Imagery Hybrid"), with place names and borders drawn by the app instead of Esri's label pictures. Names are crisp text at every zoom and keep their size between zooms (no more blurry or jumping labels): countries in spaced capitals, states and provinces smaller, cities with a dot, larger ones first, each appearing at the zoom Natural Earth suggests. Country and state borders are thin lines. Your airports and flight labels always take priority, and names that would collide are left out.
 - The data comes from Natural Earth (public domain). The add-on downloads it once (about 10 MB, from GitHub), keeps a small file for 180 days, and the phone keeps its copy for a week.
