@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.15.3
+- Routes framed by eye: after the first estimate, the map measures where your routes' northern, southern, eastern and western ends actually land on screen and adjusts until they're the same distance from the edges of the map above the list. That takes out the globe's curve, which left them sitting high. Long routes count their arc (EWR–SAN bows north), not just their airports.
+- The framing uses the whole map above the list (less of a band under the status bar and above the list).
+- Pull the list down (or back up) and the picture slides so your routes stay centered in the map you can see.
+- Passport: one smooth movement when you open it (it waits for the list to stop moving, then frames once), instead of a move and then a correction.
+- Place names and state lines no longer disappear when you drag north. The globe lowers its zoom number toward the poles, and the names' zoom rules now account for it.
+
 ## 4.15.2
 - Passport opens framed right the first time: the map waits for the sheet to settle at Passport's resting spot (lower than My Flights) and frames for the room actually left, the same as the center button does.
 - My Flights leaves room around your routes, like Flighty (they fill about 80% of the space above the sheet instead of running edge to edge). A flight's page keeps a little room too; FAA program maps still use all of it.

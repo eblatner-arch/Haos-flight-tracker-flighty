@@ -1976,6 +1976,18 @@
     if (a && a._ftSet !== PLACES.pts) { a.setData(PLACES.pts); a._ftSet = PLACES.pts; }
     if (b && b._ftSet !== PLACES.lines) { b.setData(PLACES.lines); b._ftSet = PLACES.lines; }
   }
+  // the globe lowers its zoom number as you move toward the poles (it keeps the earth the same size),
+  // so zoom-based rules would drop names and state lines there: shift them by the same amount
+  let plcOff = null;
+  function placeZoomFix(force) {
+    const map = GL.map;
+    if (!map || !GL.ready || !map.getLayer("plc")) return;
+    const off = Math.round(-Math.log2(Math.max(0.2, Math.cos(map.getCenter().lat * Math.PI / 180))) * 10) / 10;
+    if (!force && off === plcOff) return;
+    plcOff = off;
+    map.setFilter("plc", [">=", ["+", ["zoom"], off], ["get", "mz"]]);
+    map.setLayerZoomRange("brd1", Math.max(0, 2.3 - off), 24);
+  }
   function placeLayers(add) {
     const map = GL.map;
     for (const id of ["plc", "brd"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
@@ -1983,7 +1995,7 @@
     add({ id: "brd1", type: "line", source: "brd", minzoom: 2.3, filter: ["==", ["get", "a"], 1], paint: { "line-color": "#fff", "line-opacity": 0.28, "line-width": 0.7 } });
     add({ id: "plc", type: "symbol", source: "plc", filter: [">=", ["zoom"], ["get", "mz"]],
       layout: { ...SYM(false), "icon-padding": 3, "symbol-sort-key": ["get", "k"], "icon-offset": ["case", ["==", ["get", "anc"], "left"], ["literal", [-4, 0]], ["literal", [0, 0]]] } });
-    setTimeout(paintPlaces, 0);
+    setTimeout(() => { paintPlaces(); placeZoomFix(true); }, 0);
   }
   function symLayers(add) {
     const not = ["!=", ["get", "hide"], 1];
@@ -2035,8 +2047,30 @@
     // with room around them, like Flighty: My Flights' routes take about 80% of the space (some
     // context and the globe's curve around them), a flight 85%, Passport 90%, an FAA program all of it
     const fill = { home: 0.8, leg: 0.85, nas: 1 }[GL.opts.kind] || 0.9;
-    const z = Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)) * fill);
-    map.easeTo({ center, zoom: Math.max(0.5, Math.min(z, GL.maxZoom || 7)), padding, duration: dur });
+    const maxZ = GL.maxZoom || 7;
+    let c = center, z = Math.max(0.5, Math.min(Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)) * fill), maxZ));
+    // Then measure on screen, the way you'd eyeball it: try the camera (no frame is drawn in
+    // between), see where the routes' northern, southern, eastern and western ends land, and nudge
+    // until they sit the same distance from the edges of the space above the sheet. The globe's
+    // curve makes a flat-map estimate sit a little high or low; this takes it out.
+    try {
+      const orig = { center: map.getCenter(), zoom: map.getZoom(), padding: map.getPadding() };
+      const pts = b.map(([la, lo]) => [lo, la]);
+      for (let i = 0; i < 4; i++) {
+        map.jumpTo({ center: c, zoom: z, padding });
+        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+        for (const p of pts) { const q = map.project(p); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+        if (!isFinite(x0)) break;
+        const k = Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0)) * fill;
+        const tx = padding.left + aw / 2, ty = padding.top + ah / 2, mx = (x0 + x1) / 2, my_ = (y0 + y1) / 2;
+        const cc = map.unproject([mx, my_]);   // the camera's point shows at (tx, ty): aim it at the routes' middle
+        c = [cc.lng, cc.lat];
+        z = Math.max(0.5, Math.min(z + Math.log2(k), maxZ));
+        if (Math.abs(Math.log2(k)) < 0.03 && Math.abs(mx - tx) < 3 && Math.abs(my_ - ty) < 3) break;
+      }
+      map.jumpTo(orig);
+    } catch {}
+    map.easeTo({ center: c, zoom: z, padding, duration: dur });
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
   // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.
@@ -2045,8 +2079,8 @@
     const H = MAP_EL.clientHeight || window.innerHeight;
     let top = midTop();
     if (now) { const g = document.querySelector(".sheet-gap"); const t = g ? g.getBoundingClientRect().bottom : top; if (t > top) top = t; }
-    return { top: document.getElementById("telem") ? 96 : 64, left: 36, right: labels ? 140 : 80,
-      bottom: Math.max(30, Math.min(H - 170, H - top + 50)) };
+    return { top: document.getElementById("telem") ? 96 : 52, left: 36, right: labels ? 140 : 80,
+      bottom: Math.max(24, Math.min(H - 170, H - top + 12)) };
   }
   // shift a centered point into the middle of the part of the map you can see
   const padOffset = (p) => [(p.left - p.right) / 2, (p.top - p.bottom) / 2];
@@ -2130,6 +2164,7 @@
       }
     };
     map.on("move", latFix);
+    map.on("moveend", () => placeZoomFix());
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
@@ -2153,22 +2188,24 @@
   // always framed for where the sheet actually is (Passport opens with it lower than My Flights)
   // A page draws its map before the router moves the sheet to that page's resting spot, so the
   // framing waits a frame and measures the sheet where it really is (like the center button).
+  // A page draws its map before the sheet has glided to that page's resting spot (Passport rests
+  // lower than My Flights), so the framing waits until the sheet stops moving, then frames once for
+  // the room actually left above it (as the center button does): one movement, not two.
   const fitNow = (fit) => {
     if (!fit) return;
     cancelAnimationFrame(GL.fitRaf);
-    GL.fitRaf = requestAnimationFrame(() => { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = true; });
-    // the sheet may still be gliding to the new page's resting spot (Passport rests lower): once it
-    // has settled, frame again if the room above it changed
-    clearTimeout(GL.fitT2);
-    const view = GL.view;
-    const again = (ms, left) => { GL.fitT2 = setTimeout(() => {
+    const view = GL.view, t0 = performance.now();
+    let last = null, still = 0;
+    const tick = () => {
       if (GL.view !== view) return;
-      const b = mapPad(false, true).bottom;
-      if (GL.fitBottom != null && Math.abs(b - GL.fitBottom) > 30) glFit(true, true);
-      else if (left) again(ms, left - 1);
-    }, ms); };
-    again(350, 2);
+      const g = document.querySelector(".sheet-gap"), y = g ? Math.round(g.getBoundingClientRect().bottom) : 0;
+      still = y === last ? still + 1 : 0; last = y;
+      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = true; return; }
+      GL.fitRaf = requestAnimationFrame(tick);
+    };
+    GL.fitRaf = requestAnimationFrame(tick);
   };
+
 
   // ---------- what each page draws ----------
   // My Flights: every route in the next two weeks, airports, the airplanes in the air.
@@ -2181,7 +2218,7 @@
       const k = [l.dep, l.arr].sort().join("-");
       if (!seen.has(k)) { seen.add(k); routes.push(lineF(gcPoints(A, B, 40))); }
       aps.set(l.dep, A); aps.set(l.arr, B);
-      bounds.push(A, B);
+      bounds.push(...gcPoints(A, B, 8));
     }
     const f = data.focus;
     for (const l of data.legs) {
@@ -3309,6 +3346,18 @@
     }, 140);
   };
   window.addEventListener("scroll", settle, { passive: true });
+  let restT = null;
+  window.addEventListener("scroll", () => {
+    clearTimeout(restT);
+    restT = setTimeout(() => {
+      if (touching || !GL.map || !GL.ready || !document.body.classList.contains("sheetmode") || GL.fitRaf || GL.map.isMoving()) return;
+      const g = document.querySelector(".sheet-gap");
+      if (!g || window.scrollY >= g.offsetHeight - 40) return;   // sheet up over the map
+      const H = MAP_EL.clientHeight || window.innerHeight, top = g.getBoundingClientRect().bottom;
+      const p = GL.map.getPadding(), bottom = Math.max(24, Math.min(H - 170, H - top + 12));
+      if (Math.abs(bottom - p.bottom) > 30) { GL.map.easeTo({ padding: { ...p, bottom }, duration: 450 }); GL.fitBottom = bottom; }
+    }, 320);
+  }, { passive: true });
   document.addEventListener("touchstart", () => { touching = true; clearTimeout(settleT); }, { passive: true });
   document.addEventListener("touchend", () => { touching = false; settle(); }, { passive: true });
   document.addEventListener("touchcancel", () => { touching = false; settle(); }, { passive: true });
