@@ -491,7 +491,7 @@
 
   function problemBanners(leg) {
     const nf = notFound(leg) && leg.note && /^Not found/.test(leg.note) ? `<div class="banner warn"><span class="dot warn"></span><div>${esc(leg.note)}</div></div>` : "";
-    return nf + (leg.problems || []).filter((p) => !p.nas).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
+    return nf + (leg.problems || []).filter((p) => !p.nas && !p.delay).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
   }
 
   function hero(leg) {
@@ -559,13 +559,18 @@
       : n.flights ? `<div class="na-scope faint">${esc(n.flights)}</div>` : "";
     const holds = g.uses.some((u) => u.impact.some((i) => i.hit !== false));
     const tappable = ["gs", "gdp"].includes(n.kind) && (n.scope || []).length;
-    return `<div class="nas-alert k-${esc(n.kind)} ${holds ? "" : "clear"} ${tappable ? "tappable" : ""}" ${tappable ? `data-nas="${esc(n.key)}"` : ""}>
-      <div class="na-top"><span class="na-apt">${esc(n.airport)}</span><span class="na-kind">${esc(n.label)}</span><span class="na-when">${esc(when)}</span></div>
+    // Collapsed: one line plus whether it catches your flight. Tap for the scope, the map and the advisory.
+    const fid = `nas-${n.key}`;
+    return `<details class="nas-alert k-${esc(n.kind)} ${holds ? "" : "clear"}" data-fold="${esc(fid)}" ${isOpen(fid, false) ? "open" : ""}>
+      <summary><div class="na-top"><span class="na-apt">${esc(n.airport)}</span><span class="na-kind">${esc(n.kind === "gdp" && /^ground delay program$/i.test(n.label || "") ? "GDP" : n.label)}</span><span class="na-when">${esc(when)}</span><i class="na-chev"></i></div>
+      ${lines[0] || ""}</summary>
+      <div class="na-body">
       ${sub ? `<div class="na-sub">${esc(sub)}</div>` : ""}
-      ${scope}${lines.join("")}
-      ${n.advisory ? `<a class="na-adv" href="${esc(n.advisory)}" target="_blank" rel="noopener">FAA advisory ↗</a>` : ""}
+      ${scope}${lines.slice(1).join("")}
+      <div class="na-links">${tappable ? `<a class="na-adv" href="#/nas/${encodeURIComponent(n.key)}">Map ›</a>` : ""}${n.advisory ? `<a class="na-adv" href="${esc(n.advisory)}" target="_blank" rel="noopener">FAA advisory ↗</a>` : ""}</div>
       ${n.source ? `<div class="na-src faint small">from ${esc(n.source)}</div>` : ""}
-    </div>`;
+      </div>
+    </details>`;
   }
   // FAA delay trends: they do affect you, so they sit up top too, but as a quiet card, not an alert.
   function nasTrend(g) {
@@ -581,6 +586,22 @@
     const gs = nasGroups(legs);
     return gs.filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("") + gs.filter((g) => TREND.includes(g.n.kind)).map(nasTrend).join("");
   };
+  // The airport-status button on the map: red for a ground stop / closure that catches one of your
+  // flights (or its inbound), amber for a delay program, white when nothing touches you.
+  function towerLevel(legs) {
+    let lvl = "";
+    for (const g of nasGroups(legs)) {
+      if (!MAJOR.includes(g.n.kind)) continue;
+      if (!g.uses.some((u) => u.impact.some((i) => !i.airborne && i.hit !== false))) continue;
+      if (g.n.kind === "gs" || g.n.kind === "closure") return "red";
+      lvl = "amber";
+    }
+    return lvl;
+  }
+  function paintTower() {
+    const b = GL.ctl && GL.ctl.querySelector('[data-a="apts"]');
+    if (b) b.dataset.lvl = GL.tower || "";
+  }
   const nasMinor = (legs) => nasGroups(legs).filter((g) => !MAJOR.includes(g.n.kind) && !TREND.includes(g.n.kind)).map((g) => g.n);
 
   function alertsCard(list) {
@@ -603,6 +624,12 @@
     if (!c || e.target.closest("a")) return;
     go(`#/nas/${encodeURIComponent(c.dataset.nas)}`);   // in-page navigation, like every link (never the URL)
   });
+  // Program cards on any page remember whether you opened them.
+  document.addEventListener("toggle", (e) => {
+    const d = e.target;
+    if (d && d.classList && d.classList.contains("nas-alert") && d.dataset.fold)
+      try { localStorage.setItem(openKey(d.dataset.fold), d.open ? "1" : "0"); } catch {}
+  }, true);
   function wireFolds() {
     $app.querySelectorAll("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => {
       try { localStorage.setItem(openKey(d.dataset.fold), d.open ? "1" : "0"); } catch {}
@@ -1170,7 +1197,7 @@
     const [st, stc] = rowStatus(leg);
     const dt = lateTone(tone(minsLate(T.out, T.outS), T.outKnown)), at = lateTone(tone(minsLate(T.inn, T.inS), T.inKnown));
     const tags = (leg.dh ? '<span class="tag">DH</span>' : "") + kindTag(leg) + ((leg.source || "").includes("Gemini") ? '<span class="tag gem">GEMINI</span>' : "");
-    const warn = (leg.problems || []).filter((p) => !p.nas)[0];
+    const warn = (leg.problems || []).filter((p) => !p.nas && !p.delay)[0];
     return `<a class="frow ${leg.finished ? "done" : ""}" href="#/leg/${leg.id}">
       ${whenCol(leg)}
       <div class="fr-main">
@@ -1284,12 +1311,20 @@
         <div class="ep-time">
           <div class="ep-tl"><span class="ep-big ${lateTone(tn)}">${nf ? "—" : hm(shown, ap.tz)}</span>${!nf && sched && Math.abs(m) >= 1 ? `<s>${hm(sched, ap.tz)}</s>` : ""}</div>
           <div class="ep-sub">${nf ? "Not found" : `<span class="${tn}">${lateWord(m, known)}</span>${rel ? ` • ${esc(rel)}` : ""}${tzs ? ` <span class="ep-tz">${esc(tzs)}</span>` : ""}`}</div>
+          ${dep && !opts.past ? edctLine(leg) : ""}
         </div>
         <div class="ep-gates">
           <div class="ep-badges">${!dep && fa_.baggage ? `<span class="gb">${IC.bag}${esc(fa_.baggage)}</span>` : ""}<span class="gb ${gate ? "" : "none"}">${dep ? IC.dep : IC.arr}${esc(gate || "—")}</span></div>
           <div class="ep-term">${term ? `Terminal <b>${esc(term)}</b>` : gate ? "" : "Gate not set"}</div>
         </div>
       </div></div>`;
+  }
+  // The EDCT is a takeoff time at the departure airport, so it sits with the departure.
+  function edctLine(leg) {
+    const f = leg.flight || {}, e = (f.swim || {}).edct, off = (f.times || {}).off;
+    if (!e || !e.at || (off && off.actual)) return "";
+    const tz = leg.dep_ap.tz;
+    return `<div class="edct-line">EDCT <b>${hm(e.at, tz)}</b>${e.for ? ` · ${esc(e.for)}` : ""}</div>`;
   }
   function midLine(leg) {
     const T = tms(leg), f = leg.flight || {}, now = Date.now() / 1000;
@@ -1416,6 +1451,9 @@
     const f = leg.flight;
     if (!f || !f.times) return "";
     const t = f.times, src = f.time_src || {}, tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
+    const sw = f.swim || {};
+    const edct = sw.edct && sw.edct.at && !(t.off && t.off.actual)
+      ? `<div class="ts-row"><span class="ts-l">EDCT</span><b class="ts-v amber">${hm(sw.edct.at, tzA)}</b><span class="ts-s">FAA${sw.edct.for ? ` · ${esc(sw.edct.for)} program` : ""}</span></div>` : "";
     const rows = [["Gate out", "out", tzA], ["Takeoff", "off", tzA], ["Landing", "on", tzB], ["Gate in", "in", tzB]].map(([lbl, k, tz]) => {
       const x = t[k] || {}, kind = x.actual ? "Actual" : x.estimated ? "Estimate" : x.scheduled ? "Scheduled" : "";
       const v = x.actual || x.estimated || x.scheduled;
@@ -1423,12 +1461,9 @@
       const who = kind === "Scheduled" ? "" : (src[k] || {})[kind === "Actual" ? "actual" : "estimated"] || (leg.finished && !leg.flight.time_src ? leg.source : leg.source || "FlightAware");
       const m = x.scheduled && kind !== "Scheduled" ? minsLate(v, x.scheduled) : 0;
       return `<div class="ts-row"><span class="ts-l">${lbl}</span><b class="ts-v ${lateTone(tone(m))}">${hm(v, tz)}</b>
-        <span class="ts-s">${kind}${who ? ` · ${esc(who)}` : ""}</span></div>`;
+        <span class="ts-s">${kind}${who ? ` · ${esc(who)}` : ""}</span></div>${k === "off" ? edct : ""}`;
     }).join("");
-    const sw = f.swim || {};
-    const edct = sw.edct && sw.edct.at && !(t.off && t.off.actual)
-      ? `<div class="ts-row"><span class="ts-l">EDCT</span><b class="ts-v amber">${hm(sw.edct.at, tzA)}</b><span class="ts-s">FAA${sw.edct.for ? ` · ${esc(sw.edct.for)} program` : ""}</span></div>` : "";
-    return rows ? `<div class="gk-card ts"><div class="ts-h">Times</div>${rows}${edct}</div>` : "";
+    return rows ? `<div class="gk-card ts"><div class="ts-h">Times</div>${rows}</div>` : "";
   }
   function timetable(leg) {
     const f = leg.flight;
@@ -1859,6 +1894,7 @@
         on("xpdr", () => { setPref("ft-surf-all", pref("ft-surf-all", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         on("ids", () => { setPref("ft-surf-ids", pref("ft-surf-ids", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         GL.ctl = d;
+        paintTower();
         return d;
       },
       onRemove() {},
@@ -2284,6 +2320,7 @@
       <div class="sheet-head"><h1>My Flights<a class="hstat" href="#/tools" aria-label="Live updates and Drive backup"><i class="ld"></i>${IC.cloud}</a></h1>
         <div class="sh-btns"><a class="round" href="#/add" aria-label="Add a flight">${IC.plus}</a>${avatar()}</div></div>`;
     h += nasTop(watching);
+    GL.tower = towerLevel(watching);
     if (STATE.schedule && STATE.schedule.error) h += `<div class="banner critical"><span class="dot critical"></span><div><b>Schedule</b><br>${esc(STATE.schedule.error)}</div></div>`;
     h += live.length ? `<div class="flist">${list}</div>`
       : `<div class="card empty"><b>No upcoming flights</b>Nothing coming up in your calendar${STATE.schedule && STATE.schedule.count === 0 ? " (no flights found in your schedule)" : ""}. Tap + to add a flight.</div>`;
@@ -2304,6 +2341,7 @@
     // the map: every route in the next two weeks, and the airplane you're on (or about to be)
     const data = (full) => ({ legs: live, focus: full ? withChain(full) : null });
     showMap("home", paintHome, data(focus && LEGS[focus.id]), { kind: "home" });
+    paintTower();
     if (focus && moving(focus)) {
       api(`api/leg/${focus.id}`).then((full) => {
         LEGS[focus.id] = full;
@@ -2513,8 +2551,6 @@
         ${endpoint(leg, "dep")}
         ${midLine(leg)}
         ${endpoint(leg, "arr")}
-        ${f.swim && f.swim.edct && f.swim.edct.at && !(f.times.off && f.times.off.actual)
-          ? `<div class="edct-line">EDCT <b>${hm(f.swim.edct.at, tzA)}</b> ${esc(tzAbbr(f.swim.edct.at, tzA))}${f.swim.edct.for ? ` · ${esc(f.swim.edct.for)} program` : ""}</div>` : ""}
         ${goodToKnow(leg)}
         ${inboundF(leg)}
         ${timesCard(leg)}

@@ -98,7 +98,7 @@ def problems(leg, cfg, nas_items, rules=None):
     if ph == "scheduled":
         d = fa.delay_minutes(f, leg.get("sched_out"))
         if d is not None and d >= int(cfg.get("delay_threshold_minutes", 15)):
-            out.append({"level": "warn", "text": f"Delayed {mins(d)}"})
+            out.append({"level": "warn", "text": f"Delayed {mins(d)}", "delay": True})  # the app shows this in the times
         if inb:
             iph = fa.phase(inb, 0)
             if iph in ("cancelled", "diverted"):

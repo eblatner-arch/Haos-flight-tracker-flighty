@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.11.0
+- Ground stop / GDP cards are one line now: the airport, the program, until when, and whether it includes your flight. Tap to open the scope, the map and the FAA advisory. They remember whether you left them open.
+- The airport-status (tower) button on the map turns amber for a delay program that includes one of your flights or its inbound, red for a ground stop or closure that does. Otherwise it stays white.
+- EDCT moved to the departure. On the flight page it sits under the departure time, and in Times it's right under Takeoff.
+- Dropped the "Delayed 40 min" banner, since the times already show it. The Home Assistant problem sensor still reports it.
+- Fixed: on the inbound timeline, the This Flight arrow sat off the line, crowding the first airport.
+
 ## 4.10.0
 - Notification link now takes a full address. Put the add-on's own web address there (e.g. `http://homeassistant.local:8099/`, with the 8099 port set under Network) and tapping a push opens Safari right on the flight it's about. A link to another app (e.g. `shortcuts://run-shortcut?name=Flighty`) is sent unchanged, so iOS opens that app. Blank still opens the Flights panel in the Home Assistant app. A pasted Home Assistant page address (one with a path) still opens that panel in the app, as before.
 - iOS can't open a Home Screen web app from a notification. A web link always opens in Safari.

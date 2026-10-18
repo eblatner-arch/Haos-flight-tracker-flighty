@@ -520,8 +520,19 @@ button.ychip { background: transparent; font: inherit; font-size: 13px; font-wei
   text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
 .z8 .fix-lbl { display: inline; }
 /* ground stop / delay program cards open their map */
-.nas-alert.tappable { cursor: pointer; }
-.nas-alert.tappable .na-top::after { content: "Map ›"; margin-left: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+/* program cards: one line until tapped */
+.nas-alert { padding: 11px 14px; }
+.nas-alert > summary { list-style: none; cursor: pointer; }
+.nas-alert > summary::-webkit-details-marker { display: none; }
+.nas-alert .na-top { flex-wrap: nowrap; align-items: center; }
+.nas-alert .na-apt { font-size: 17px; }
+.nas-alert .na-kind { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 15px; }
+.nas-alert .na-when { white-space: nowrap; font-size: 13px; }
+.na-chev { flex: none; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin: -3px 2px 0 4px; transition: transform .2s; }
+.nas-alert[open] .na-chev { transform: rotate(-135deg); margin-top: 3px; }
+.nas-alert > summary .na-hit { margin-top: 5px; font-size: 13.5px; }
+.na-body { padding-top: 2px; }
+.na-links { display: flex; gap: 16px; }
 .ctr-lbl { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none;
   font: 800 10px/1 -apple-system, system-ui, sans-serif; color: var(--faint); letter-spacing: .04em;
   text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
@@ -653,7 +664,7 @@ body.sheet-up::before { content: ""; position: fixed; top: 0; left: 0; right: 0;
 .ep-line b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--route); border-radius: 2px; }
 .ep-line em { position: absolute; top: 50%; width: 18px; height: 18px; transform: translate(-50%, -50%) rotate(90deg); color: #fff; }
 .ep-line em svg { width: 100%; height: 100%; display: block; }
-.edct-line { color: var(--amber); font-size: 16px; margin: 10px 0 0; }
+.edct-line { color: var(--amber); font-size: 15px; margin: 6px 0 0; white-space: nowrap; }
 .gk-h { font-size: 26px; font-weight: 700; margin: 28px 0 12px; letter-spacing: -0.01em; }
 .gk, .gk-card { border: 1px solid var(--line); border-radius: 20px; padding: 16px; margin-bottom: 12px; }
 .gk-card { margin-top: 12px; }
@@ -683,13 +694,14 @@ body.sheet-up::before { content: ""; position: fixed; top: 0; left: 0; right: 0;
 .tl { margin-top: 14px; position: relative; }
 .tl::before { content: ""; position: absolute; left: 14px; top: 24px; bottom: 18px; width: 2px; background: #48484a; }
 .tl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px 10px 36px; position: relative; color: var(--text); }
-.tl-row.me { background: var(--card-2); border-radius: 14px; padding-left: 12px; z-index: 1; }
+.tl-row.me { background: var(--card-2); border-radius: 14px; padding-left: 4px; gap: 10px; z-index: 1; margin-bottom: 4px; }
+.tl-row.me .tl-up { flex: none; }
 .tl-row.me b { margin-right: auto; font-size: 17px; }
 .tl-row div { display: flex; flex-direction: column; min-width: 0; }
 .tl-row div b { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-row div span { color: var(--muted); font-size: 15px; }
 .tl-row > span:last-child { white-space: nowrap; font-size: 16px; }
-.tl-up { width: 22px; height: 22px; color: #fff; display: grid; place-items: center; }
+.tl-up { width: 22px; height: 22px; margin-left: 0; color: #fff; display: grid; place-items: center; }
 .tl-up svg { width: 20px; height: 20px; transform: rotate(-45deg); }
 .tl-node { position: relative; padding: 4px 0 4px 36px; color: var(--muted); font-size: 15px; font-weight: 600; }
 .tl-node i { position: absolute; left: 9px; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: #8e8e93; transform: translateY(-50%); }
@@ -1023,3 +1035,7 @@ html, body { overflow-x: hidden; max-width: 100%; }
 #f-ident { text-transform: uppercase; }
 #f-ident::placeholder { text-transform: none; }
 body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !important; }
+
+/* map: the airport-status button turns amber/red when a program catches one of your flights */
+.map-stack button[data-lvl="amber"] { color: var(--amber); }
+.map-stack button[data-lvl="red"] { color: var(--red); }
