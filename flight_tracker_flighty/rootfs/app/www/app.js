@@ -929,10 +929,13 @@
     const t = f.times || {};
     const cont = !!f.continuation_of;  // its "schedule" is the original flight's: show actual times only
     const conv = (x) => x ? { scheduled: cont ? null : x.s, actual: x.a, estimated: null } : {};
+    // where each actual time came from (saved since 4.6; older flights and Flighty imports don't say)
+    const tsrc = {};
+    for (const k of ["out", "off", "on", "in"]) if (t[k] && t[k].src) tsrc[k] = { actual: t[k].src };
     const P = { id: f.id, dep: f.dep, arr: f.diverted_to || f.arr, dep_ap: f.dep_ap || {}, arr_ap: f.arr_ap || {}, phase: f.cancelled ? "cancelled" : "arrived",
-      finished: true, source: f.source === "flighty" ? "Flighty import" : "tracked here", sched_out: (t.out || {}).s, sched_in: (t.in || {}).s, display: f.display, ident: f.ident, airline: f.airline, nas: [], problems: [],
+      finished: true, source: f.source === "flighty" ? "Flighty import" : "", sched_out: (t.out || {}).s, sched_in: (t.in || {}).s, display: f.display, ident: f.ident, airline: f.airline, nas: [], problems: [],
       flight: { times: { out: conv(t.out), off: conv(t.off), on: conv(t.on), in: conv(t.in) }, distance_nm: f.distance_nm, aircraft_name: f.aircraft, aircraft_type: f.type, tail: f.tail,
-        origin: { gate: f.dep_gate, terminal: f.dep_terminal }, destination: { gate: f.arr_gate, terminal: f.arr_terminal } } };
+        origin: { gate: f.dep_gate, terminal: f.dep_terminal }, destination: { gate: f.arr_gate, terminal: f.arr_terminal }, time_src: tsrc } };
     if (!P.dep_ap.tz) P.dep_ap.tz = f.dep_tz;
     if (!P.arr_ap.tz) P.arr_ap.tz = f.arr_tz;
     const rs = f.route_stats || {};
@@ -1375,7 +1378,7 @@
       const x = t[k] || {}, kind = x.actual ? "Actual" : x.estimated ? "Estimate" : x.scheduled ? "Scheduled" : "";
       const v = x.actual || x.estimated || x.scheduled;
       if (!v) return "";
-      const who = kind === "Scheduled" ? "" : (src[k] || {})[kind === "Actual" ? "actual" : "estimated"] || leg.source || "FlightAware";
+      const who = kind === "Scheduled" ? "" : (src[k] || {})[kind === "Actual" ? "actual" : "estimated"] || (leg.finished && !leg.flight.time_src ? leg.source : leg.source || "FlightAware");
       const m = x.scheduled && kind !== "Scheduled" ? minsLate(v, x.scheduled) : 0;
       return `<div class="ts-row"><span class="ts-l">${lbl}</span><b class="ts-v ${lateTone(tone(m))}">${hm(v, tz)}</b>
         <span class="ts-s">${kind}${who ? ` · ${esc(who)}` : ""}</span></div>`;

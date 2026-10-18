@@ -179,7 +179,7 @@ def upsert(rec, pts=None, prefer_new=True):
                     t = {kk: dict(vv) for kk, vv in (old.get("times") or {}).items()}
                     for kk, vv in v.items():
                         cur = t.setdefault(kk, {})
-                        for x in ("s", "a"):
+                        for x in ("s", "a", "src"):
                             if vv.get(x) and (prefer_new or not cur.get(x)):
                                 cur[x] = vv[x]
                     merged["times"] = t
@@ -205,9 +205,13 @@ def from_leg(L, kind):
     arr = L.get("arr") or d.get("iata")
     sched_out = (t.get("out") or {}).get("scheduled") or L.get("sched_out")
     times = {}
+    srcs = f.get("time_src") or {}
     for k, fallback in (("out", L.get("sched_out")), ("off", None), ("on", None), ("in", L.get("sched_in"))):
         x = t.get(k) or {}
         times[k] = {"s": x.get("scheduled") or fallback, "a": x.get("actual")}
+        # where the final (actual) time came from: the airline, the FAA, a tower, surface radar, FlightAware...
+        if x.get("actual"):
+            times[k]["src"] = (srcs.get(k) or {}).get("actual") or L.get("source") or "FlightAware"
     diverted_to = f.get("diverted_to") or (d.get("iata") if f.get("diverted") and d.get("iata") and d.get("iata") != arr else None)
     typ = f.get("aircraft_type")
     return {

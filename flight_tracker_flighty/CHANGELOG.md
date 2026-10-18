@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.6.0
+- Past flights' Times card says where each final time came from (United, FAA, a tower, surface radar, FlightAware...) instead of "tracked here". History now saves each actual time's source; flights saved before this version (and Flighty imports) show just "Actual". A flight still on your list gets its sources filled in on its next save.
+
 ## 4.5.1
 - The center button frames every route again. After the airport buttons or Passport, a hidden camera offset was left behind, so later fits came out off-center and zoomed in.
 - My Flights frames all your upcoming routes (4.4.0 framed only the coming week).
