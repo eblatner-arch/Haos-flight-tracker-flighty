@@ -175,7 +175,11 @@
     if (get && !(opts && opts.signal) && window.AbortController) { ctl = new AbortController(); to = setTimeout(() => ctl.abort(), 15000); }
     let r;
     try { r = await fetch(path, { cache: get ? "no-cache" : "no-store", ...(ctl ? { signal: ctl.signal } : {}), ...opts }); }
-    catch (e) { throw new Error(e && e.name === "AbortError" ? "timed out (weak signal?)" : "offline or unreachable"); }
+    catch (e) {
+      // can't reach the add-on: the Live dot goes gray now, not after the stream's 35 s silence check
+      try { setLive(false); } catch {}
+      throw new Error(e && e.name === "AbortError" ? "timed out (weak signal?)" : "offline or unreachable");
+    }
     finally { if (to) clearTimeout(to); }
     if (!r.ok) throw new Error(`${r.status}`);
     if (opts && opts.method === "POST") changed(path);
@@ -183,20 +187,59 @@
   }
   // Stale-while-revalidate: draw the copy kept on the phone at once, then fetch and redraw in place
   // (only if it changed). On a weak signal the page is there immediately, and stays if the fetch fails.
-  async function swr(path, draw) {
-    const key = "ft-c:" + path, route0 = ROUTE;
-    let c = null;
-    try { c = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
-    if (c && !morphing) draw(c);
+  // ---------- the phone's copy of every page ----------
+  // Each page's data is kept on the phone. A page draws from that copy at once, then fetches and
+  // redraws in place only if something changed; with no signal it simply stays as it was.
+  const CKEY = (p) => "ft-c:" + p;
+  function cacheGet(p) { try { return JSON.parse(localStorage.getItem(CKEY(p)) || "null"); } catch { return null; } }
+  function cachePut(p, d) {
+    let txt;
+    try { txt = JSON.stringify(d); } catch { return; }
+    if (txt.length > 1500000) return;
+    try { localStorage.setItem(CKEY(p), txt); }
+    catch {
+      // phone storage full: let go of the saved flights (the next visit re-saves the ones still open) and try once more
+      try { Object.keys(localStorage).filter((k) => k.startsWith("ft-c:api/leg/")).forEach((k) => localStorage.removeItem(k)); localStorage.setItem(CKEY(p), txt); } catch {}
+    }
+  }
+  // a flight's copy without the long lookup log (it can be big; the page fetches it fresh anyway)
+  const slimLeg = (d) => d && d.history && d.history.length > 8 ? { ...d, history: d.history.slice(0, 8), history_more: (d.history_more || 0) + d.history.length - 8 } : d;
+  // paths: one path, or several fetched together (draw gets them in order)
+  async function swr(paths, draw) {
+    const many = Array.isArray(paths), list = many ? paths : [paths], route0 = ROUTE;
+    const c = list.map(cacheGet), have = c.every(Boolean);
+    if (have && !morphing) draw(...c);
     let d;
-    try { d = await api(path); } catch (e) { if (!c) throw e; return; }
+    try { d = await Promise.all(list.map((p) => api(p))); }
+    catch (e) { if (!have) throw e; return; }
     if (ROUTE !== route0) return;
-    const txt = JSON.stringify(d);
-    try { if (txt.length < 1500000) localStorage.setItem(key, txt); } catch {}
-    if (c && !morphing && JSON.stringify(c) === txt) return;
+    list.forEach((p, k) => cachePut(p, d[k]));
+    if (have && !morphing && JSON.stringify(c) === JSON.stringify(d)) return;
     const was = morphing;
-    morphing = morphing || !!c;
-    try { draw(d); } finally { morphing = was; }
+    morphing = morphing || have;
+    try { draw(...d); } finally { morphing = was; }
+  }
+  // As soon as the app opens (and when it comes back, at most every 5 minutes): every page's data,
+  // one request at a time behind whatever you're looking at, so each page opens instantly after.
+  let lastPrefetch = 0, prefetching = false;
+  async function prefetchAll(force) {
+    if (prefetching || document.hidden || !STATE || (!force && Date.now() - lastPrefetch < 300000)) return;
+    prefetching = true; lastPrefetch = Date.now();
+    const low = lowData();
+    const key = (l) => (l.flight && best(l.flight.times, "out")) || l.sched_out;
+    const legs = (STATE.legs || []).filter((l) => !l.finished).sort((a, b) => key(a) - key(b)).slice(0, low ? 3 : 15);
+    const jobs = [...legs.slice(0, 3).map((l) => `api/leg/${l.id}`), "api/history", "api/airports/status", "api/alerts",
+      ...legs.slice(3).map((l) => `api/leg/${l.id}`), "api/settings", "api/backup", "api/rules", "api/debug"];
+    try {
+      for (const p of jobs) {
+        if (document.hidden) break;
+        try {
+          const d = await api(p);
+          if (p.startsWith("api/leg/")) { LEGS[d.id] = d; cachePut(p, slimLeg(d)); }
+          else { cachePut(p, d); if (p === "api/airports/status") APTS = d; }
+        } catch {}
+      }
+    } finally { prefetching = false; }
   }
   // Anything you change here turns the Drive pill amber right away (the server confirms and uploads ~15 s later).
   function changed(path) {
@@ -900,9 +943,8 @@
     });
   }
 
-  async function alertsHistoryView() {
-    destroyMaps();
-    const d = await api("api/alerts");
+  function alertsHistoryView() { return swr("api/alerts", drawAlertsPage); }
+  function drawAlertsPage(d) {
     let h = histTabs("alerts") + `<input class="search" id="a-q" placeholder="Search notifications" autocomplete="off">`;
     h += `<div id="a-list"></div>`;
     $app.innerHTML = h;
@@ -2370,7 +2412,7 @@
 
   async function legView(id) {
     const route0 = ROUTE;
-    const quick = !morphing && (LEGS[id] || ((STATE && STATE.legs) || []).find((l) => l.id === id));
+    const quick = !morphing && (LEGS[id] || cacheGet(`api/leg/${id}`) || ((STATE && STATE.legs) || []).find((l) => l.id === id));
     if (quick) drawLeg(id, quick);
     let leg;
     try { leg = await api(`api/leg/${id}${LOG_ALL.has(id) ? "?log=1" : ""}`); }
@@ -2378,8 +2420,9 @@
       if (!quick) $app.innerHTML = `<div class="sheet-gap"></div><section class="sheet">${sheetHead("Flight not found", "", "#/")}<div class="card empty"><b>Couldn't load this flight</b>${esc(e.message)}. It may have dropped off your schedule.</div></section>`;
       return;
     }
-    if (ROUTE !== route0) return;
     LEGS[id] = leg;
+    cachePut(`api/leg/${id}`, slimLeg(leg));
+    if (ROUTE !== route0) return;
     const was = morphing;
     morphing = morphing || !!quick;
     try { drawLeg(id, leg); } finally { morphing = was; }
@@ -2636,9 +2679,8 @@
   }
 
   // ---------- notification settings ----------
-  async function notifyView() {
-    destroyMaps();
-    const d = await api("api/rules");
+  function notifyView() { return swr("api/rules", drawNotify); }
+  function drawNotify(d) {
     const groups = [];
     for (const r of d.rules) {
       let g = groups.find((x) => x.name === r.group);
@@ -2759,10 +2801,11 @@
     if (x) x.onclick = async () => { if (confirm("Disconnect Google Drive? The files already in Drive stay.")) { await post("api/backup/disconnect"); toolsView(); } };
   }
 
-  async function toolsView() {
-    destroyMaps();
-    const [d, st, bk] = await Promise.all([api("api/debug"), api("api/settings").catch(() => ({ settings: [] })),
-      api("api/backup").catch(() => ({ configured: false }))]);
+  function toolsView() {
+    return swr(["api/debug", "api/settings", "api/backup"], drawTools);
+  }
+  function drawTools(d, st, bk) {
+    st = st || { settings: [] }; bk = bk || { configured: false };
     const sch = d.schedule || {};
     const c = d.config;
     const setRow = (x) => x.kind === "bool"
@@ -3052,7 +3095,7 @@
     if (document.hidden || Date.now() - lastWake < 1500) return;
     lastWake = Date.now();
     if (!es || Date.now() - lastSeen > 20000) { setLive(false); connect(true); }
-    render(true);  // fresh data right away, not after the stream reconnects
+    render(true).then(() => setTimeout(prefetchAll, 1500));  // fresh data right away, not after the stream reconnects
   }
   connect();
   // Countdowns tick, and a fallback in case the stream is blocked somewhere.
@@ -3068,6 +3111,6 @@
   if (snap) {
     STATE = snap;
     $updated.textContent = "updating…";
-    render(false).then(() => render(true));
-  } else render(true);
+    render(false).then(() => render(true)).then(() => setTimeout(prefetchAll, 800));
+  } else render(true).then(() => setTimeout(prefetchAll, 800));
 })();

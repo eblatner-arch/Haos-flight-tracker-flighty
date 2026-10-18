@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.9.0
+- Every page opens instantly: as soon as the app opens (and when you come back to it, at most every 5 minutes) it fetches every page's data in the background, one request at a time behind what you're looking at: your next flights first, then Passport, Airports, Alerts, the rest of your upcoming flights, Settings and Notifications. Each is kept on the phone, so it opens at once (in testing, 2–50 ms) and still opens with no signal; it then refreshes in place if anything changed. Data saver fetches only the next 3 flights.
+- Alerts, Notifications and Settings draw from the phone's copy first too.
+- The Live dot turns gray as soon as a request can't reach the add-on, instead of after 35 seconds of silence.
+
 ## 4.8.0
 - Add a Flight: type the flight number (the date is today unless you change it) and tap Find flights. With an AeroAPI key and a date from 9 days back to 2 days ahead, one AeroAPI query lists every flight with that number that day (route, times, aircraft, tail); tap yours. The flight you pick reuses that answer as its first lookup, so adding it doesn't spend a second query. Later dates (or no key) ask for the airports and add right away, no waiting.
 - "Not listed? Enter the airports" for anything the lookup doesn't show.
