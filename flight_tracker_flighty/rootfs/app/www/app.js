@@ -2,6 +2,7 @@
 (() => {
   "use strict";
   const $root = document.getElementById("app");
+  try { if (window.top !== window) document.documentElement.classList.add("in-frame"); } catch { document.documentElement.classList.add("in-frame"); }
   // Views write `$app.innerHTML = …`. On a live update of the same page the new markup is
   // patched into the existing DOM instead of replacing it, so nothing blinks: unchanged
   // elements stay put, only changed text/attributes are touched, and maps are left alone.
@@ -177,13 +178,14 @@
     el.style.transform = `translate3d(${window.innerWidth}px,0,0)`; el.style.opacity = "0.6";
     setTimeout(async () => {
       unstyle(el);
-      $root.style.transition = "none";
-      $root.style.transform = "translate3d(-24px,0,0)"; $root.style.opacity = "0";
+      $root.style.transition = "none"; $root.style.opacity = "0";
       await Promise.race([goBack(href), new Promise((r) => setTimeout(r, 1500))]);
+      const inEl = swipeEl();
+      inEl.style.transition = "none"; inEl.style.transform = "translate3d(-24px,0,0)";
       requestAnimationFrame(() => {
-        $root.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1), opacity .2s";
-        $root.style.transform = ""; $root.style.opacity = ""; $root.style.willChange = "";
-        const s2 = $root.querySelector(".sheet"); if (s2) unstyle(s2);
+        $root.style.transition = "opacity .2s"; $root.style.opacity = "";
+        inEl.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1)"; inEl.style.transform = "";
+        setTimeout(() => { unstyle(inEl); unstyle($root); }, 260);
       });
     }, 150);
   }, { capture: true, passive: true });
@@ -300,7 +302,7 @@
     map._ftTiles = [];
     if (mapStyle() === "satellite") {
       map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 19, className: "sat-tiles",
-        attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics" }).addTo(map));
+        attribution: "&copy; Esri, Maxar" }).addTo(map));
       map._ftTiles.push(L.tileLayer(ESRI_LBL, { maxZoom: 20, maxNativeZoom: 19, pane: pane(map, "labels", 390) }).addTo(map));
       return;
     }
@@ -463,7 +465,7 @@
     MAPS[key] = entry;
     usedMaps.add(key);
     if (interactive && L.Control) {
-      addStack(map);
+      addStack(map, key === "home");
       const Btn = L.Control.extend({
         options: { position: "topright" },
         onAdd() {
@@ -542,7 +544,7 @@
       map.on("zoomend", () => { if (entry.lastSurface) paintSurface(entry, entry.lastSurface); });
     }
     entry.paint(entry, leg, true);
-    setTimeout(() => map.invalidateSize(), 50);
+    setTimeout(() => { map.invalidateSize(); entry.center(); }, 60);
   }
 
   // Double-tap and hold, then slide down to zoom in or up to zoom out (like Apple and Google Maps);
@@ -1493,7 +1495,7 @@
     const cont = !!f.continuation_of;  // its "schedule" is the original flight's: show actual times only
     const conv = (x) => x ? { scheduled: cont ? null : x.s, actual: x.a, estimated: null } : {};
     const P = { id: f.id, dep: f.dep, arr: f.diverted_to || f.arr, dep_ap: f.dep_ap || {}, arr_ap: f.arr_ap || {}, phase: f.cancelled ? "cancelled" : "arrived",
-      finished: true, sched_out: (t.out || {}).s, sched_in: (t.in || {}).s, display: f.display, ident: f.ident, airline: f.airline, nas: [], problems: [],
+      finished: true, source: f.source === "flighty" ? "Flighty import" : "tracked here", sched_out: (t.out || {}).s, sched_in: (t.in || {}).s, display: f.display, ident: f.ident, airline: f.airline, nas: [], problems: [],
       flight: { times: { out: conv(t.out), off: conv(t.off), on: conv(t.on), in: conv(t.in) }, distance_nm: f.distance_nm, aircraft_name: f.aircraft, aircraft_type: f.type, tail: f.tail,
         origin: { gate: f.dep_gate, terminal: f.dep_terminal }, destination: { gate: f.arr_gate, terminal: f.arr_terminal } } };
     if (!P.dep_ap.tz) P.dep_ap.tz = f.dep_tz;
@@ -1516,7 +1518,7 @@
         ${endpoint(P, "dep", { past: true })}
         ${midLine(P)}
         ${endpoint(P, "arr", { past: true })}
-        ${timetable(P)}
+        ${timesCard(P)}
         ${aircraftF({ ...P, tail_count: f.tail_count })}
         <div class="gk-card"><div class="kv">
           <div class="k">Distance</div><div>${nm(f.distance_nm)} nm · ${nm((f.distance_nm || 0) * 1.15078)} mi</div>
@@ -1614,7 +1616,7 @@
   };
   function cityOf(ap, code) {
     ap = ap || {};
-    if (ap.city) return ap.city;
+    if (ap.city) return String(ap.city).replace(/,\s*[A-Z]{2}$/, "");
     const n = String(ap.name || "").replace(/\b(International|Intl\.?|Regional|Municipal|Airport|Field|Int'l)\b/gi, "").replace(/\s+/g, " ").trim();
     return n || code || ap.iata || "";
   }
@@ -1739,12 +1741,15 @@
     } catch {}
   }
   const allLeaflet = () => Object.values(MAPS).map((m) => m.map).filter(Boolean);
-  function addStack(map) {
+  const TOWER = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 3h8l1.5 4.5H6.5zm-2.2 5.5h12.4l-1.4 4H7.2zM9 13.5h6l.6 7.5H8.4zM11 1h2v2h-2z"/></svg>';
+  function addStack(map, home) {
     const Stack = L.Control.extend({
       options: { position: "topright" },
       onAdd() {
         const d = L.DomUtil.create("div", "map-stack");
-        d.innerHTML = `<button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button>`;
+        d.innerHTML = `<button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button>`
+          + (home ? `<button type="button" data-a="apts" aria-label="Airport status">${TOWER}</button>` : "");
+        if (home) d.querySelector('[data-a="apts"]').onclick = () => go("#/airports");
         L.DomEvent.disableClickPropagation(d);
         d.querySelector('[data-a="style"]').onclick = () => {
           setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite");
@@ -2033,6 +2038,26 @@
       ${turn != null && leg.phase === "scheduled" ? `<div class="turnbar ${tcls}"><div class="bar"><span style="width:${tpct}%"></span></div><div class="num">${fdur(turn * 60)} turn</div></div>` : ""}
       <div class="tl">${tl}</div></div>`;
   }
+  // Each of the four times, what kind it is (actual, estimate, schedule) and who it's from:
+  // the airline, the FAA, a tower, surface radar, FlightAware...
+  function timesCard(leg) {
+    const f = leg.flight;
+    if (!f || !f.times) return "";
+    const t = f.times, src = f.time_src || {}, tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
+    const rows = [["Gate out", "out", tzA], ["Takeoff", "off", tzA], ["Landing", "on", tzB], ["Gate in", "in", tzB]].map(([lbl, k, tz]) => {
+      const x = t[k] || {}, kind = x.actual ? "Actual" : x.estimated ? "Estimate" : x.scheduled ? "Scheduled" : "";
+      const v = x.actual || x.estimated || x.scheduled;
+      if (!v) return "";
+      const who = kind === "Scheduled" ? "" : (src[k] || {})[kind === "Actual" ? "actual" : "estimated"] || leg.source || "FlightAware";
+      const m = x.scheduled && kind !== "Scheduled" ? minsLate(v, x.scheduled) : 0;
+      return `<div class="ts-row"><span class="ts-l">${lbl}</span><b class="ts-v ${lateTone(tone(m))}">${hm(v, tz)}</b>
+        <span class="ts-s">${kind}${who ? ` · ${esc(who)}` : ""}</span></div>`;
+    }).join("");
+    const sw = f.swim || {};
+    const edct = sw.edct && sw.edct.at && !(t.off && t.off.actual)
+      ? `<div class="ts-row"><span class="ts-l">EDCT</span><b class="ts-v amber">${hm(sw.edct.at, tzA)}</b><span class="ts-s">FAA${sw.edct.for ? ` · ${esc(sw.edct.for)} program` : ""}</span></div>` : "";
+    return rows ? `<div class="gk-card ts"><div class="ts-h">Times</div>${rows}${edct}</div>` : "";
+  }
   function timetable(leg) {
     const f = leg.flight;
     if (!f || !f.times) return "";
@@ -2297,13 +2322,63 @@
     }
   }
 
+  let APTS = null;   // last airport-status answer, for the program map
+  const issueRank = (a) => a.items.some((n) => ["gs", "closure"].includes(n.kind)) ? 0 : a.items.some((n) => n.kind === "gdp") ? 1 : 2;
+  function paintAirports(entry, data, fit) {
+    const { layer } = entry;
+    layer.clearLayers();
+    addNight(entry);
+    const bounds = [];
+    for (const a of data.airports) {
+      if (a.lat == null) continue;
+      const c = issueRank(a) < 2 ? css("--red") : css("--amber");
+      L.circleMarker([a.lat, a.lon], { radius: 6.5, color: "#fff", weight: 1.5, fillColor: c, fillOpacity: 1, interactive: false }).addTo(layer);
+      if (data.labels) L.marker([a.lat, a.lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: null, iconAnchor: [-8, 7],
+        html: `<span class="apt-dot-lbl">${esc(a.code)}</span>` }) }).addTo(layer);
+      bounds.push([a.lat, a.lon]);
+    }
+    entry.bounds = bounds.length ? bounds : [[49, -125], [25, -67]];
+    if (fit) entry.center();
+  }
+  async function airportsView() {
+    destroyMaps();
+    let d;
+    try { d = await api("api/airports/status"); } catch (e) { d = { airports: [], error: e.message }; }
+    APTS = d;
+    const list = [...d.airports].sort((a, b) => issueRank(a) - issueRank(b) || (b.mine - a.mine) || a.code.localeCompare(b.code));
+    const major = list.filter((a) => issueRank(a) < 2), minor = list.filter((a) => issueRank(a) === 2);
+    const item = (a, n) => {
+      const when = n.end ? `${n.start && n.start > Date.now() / 1000 ? hm(n.start, a.tz) + "–" : "until "}${hm(n.end, a.tz)}` : "";
+      const sub = [n.detail, n.reason && n.reason[0].toUpperCase() + n.reason.slice(1), when].filter(Boolean).join(" · ");
+      const tap = ["gs", "gdp"].includes(n.kind) && (n.scope || []).length;
+      return `<${tap ? `a href="#/nas/${encodeURIComponent(n.key)}"` : "div"} class="ap-item k-${esc(n.kind)}"><b>${esc(n.label)}${tap ? ` ${IC.chev}` : ""}</b>${sub ? `<span>${esc(sub)}</span>` : ""}</${tap ? "a" : "div"}>`;
+    };
+    const row = (a) => `<div class="ap-row">
+      <div class="ap-dot ${issueRank(a) < 2 ? "red" : "amber"}"><i></i><span>${esc(a.code)}</span></div>
+      <div class="ap-main"><div class="ap-name">${esc(apShort(a, a.code))}${a.mine ? ' <span class="tag">YOUR FLIGHT</span>' : ""}</div>${a.items.map((n) => item(a, n)).join("")}</div></div>`;
+    $app.innerHTML = `<div class="mapbg" id="apt-map"></div><div class="sheet-gap"></div><section class="sheet">
+      <div class="sheet-head"><h1>Airports</h1><div class="sh-btns"><a class="round back xbtn" href="#/" aria-label="Close">${IC.x}</a></div></div>
+      <p class="small muted" style="margin:-4px 0 6px">FAA status for every US airport with a ground stop, delay program, closure or delay trend${d.at ? ` · updated ${ago(d.at)}` : ""}.</p>
+      ${d.error ? `<div class="err">${esc(d.error)}</div>` : ""}
+      ${major.length ? `<h2 class="ap-h">Major Issues</h2>${major.map(row).join("")}` : ""}
+      ${minor.length ? `<h2 class="ap-h">Minor Issues</h2>${minor.map(row).join("")}` : ""}
+      ${!list.length ? `<div class="card empty"><b>All clear</b>No FAA ground stops, delay programs, closures or delay trends right now.</div>` : ""}
+    </section>`;
+    drawMap(document.getElementById("apt-map"), { airports: list, labels: list.length <= 25 }, { key: "apts", paint: paintAirports, controls: "basic" });
+  }
+
   // A ground stop or delay program on a map: the centers whose departures it holds, filled; the
   // program airport; and where your flight (or its inbound) departs, red if it's held, green if not.
   let ARTCC = null;
   const CTR_LABEL_AT = { ZNY: [41.05, -76.45] };
   async function nasView(key) {
     const legs = (STATE.legs || []).filter((l) => (l.nas || []).some((n) => n.key === key));
-    const g = nasGroups(legs).find((x) => x.n.key === key);
+    let g = nasGroups(legs).find((x) => x.n.key === key);
+    if (!g) {
+      const n0 = (STATE.nas || []).find((n) => n.key === key);
+      const ap0 = APTS && APTS.airports.find((a) => n0 && a.code === n0.airport);
+      if (n0) g = { n: n0, tz: ap0 ? ap0.tz : undefined, uses: [] };
+    }
     destroyMaps();
     if (!g) { $app.innerHTML = `<div class="mapbg" id="nas-map"></div><div class="sheet-gap"></div><section class="sheet">${sheetHead("Program ended", "FAA", "#/")}<div class="card empty"><b>Program ended</b>It's no longer in the FAA's list.</div></section>`; return; }
     const n = g.n;
@@ -2340,6 +2415,7 @@
     const bounds = [];
     const apPos = {};
     for (const l of legs) for (const a of [l.dep_ap, l.arr_ap]) if (a && ll(a)) apPos[a.iata] = ll(a);
+    for (const a of (APTS && APTS.airports) || []) if (a.lat != null && !apPos[a.code]) apPos[a.code] = [a.lat, a.lon];
     // where the program is
     const prog = apPos[n.airport];
     if (prog) {
@@ -2468,7 +2544,7 @@
           `${esc(flno(leg))} • ${esc(fmt(T0.out, tzA, { weekday: "short", day: "numeric", month: "short" }).toUpperCase())}${leg.dh ? " • DH" : ""}${leg.extra ? ` • ${leg.kind === "manual" ? "MANUAL" : "FRIEND"}` : ""}`,
           "#/", alBadge(airlineCode(leg), "lg"))}
         ${statusBanner(leg)}
-        ${nasTop([leg])}
+        ${nasGroups([leg]).filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("")}
         ${problemBanners(leg)}
         ${endpoint(leg, "dep")}
         ${midLine(leg)}
@@ -2477,7 +2553,7 @@
           ? `<div class="edct-line">EDCT <b>${hm(f.swim.edct.at, tzA)}</b> ${esc(tzAbbr(f.swim.edct.at, tzA))}${f.swim.edct.for ? ` · ${esc(f.swim.edct.for)} program` : ""}</div>` : ""}
         ${goodToKnow(leg)}
         ${inboundF(leg)}
-        ${timetable(leg)}
+        ${timesCard(leg)}
         ${aircraftF(leg)}
         <div class="actions">
           ${leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
@@ -2900,6 +2976,7 @@
       else if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
       else if (m) await legView(m[1]);
       else if (route.startsWith("#/add")) addView();
+      else if (route.startsWith("#/airports")) await airportsView();
       else if (route.startsWith("#/tools")) await toolsView();
       else if (route.startsWith("#/notify")) await notifyView();
       else homeView();

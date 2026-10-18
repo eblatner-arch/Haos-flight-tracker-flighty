@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.1.0
+- Airports: the control-tower button on the My Flights map opens every US airport the FAA lists right now (ground stops, delay programs, closures, delay trends, deicing) on a map and in a list, major issues first, your airports marked. Ground stops and delay programs open their scope map. Uses the FAA data already being fetched, no extra calls.
+- The detailed timetable is replaced by a short Times card: gate out, takeoff, landing and gate in, each with whether it's actual, an estimate or the schedule, and where it came from (the airline, the FAA, a tower, surface radar, FlightAware). EDCT shows there too.
+- Everything is smaller and closer to Flighty's sizes: flight rows, the flight page, cards, map buttons, tab bar.
+- Inside the Home Assistant app the map buttons and headers no longer leave room for a status bar that isn't there; the map credit is shorter and sits in the corner.
+- Swiping back from Settings (or any page) to a map no longer leaves the map pointed at the wrong place.
+- City names drop the state ("San Francisco", not "San Francisco, CA").
+- The flight page shows FAA delay trends once (status line and Good to Know), not three times.
+
 ## 4.0.0
 - New look, modeled on Flighty. Every flight screen is a full-screen map with a sheet over it that you scroll up.
 - My Flights: the map shows every route in the next two weeks, the night side of the earth, and the airplane you're on. Each row shows a countdown ("3 Days", "In Air"), the cities, and departure and arrival times in red when late. Connections between your flights show the sit ("1h 12m at FLL").

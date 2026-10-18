@@ -3248,6 +3248,29 @@ def api_history(q):
             "stats": history.stats(sel, lk), "flights": [history.summary(r, lk) for r in sel], "airports": aps}
 
 
+def api_airports_status():
+    """Every US airport the FAA lists right now (ground stops, delay programs, closures, delay
+    trends, deicing), grouped by airport with its name and position. Built from the NAS data the
+    tracker already fetches, so it costs no extra calls."""
+    with LOCK:
+        nas, at, err = list(STATE["nas"]), STATE.get("nas_at"), STATE.get("nas_error")
+    mine = set()
+    with LOCK:
+        for L in STATE["legs"].values():
+            mine.update(x for x in (L.get("dep"), L.get("arr")) if x)
+    aps = {}
+    for n in nas:
+        c = n.get("airport")
+        if not c:
+            continue
+        if c not in aps:
+            a = airports.get(c)
+            aps[c] = {"code": c, "name": a.get("name") or c, "city": a.get("city") or "", "lat": a.get("lat"),
+                      "lon": a.get("lon"), "tz": a.get("tz") or "", "mine": c in mine, "items": []}
+        aps[c]["items"].append(n)
+    return {"at": at, "error": err, "airports": list(aps.values())}
+
+
 def api_history_flight(fid):
     r = history.get(fid)
     if not r:
@@ -3439,6 +3462,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/alerts":
             with LOCK:
                 return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
+        if path == "/api/airports/status":
+            return self._send(200, api_airports_status())
         if path == "/api/artcc":
             d = artcc_boundaries()
             return self._send(200, d, cache="private, max-age=86400") if d else self._send(404, {"error": "no boundaries"})

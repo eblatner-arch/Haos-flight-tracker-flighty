@@ -1,4 +1,5 @@
 :root {
+  --sat: env(safe-area-inset-top);
   --bg: #000;
   --sheet: #151517;
   --card: #1f1f22;
@@ -33,7 +34,7 @@ button { font: inherit; color: inherit; }
 .mono { font-family: var(--mono); }
 
 .top {
-  position: fixed; top: calc(env(safe-area-inset-top) + 8px); right: 12px; z-index: 5000;
+  position: fixed; top: calc(var(--sat) + 8px); right: 12px; z-index: 5000;
   display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 999px;
   background: rgba(28,28,30,.72); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
   border: 1px solid rgba(255,255,255,.08);
@@ -49,7 +50,7 @@ body.sheetmode .top { display: none; }
 .icon-btn.spin svg { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-main { max-width: 760px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 58px) 16px calc(120px + env(safe-area-inset-bottom)); }
+main { max-width: 760px; margin: 0 auto; padding: calc(var(--sat) + 58px) 16px calc(120px + env(safe-area-inset-bottom)); }
 .loading { padding: 60px 0; text-align: center; color: var(--muted); }
 
 h2.section {
@@ -609,9 +610,9 @@ body[data-drive="disconnected"] .hstat svg { display: block; color: var(--faint)
 .layover.tight b { color: var(--amber); }
 
 /* flight page sheet */
-.d-head { display: flex; align-items: center; gap: 12px; position: sticky; top: env(safe-area-inset-top); z-index: 3; background: var(--sheet);
+.d-head { display: flex; align-items: center; gap: 12px; position: sticky; top: var(--sat); z-index: 3; background: var(--sheet);
   margin: 0 -16px; padding: 4px 16px 12px; }
-body.sheet-up::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); background: var(--sheet); z-index: 10; }
+body.sheet-up::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: var(--sheet); z-index: 10; }
 .d-title { flex: 1; min-width: 0; }
 .d-sub { font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: .02em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .d-cities { font-size: 25px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -712,7 +713,7 @@ body.sheet-up::before { content: ""; position: fixed; top: 0; left: 0; right: 0;
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 6px; }
 .sheet details.fold { margin-top: 10px; }
 .sheet details.fold > summary, main details.fold > summary { font-size: 20px; text-transform: none; letter-spacing: -0.01em; color: var(--text); padding: 14px 2px 10px; }
-.telem { position: fixed; z-index: 1; top: calc(env(safe-area-inset-top) + 12px); left: 50%; transform: translateX(-50%); display: flex; gap: 14px;
+.telem { position: fixed; z-index: 1; top: calc(var(--sat) + 12px); left: 50%; transform: translateX(-50%); display: flex; gap: 14px;
   padding: 9px 18px; border-radius: 999px; background: rgba(40,40,44,.72); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
   font-size: 20px; font-weight: 700; color: #fff; pointer-events: none; white-space: nowrap; box-shadow: 0 4px 18px rgba(0,0,0,.35); }
 body.sheetmode main > .telem { pointer-events: none; }
@@ -722,8 +723,8 @@ body.sheetmode main > .telem { pointer-events: none; }
 .telem .te + .te { padding-left: 14px; border-left: 1px solid rgba(255,255,255,.25); }
 
 /* map controls, airplanes */
-.mapbg .leaflet-top { top: env(safe-area-inset-top); }
-body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(env(safe-area-inset-top) + 64px); }
+.mapbg .leaflet-top { top: var(--sat); }
+body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 64px); }
 .mapbg .leaflet-right .leaflet-control { margin-right: 12px; }
 .map-stack { display: flex; flex-direction: column; border-radius: 27px; overflow: hidden; background: rgba(40,40,44,.72);
   backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4); box-shadow: 0 4px 18px rgba(0,0,0,.35); }
@@ -817,3 +818,135 @@ button.gl-row { width: 100%; background: none; border-left: 0; border-right: 0; 
   .fr-cities { font-size: 19px; } .fr-times { font-size: 16px; } .ep-big { font-size: 40px; } .gb { font-size: 22px; }
   .pc-grid b { font-size: 28px; } .tt-row { grid-template-columns: 1fr 80px 80px; }
 }
+
+html.in-frame { --sat: 0px; }
+
+/* ---- 4.1: tighter, closer to Flighty's real sizes ---- */
+body { font-size: 15px; }
+.sheet { padding-left: 14px; padding-right: 14px; border-radius: 26px 26px 0 0; }
+.sheet-head h1, .ptitle { font-size: 30px; }
+.round, .back.xbtn { width: 38px; height: 38px; }
+.round svg, .back.xbtn svg { width: 19px; height: 19px; }
+.avatar { font-size: 18px; }
+.flist { margin: 0 -14px; }
+.frow { grid-template-columns: 66px 1fr; padding: 12px 14px 12px 0; }
+.frow::after { left: 66px; }
+.layover { margin-left: 66px; padding: 10px 14px 10px 0; font-size: 15px; }
+.fw b { font-size: 32px; }
+.fw-l { font-size: 11px; margin-top: 5px; }
+.fw-ic { width: 40px; height: 40px; }
+.fw-ic svg { width: 20px; height: 20px; }
+.fr-top { font-size: 14px; gap: 7px; }
+.al-badge { width: 19px; height: 19px; font-size: 8.5px; border-radius: 5px; }
+.al-badge.lg { width: 40px; height: 40px; font-size: 14px; border-radius: 9px; }
+.fr-cities { font-size: 18px; font-weight: 600; margin: 2px 0 5px; }
+.fr-times { font-size: 15px; gap: 4px 14px; }
+.ti { width: 18px; height: 18px; }
+.ti svg { width: 11px; height: 11px; }
+.fr-warn { font-size: 13px; }
+.d-cities { font-size: 21px; }
+.d-sub { font-size: 13px; }
+.sbanner { margin: 0 -14px 4px; padding: 11px 14px; }
+.sb-h { font-size: 19px; }
+.sb-s { font-size: 15px; }
+.ep { padding: 14px 0 2px; }
+.ep-ap { font-size: 16px; }
+.ep-ic { width: 20px; height: 20px; }
+.ep-big { font-size: 32px; }
+.ep-time s { font-size: 14px; }
+.ep-sub { font-size: 15px; }
+.gb { font-size: 19px; padding: 2px 8px; border-radius: 8px; }
+.gb svg { width: 15px; height: 15px; }
+.ep-term { font-size: 14px; margin-top: 4px; }
+.ep-mid { font-size: 14px; padding: 8px 0 0; }
+.ep-mid svg { width: 16px; height: 16px; }
+.gk-h { font-size: 22px; margin: 22px 0 10px; }
+.gk, .gk-card { padding: 13px 14px; border-radius: 16px; margin-bottom: 10px; }
+.gk-ic { width: 34px; height: 34px; }
+.gk-ic svg { width: 30px; height: 30px; }
+.gk-ic.sm svg { width: 22px; height: 22px; }
+.gk-t b { font-size: 16px; }
+.gk-t span { font-size: 14px; }
+.gk-row { font-size: 16px; padding: 12px 14px; }
+.gk-item { padding: 11px 14px; }
+.ib-head b { font-size: 18px; }
+.ib-head span { font-size: 13px; }
+.ib-pill { font-size: 12px; margin-top: 10px; }
+.ib-line { font-size: 15px; }
+.tl-row { padding: 8px 2px 8px 34px; }
+.tl-row div b, .tl-row.me b { font-size: 15px; }
+.tl-row div span { font-size: 13px; }
+.tl-row > span:last-child { font-size: 14px; }
+.tl-node, .tl-more { font-size: 13px; }
+.ac-name { font-size: 21px; }
+.ac-sub, .ac-k { font-size: 13px; }
+.sheet details.fold > summary, main details.fold > summary { font-size: 17px; padding: 12px 2px 8px; }
+h2.section { font-size: 19px; margin: 22px 0 10px; }
+.telem { font-size: 16px; padding: 7px 14px; gap: 11px; top: calc(var(--sat) + 10px); }
+.te svg { width: 16px; height: 16px; }
+.te small { font-size: 10.5px; }
+.telem .te + .te { padding-left: 11px; }
+body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 48px); }
+/* map buttons: Flighty's size */
+.map-stack { border-radius: 21px; }
+.map-stack button { width: 42px; height: 42px; }
+.map-stack button svg { width: 20px; height: 20px; }
+.map-center { width: 42px; height: 42px; margin-top: 8px !important; }
+.map-center svg { width: 18px; height: 18px; }
+.mapbg .leaflet-right .leaflet-control { margin-right: 10px; margin-top: 10px; }
+.mapbg .leaflet-control-attribution { font-size: 8px !important; padding: 0 5px !important; opacity: .75; }
+.mapbg .leaflet-left .leaflet-control { margin: 0; }
+.pbadge { width: 28px; height: 28px; } .pbadge div { width: 17px; height: 17px; }
+.apt-label { font-size: 11.5px; }
+/* tab bar */
+.tab-pill { padding: 4px; }
+.tab-pill a { padding: 5px 0 4px; font-size: 10.5px; }
+.tabbar svg { width: 22px; height: 22px; }
+.tab-search { width: 54px; height: 54px; }
+.tab-search svg { width: 23px; height: 23px; }
+/* Passport */
+.yp { font-size: 15px; padding: 7px 14px; }
+.pcard { padding: 18px 16px 14px; border-radius: 20px; }
+.pc-t { font-size: 20px; }
+.pc-st { font-size: 11.5px; }
+.pc-grid span { font-size: 12px; }
+.pc-grid b { font-size: 26px; }
+.pc-grid small { font-size: 13px; }
+.pc-btn { font-size: 15px; padding: 10px 14px; margin-top: 14px; }
+.pd-n { font-size: 60px; }
+.pd-t { font-size: 19px; } .pd-s { font-size: 15px; }
+.pa-k { font-size: 18px; } .pa-n { font-size: 28px; } .pa-c { font-size: 15px; }
+.psort { font-size: 15px; padding: 7px 13px; }
+.pgroup { font-size: 16px; padding: 14px 0 8px; } .pgroup span { font-size: 13px; }
+.prow { grid-template-columns: 38px 1fr auto; padding: 11px 0; }
+.prow .al-badge { width: 38px; height: 38px; font-size: 13px; }
+.pr-top, .pr-date { font-size: 13px; }
+.pr-cities { font-size: 16px; }
+/* where each time comes from */
+.ts-h { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.ts-row { display: grid; grid-template-columns: 76px auto 1fr; gap: 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.ts-h + .ts-row { border-top: 0; }
+.ts-l { color: var(--muted); }
+.ts-v { font-weight: 600; font-size: 15px; white-space: nowrap; }
+.ts-v.red { color: var(--red); } .ts-v.amber { color: var(--amber); }
+.ts-s { color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+/* airport status */
+.ap-h { font-size: 15px; font-weight: 600; color: var(--muted); margin: 16px 0 2px; }
+.ap-row { display: grid; grid-template-columns: 52px 1fr; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ap-dot { display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 2px; }
+.ap-dot i { width: 14px; height: 14px; border-radius: 50%; }
+.ap-dot.red i { background: var(--red); box-shadow: 0 0 0 6px rgba(255,91,79,.18); }
+.ap-dot.amber i { background: #ffc53d; box-shadow: 0 0 0 6px rgba(255,197,61,.16); }
+.ap-dot span { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 4px; }
+.ap-main { min-width: 0; }
+.ap-name { font-size: 17px; font-weight: 600; margin-bottom: 3px; }
+.ap-name .tag { font-size: 9.5px; vertical-align: 2px; }
+.ap-item { display: block; padding: 3px 0; color: var(--text); }
+.ap-item b { font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 3px; }
+.ap-item b svg { width: 13px; height: 13px; color: var(--muted); }
+.ap-item span { display: block; font-size: 13px; color: var(--muted); }
+.ap-item.k-gs b, .ap-item.k-closure b { color: var(--red); }
+.ap-item.k-gdp b { color: #ff8a5c; }
+.apt-dot-lbl { font: 700 10px/1 -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: nowrap; }
+.sheet-head .xbtn { margin: 0; }
+@media (max-width: 380px) { .fr-cities { font-size: 17px; } .fr-times { font-size: 14px; } .ep-big { font-size: 29px; } }
