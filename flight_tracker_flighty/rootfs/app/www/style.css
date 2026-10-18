@@ -1046,3 +1046,8 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .mapbg .maplibregl-ctrl-attrib-inner { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; line-height: 1.35; }
 .attr-logo { height: 11px; vertical-align: middle; }
 .attr-mb { font-size: 11px; color: #fff; letter-spacing: -0.02em; margin-right: 2px; }
+
+/* an inbound leg's data log */
+.hl { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.hl:last-of-type { border-bottom: 0; }
+.hl-t { font-weight: 700; font-size: 14px; margin-bottom: 2px; }

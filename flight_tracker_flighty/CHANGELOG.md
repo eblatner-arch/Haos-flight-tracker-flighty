@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.19.0
+- Inbound legs use the FAA's data exactly like your own flight: your inbound, its inbound and so on read the same SWIM feeds (TFMS, TFDM towers, STDDS surface radar, the airline's own messages) with the same priority over FlightAware. So an inbound shows "In the air" the moment the FAA reports its takeoff, with the FAA's landing estimate and taxi-in, instead of waiting for FlightAware (it could sit at "Taxiing" well after takeoff). Turn times and lateness use those times too. A SWIM message about any inbound leg refreshes your flight within seconds, as one about your own flight does.
+- Data Log on each inbound leg's page: what the FAA, towers, surface radar and the airline said and when. The four times on the page say who reported each one (FAA, IAD tower, United, FlightAware…).
+- Each inbound leg's SWIM data and log are kept until 15 minutes after it's at the gate, then dropped.
+- No EDCT push notifications for inbound legs (only your own flights).
+
 ## 4.18.4
 - Inbound arriving after you're due out: the turn bar now reads "lands 56m after you're due out" (full red bar) instead of "56m turn", and the warning says "Inbound lands 56 min after your departure" instead of "Short turn: -56 min".
 - An inbound that has pushed back but not taken off shows as Taxiing, with how long ("Taxiing · 34m"), when it pushed back, and that it hasn't taken off yet, instead of "Departing". The inbound timeline says "Taxiing since 7:12 PM · arrives 9:14 PM" instead of its old departure time.

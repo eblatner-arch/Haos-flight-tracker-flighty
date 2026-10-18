@@ -597,7 +597,8 @@ def swim_news(now):
     out = set()
     with LOCK:
         for L in STATE["legs"].values():
-            idents = {(L.get("ident") or "").upper(), ((L.get("inbound") or {}).get("ident") or "").upper()}
+            idents = {(L.get("ident") or "").upper(), ((L.get("inbound") or {}).get("ident") or "").upper()} | \
+                     {(r.get("ident") or "").upper() for r in (L.get("rotation") or []) if r}
             if acids & idents and watched(L, now) and now - (L.get("swim_forced") or 0) >= 20:
                 L["swim_forced"] = now
                 out.add(L["id"])
@@ -878,7 +879,7 @@ def swim_check(L, f, planned):
         sw["logged"] = list(dict.fromkeys(bits))[-20:]
         if new_bits:
             saw(L, "FAA SWIM", None, "; ".join(new_bits))
-    if sw.pop("edct_new", False) and fa.phase(f, time.time()) in ("scheduled", "taxi_out"):
+    if sw.pop("edct_new", False) and not L.get("_quiet") and fa.phase(f, time.time()) in ("scheduled", "taxi_out"):
         tza = alerting.tz_for(L.get("dep"), f.get("origin") or {})
         so_ = ((f.get("times") or {}).get("off") or {}).get("scheduled") or L.get("sched_out")
         late = f" · {round((sw['edct'] - so_) / 60)} min after scheduled takeoff" if so_ and sw["edct"] > so_ + 60 else ""
@@ -897,6 +898,58 @@ def swim_check(L, f, planned):
         if sw.get(k):
             out[k] = datetime.fromtimestamp(sw[k], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return out
+
+
+ROT_LOG_KEEP = 80
+
+
+def rotation_swim(L, now):
+    """The FAA's SWIM data for the airplane's earlier legs (your inbound, its inbound, ...), read and
+    applied exactly as for your own flight: the same events, the same priority (surface radar, the
+    tower, the FAA, the airline over FlightAware) and the same log of who said what. Each leg's facts
+    and log are kept in L['rot_swim'] by its FlightAware id and dropped 15 minutes after it's at the
+    gate (FlightAware has the final times by then)."""
+    if swim.STATE.get("status") == "off":
+        return
+    store = L.setdefault("rot_swim", {})
+    legs, seen_obj, keys = [], set(), set()
+    for h in [L.get("inbound")] + list(L.get("rotation") or []):
+        if h and id(h) not in seen_obj and h.get("ident"):
+            seen_obj.add(id(h))
+            legs.append(h)
+    for h in legs:
+        t = h.get("times") or {}
+        key = h.get("fa_id") or f"{h['ident']}-{(t.get('out') or {}).get('scheduled')}"
+        keys.add(key)
+        st = store.setdefault(key, {"swim": {}, "seen": 0, "log": []})
+        if st.get("done"):
+            continue
+        o, d = h.get("origin") or {}, h.get("destination") or {}
+        Lh = {"id": f"{L['id']}~{key}", "ident": h["ident"], "display": h.get("display_ident") or h["ident"],
+              "dep": o.get("iata") or o.get("icao"), "arr": d.get("iata") or d.get("icao"),
+              "sched_out": (t.get("out") or {}).get("scheduled"), "swim": st["swim"], "swim_seen": st["seen"],
+              "source": "FlightAware", "_quiet": True}
+        try:
+            res = swim_check(Lh, h, Lh["arr"])
+            st["swim"], st["seen"] = Lh.get("swim") or {}, Lh.get("swim_seen") or st["seen"]
+            for x in Lh.pop("_seen", None) or []:
+                if x.get("note"):
+                    st["log"].append({"at": now, "src": x.get("src") or "FAA SWIM", "text": x["note"]})
+            del st["log"][:-ROT_LOG_KEEP]
+            if st["swim"]:
+                swim_overlay(Lh, h, now)
+            if res.get("diverted_to"):
+                fa.fix_diversion(h, Lh["arr"], res["diverted_to"])
+        except Exception as e:
+            log.debug("inbound SWIM %s: %s", h.get("ident"), e)
+        h["rot_key"] = key
+        gin = ((h.get("times") or {}).get("in") or {}).get("actual")
+        if gin and now - gin > 15 * 60:
+            st["done"] = now
+            st.pop("swim", None)
+            st["log"] = []
+    for k in [k for k in store if k not in keys]:
+        del store[k]
 
 
 def swim_overlay(L, f, now):
@@ -2410,6 +2463,7 @@ def update_leg(browser, lid):
             if sw.get("new"):
                 used.append("FAA SWIM")
             swim_overlay(L, flight, now)
+            rotation_swim(L, now)
             fa.fix_diversion(flight, planned, sw.get("diverted_to") or route_end(flight.get("route")))
             if L.get("extra"):
                 L["dep"] = flight["origin"].get("iata") or L["dep"]
@@ -2434,6 +2488,7 @@ def update_leg(browser, lid):
             if swim_check(L, L["flight"], planned_arr(L)).get("new"):
                 used.append("FAA SWIM")
             swim_overlay(L, L["flight"], now)
+            rotation_swim(L, now)
         if L.get("extra") and not L.get("flight") and (L.get("aero") or {}).get("at"):
             note = not_found_note(L)  # page check came up empty too: keep the clear "not found" story
         L["note"] = note
@@ -2485,6 +2540,7 @@ def update_leg(browser, lid):
         if ph == "scheduled" and L.get("inbound") and not L.get("_rot_done"):
             update_rotation(browser, L, now)
         L.pop("_rot_done", None)
+        rotation_swim(L, now)   # freshly loaded inbound legs get the FAA's times straight away
 
         # Live positions
         if CFG.get("live_positions", True):
@@ -3387,6 +3443,7 @@ def leg_summary(L, now, nas, full=False, rotation_tracks=False, log_all=False):
             r["status"] = alerting.PHASE_LABEL[r["phase"]]
             r["dep_delay"] = fa.delay_minutes(h)
             r["arr_delay"] = fa.arrival_delay_minutes(h)
+            r["log"] = list(reversed(((L.get("rot_swim") or {}).get(h.get("rot_key") or "") or {}).get("log") or []))
             try:
                 r["edct"] = rotation_edct(h, now)
             except Exception:
