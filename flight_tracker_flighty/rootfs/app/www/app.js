@@ -1730,13 +1730,11 @@
         : goo
         ? { under: under([img]), base: { type: "raster", tiles: [gTiles()], tileSize: ts, maxzoom: 22, attribution: G_LOGO } }
         : sat
-        ? { under: under([img]), base: { type: "raster", tiles: [img], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
-            lbl: { type: "raster", tiles: [tc(ESRI_LBL)], tileSize: 256, maxzoom: 19 } }
+        ? { under: under([img]), base: { type: "raster", tiles: [img], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar &middot; Natural Earth" } }
         : { under: under(dark), base: { type: "raster", tiles: dark, tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
       layers: [
         { id: "under", type: "raster", source: "under", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 0 } : { "raster-fade-duration": 0 } },
         { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
-        ...(sat && !goo ? [{ id: "lbl", type: "raster", source: "lbl", minzoom: low ? 3 : 0, paint: { "raster-fade-duration": 120 } }] : []),
       ],
     };
   }
@@ -1775,6 +1773,7 @@
     for (const id of [...DYN, ...LAY, "sym", "laysym", "surf"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
     const add = (l, b) => { if (!map.getLayer(l.id)) map.addLayer(l, b); };
     add({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
+    placeLayers(add);
     add({ id: "lay-term", type: "fill", source: "lay-term", paint: { "fill-color": "#c8cdd8", "fill-opacity": 0.14 } });
     add({ id: "lay-term-line", type: "line", source: "lay-term", paint: { "line-color": "#c8cdd8", "line-opacity": 0.5, "line-width": 1 } });
     add({ id: "lay-twy", type: "line", source: "lay-twy", layout: { "line-join": "round" }, paint: { "line-color": "#fff", "line-opacity": 0.12, "line-width": widthM(23) } });
@@ -1894,6 +1893,22 @@
       size(w + 2, h + 2); rrect(ctx, 1, 1, w, h, st[4]); ctx.fillStyle = st[3]; ctx.fill();
       if (k === "twy") { ctx.lineWidth = 1; ctx.strokeStyle = "#f6c445"; ctx.stroke(); }
       ctx.font = f; ctx.fillStyle = st[2]; ctx.textBaseline = "middle"; ctx.fillText(a, 1 + st[5], 1 + h / 2 + 0.5);
+    } else if (k === "pc" || k === "ps" || k === "pt") {
+      // place names: countries in spaced capitals, states smaller and dimmer, cities with a dot
+      const [wgt, px, col, sp, up] = { pc: [700, 11, "rgba(255,255,255,.88)", 1.6, true], ps: [600, 9.5, "rgba(255,255,255,.66)", 1.1, true],
+        pt: [600, 11.5, "#fff", 0, false] }[k];
+      const t = up ? String(a).toUpperCase() : String(a), f = font(wgt, px);
+      ctx.font = f;
+      const chars = [...t], cw = chars.map((ch) => ctx.measureText(ch).width), tw_ = cw.reduce((x, y) => x + y, 0) + sp * Math.max(0, chars.length - 1);
+      const dot = k === "pt" ? 10 : 0, w = tw_ + 6 + dot, h = px + 8;
+      size(w, h); ctx.font = f; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      if (dot) {
+        ctx.beginPath(); ctx.arc(4, h / 2, 2.6, 0, 7); ctx.fillStyle = "#fff"; ctx.fill();
+        ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.stroke();
+      }
+      const run = (fn) => { let x = 3 + dot; chars.forEach((ch, i) => { fn(ch, x); x += cw[i] + sp; }); };
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.72)"; run((ch, x) => ctx.strokeText(ch, x, h / 2));
+      ctx.fillStyle = col; run((ch, x) => ctx.fillText(ch, x, h / 2));
     } else {   // text with a dark halo: airport codes, route fixes, terminals, gates, centers
       const st = { code: [700, 10, "#fff"], fix: [600, 9, "#c3c7cf"], term: [700, 11, "rgba(255,255,255,.9)"], gate: [600, 9, "#b8bcc4"],
         ctr: [800, b ? 12 : 10, b || "#7c7c82"] }[k] || [600, 10, "#fff"];
@@ -1911,7 +1926,7 @@
   }
   // A label or airplane: L picks the layer (lbl always shown, code from zoom 3, fix from zoom 7,
   // plane rotated with the map), anc the side of the picture on the point.
-  const symF = (p, spec, L, anc, rot) => ({ type: "Feature", properties: { img: imgId(spec), L, anc: anc || "center", rot: rot || 0 },
+  const symF = (p, spec, L, anc, rot, extra) => ({ type: "Feature", properties: { img: imgId(spec), L, anc: anc || "center", rot: rot || 0, ...(extra || {}) },
     geometry: { type: "Point", coordinates: [p[1], p[0]] } });
   const planeMk = (pos, hdg, color, badge, size) => symF(pos, badge ? ["badge"] : ["plane", color || "#fff", size || 0], "plane", "center", hdg);
   let symT = 0;
@@ -1929,6 +1944,47 @@
   const mkHandle = (f) => f ? { setLatLng: (p) => { f.geometry.coordinates = [p[1], p[0]]; flushSym(); },
     setOpacity: (o) => { f.properties.hide = o ? 0 : 1; flushSym(); } } : null;
   const SYM = (overlap) => ({ "icon-image": ["get", "img"], "icon-anchor": ["get", "anc"], "icon-allow-overlap": overlap, "icon-ignore-placement": overlap, "icon-padding": 1 });
+  // ---------- place names and borders (Esri imagery) ----------
+  // From Natural Earth via the add-on (/api/places): drawn as crisp text like the map's other labels,
+  // so they're sharp at every zoom and don't jump in size between tile zooms. Countries, then states
+  // and provinces, then cities by population, each from the zoom Natural Earth suggests; the map
+  // drops ones that would collide. Hidden on Mapbox, Google and Dark, whose tiles have names.
+  let PLACES = null, placesP = null;
+  const placesOn = () => { const st = mapStyle(); return !(st === "dark" || (st === "mapbox" && mbTok()) || (st === "google" && gReady())); };
+  function loadPlaces() {
+    if (PLACES || placesP) return placesP;
+    placesP = fetch("api/places").then((r) => r.ok ? r.json() : Promise.reject(new Error(r.status))).then((d) => {
+      const pts = [], lines = [];
+      (d.countries || []).forEach(([n, la, lo, mz]) => pts.push(symF([la, lo], ["pc", n], "plc", "center", 0, { mz: Math.max(0.6, mz - 1.2), k: mz })));
+      (d.states || []).forEach(([n, la, lo, mz]) => pts.push(symF([la, lo], ["ps", n], "plc", "center", 0, { mz: Math.max(2.2, mz - 1.5), k: 20 + mz })));
+      (d.cities || []).forEach(([n, la, lo, mz], i) => pts.push(symF([la, lo], ["pt", n], "plc", "left", 0, { mz: Math.max(2, mz - 1), k: 100 + i })));
+      (d.borders || []).forEach((l) => lines.push({ type: "Feature", properties: { a: 0 }, geometry: { type: "LineString", coordinates: l } }));
+      (d.state_lines || []).forEach((l) => lines.push({ type: "Feature", properties: { a: 1 }, geometry: { type: "LineString", coordinates: l } }));
+      PLACES = { pts: FC(pts), lines: FC(lines) };
+      paintPlaces();
+    }).catch(() => { placesP = null; setTimeout(loadPlaces, 60000); });
+    return placesP;
+  }
+  function paintPlaces() {
+    const map = GL.map;
+    if (!map || !GL.ready) return;
+    const vis = placesOn() ? "visible" : "none";
+    for (const id of ["plc", "brd0", "brd1"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
+    if (vis === "none") return;
+    if (!PLACES) { loadPlaces(); return; }
+    const a = map.getSource("plc"), b = map.getSource("brd");
+    if (a && a._ftSet !== PLACES.pts) { a.setData(PLACES.pts); a._ftSet = PLACES.pts; }
+    if (b && b._ftSet !== PLACES.lines) { b.setData(PLACES.lines); b._ftSet = PLACES.lines; }
+  }
+  function placeLayers(add) {
+    const map = GL.map;
+    for (const id of ["plc", "brd"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
+    add({ id: "brd0", type: "line", source: "brd", filter: ["==", ["get", "a"], 0], paint: { "line-color": "#fff", "line-opacity": 0.5, "line-width": 0.9 } });
+    add({ id: "brd1", type: "line", source: "brd", minzoom: 2.3, filter: ["==", ["get", "a"], 1], paint: { "line-color": "#fff", "line-opacity": 0.28, "line-width": 0.7 } });
+    add({ id: "plc", type: "symbol", source: "plc", filter: [">=", ["zoom"], ["get", "mz"]],
+      layout: { ...SYM(false), "icon-padding": 3, "symbol-sort-key": ["get", "k"], "icon-offset": ["case", ["==", ["get", "anc"], "left"], ["literal", [-4, 0]], ["literal", [0, 0]]] } });
+    setTimeout(paintPlaces, 0);
+  }
   function symLayers(add) {
     const not = ["!=", ["get", "hide"], 1];
     add({ id: "sym-fix", type: "symbol", source: "sym", minzoom: 7, filter: ["all", ["==", ["get", "L"], "fix"], not], layout: SYM(false) });

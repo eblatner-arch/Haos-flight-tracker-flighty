@@ -3111,6 +3111,144 @@ def layout_prefetch_loop():
 # or delay program's departure scope on a map.
 ARTCC_URL = ("https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Boundary_Airspace/FeatureServer/0/query")
 ARTCC_PATH = os.path.join(DATA_DIR, "artcc_boundaries_v2.json")
+
+# ---------- place names and borders for the satellite map ----------
+# Esri's label layer is a set of pictures: soft on a phone, and the text jumps in size between tile
+# zooms. Instead the app draws names itself, crisp at every zoom, from Natural Earth (public domain):
+# countries, states/provinces, ~7,000 cities with the zoom each deserves, and country/state borders.
+# Fetched once (about 10 MB), kept as a small file for 180 days.
+NE_BASE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/"
+NE_FILES = {"cities": "ne_10m_populated_places_simple.geojson", "countries": "ne_50m_admin_0_countries.geojson",
+            "states": "ne_50m_admin_1_states_provinces.geojson", "borders": "ne_50m_admin_0_boundary_lines_land.geojson",
+            "state_lines": "ne_50m_admin_1_states_provinces_lines.geojson"}
+PLACES_PATH = os.path.join(DATA_DIR, "places_v1.json")
+_places_lock = threading.Lock()
+_places_mem = {"d": None, "tag": None}
+
+
+# map-friendly names for countries whose official ones are long
+SHORT_NAMES = {"United States of America": "United States", "Dominican Rep.": "Dominican Republic", "Bosnia and Herz.": "Bosnia",
+               "Central African Rep.": "C. African Rep.", "Dem. Rep. Congo": "DR Congo", "Democratic Republic of the Congo": "DR Congo",
+               "Republic of the Congo": "Congo", "United Kingdom of Great Britain and Northern Ireland": "United Kingdom",
+               "Russian Federation": "Russia", "The Bahamas": "Bahamas", "Turks and Caicos Is.": "Turks & Caicos",
+               "Trinidad and Tobago": "Trinidad & Tobago", "Antigua and Barb.": "Antigua", "St. Kitts and Nevis": "St. Kitts",
+               "St. Vin. and Gren.": "St. Vincent", "Cayman Is.": "Cayman Islands", "British Virgin Is.": "BVI",
+               "U.S. Virgin Is.": "USVI", "Falkland Is.": "Falklands", "Solomon Is.": "Solomon Islands"}
+
+
+def _ne_get(name):
+    req = urllib.request.Request(NE_BASE + name, headers={"User-Agent": f"HA-Flight-Tracker/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.load(r)
+
+
+def _lower(props):
+    return {str(k).lower(): v for k, v in (props or {}).items()}
+
+
+def _label_point(geom):
+    """A point inside the biggest ring of a (multi)polygon: its vertex average (good enough for a label)."""
+    polys = geom.get("coordinates") or []
+    if geom.get("type") == "Polygon":
+        polys = [polys]
+    best = max((p[0] for p in polys if p and p[0]), key=len, default=None)
+    if not best:
+        return None
+    return sum(pt[1] for pt in best) / len(best), sum(pt[0] for pt in best) / len(best)
+
+
+def _lines(fc, digits=2):
+    out = []
+    for ft in fc.get("features") or []:
+        g = ft.get("geometry") or {}
+        parts = [g.get("coordinates")] if g.get("type") == "LineString" else g.get("coordinates") or [] if g.get("type") == "MultiLineString" else []
+        for line in parts:
+            pts, last = [], None
+            for x, y, *_ in line:
+                q = [round(x, digits), round(y, digits)]
+                if q != last:
+                    pts.append(q)
+                last = q
+            if len(pts) > 1:
+                out.append(pts)
+    return out
+
+
+def _build_places():
+    out = {"v": 1, "countries": [], "states": [], "cities": [], "borders": [], "state_lines": [], "missing": []}
+    got = {}
+    for k, name in NE_FILES.items():
+        try:
+            got[k] = _ne_get(name)
+        except Exception as e:
+            log.warning("Place names: couldn't fetch %s (%s)", name, e)
+            out["missing"].append(k)
+    for ft in (got.get("countries") or {}).get("features") or []:
+        p = _lower(ft.get("properties"))
+        nm = p.get("name_en") or p.get("name")
+        lat, lon = p.get("label_y"), p.get("label_x")
+        if lat is None or lon is None:
+            lp = _label_point(ft.get("geometry") or {})
+            if not lp:
+                continue
+            lat, lon = lp
+        nm = SHORT_NAMES.get(nm, nm)
+        if nm:
+            out["countries"].append([nm, round(lat, 3), round(lon, 3), float(p.get("min_label") or p.get("labelrank") or 3)])
+    for ft in (got.get("states") or {}).get("features") or []:
+        p = _lower(ft.get("properties"))
+        nm = p.get("name_en") or p.get("name")
+        lat, lon = p.get("latitude"), p.get("longitude")
+        if lat is None or lon is None:
+            lp = _label_point(ft.get("geometry") or {})
+            if not lp:
+                continue
+            lat, lon = lp
+        if nm:
+            out["states"].append([nm, round(float(lat), 3), round(float(lon), 3), float(p.get("min_label") or 4)])
+    for ft in (got.get("cities") or {}).get("features") or []:
+        p = _lower(ft.get("properties"))
+        nm = p.get("name_en") or p.get("name") or p.get("nameascii")
+        lat, lon = p.get("latitude"), p.get("longitude")
+        if (lat is None or lon is None) and (ft.get("geometry") or {}).get("type") == "Point":
+            lon, lat = ft["geometry"]["coordinates"][:2]
+        if not nm or lat is None:
+            continue
+        mz = p.get("min_zoom")
+        mz = float(mz) if mz not in (None, "") else 4 + float(p.get("scalerank") or 6) / 2
+        out["cities"].append([nm, round(float(lat), 3), round(float(lon), 3), mz, int(p.get("pop_max") or 0)])
+    out["cities"].sort(key=lambda c: -c[4])
+    out["borders"] = _lines(got.get("borders") or {})
+    out["state_lines"] = _lines(got.get("state_lines") or {})
+    log.info("Place names: %d countries, %d states, %d cities, %d border lines", len(out["countries"]), len(out["states"]),
+             len(out["cities"]), len(out["borders"]) + len(out["state_lines"]))
+    return out
+
+
+def places_data():
+    """The compact place file (and its ETag), built on first use."""
+    with _places_lock:
+        if _places_mem["d"] is not None:
+            return _places_mem["d"], _places_mem["tag"]
+        d = None
+        try:
+            if time.time() - os.path.getmtime(PLACES_PATH) < 180 * 86400:
+                with open(PLACES_PATH, "rb") as fh:
+                    d = fh.read()
+        except OSError:
+            pass
+        if d is None:
+            built = _build_places()
+            if not built["cities"] and not built["countries"]:
+                return None, None
+            d = json.dumps(built, separators=(",", ":")).encode()
+            if not built["missing"]:
+                os.makedirs(os.path.dirname(PLACES_PATH), exist_ok=True)
+                with open(PLACES_PATH + ".tmp", "wb") as fh:
+                    fh.write(d)
+                os.replace(PLACES_PATH + ".tmp", PLACES_PATH)
+        _places_mem["d"], _places_mem["tag"] = d, '"p%s"' % hashlib.md5(d).hexdigest()[:12]
+        return _places_mem["d"], _places_mem["tag"]
 _artcc_lock = threading.Lock()
 
 
@@ -3578,6 +3716,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, api_lookup(self._query()))
         if path == "/api/airports/status":
             return self._send(200, api_airports_status())
+        if path == "/api/places":
+            d, tag = places_data()
+            return self._send(200, d, cache="private, max-age=604800", etag=tag) if d else self._send(503, {"error": "place names not available yet"})
         if path == "/api/artcc":
             d = artcc_boundaries()
             return self._send(200, d, cache="private, max-age=86400") if d else self._send(404, {"error": "no boundaries"})
@@ -3825,6 +3966,7 @@ def main():
     threading.Thread(target=backup_loop, daemon=True, name="backup").start()
     threading.Thread(target=live_loop, daemon=True, name="live").start()
     threading.Thread(target=layout_prefetch_loop, daemon=True, name="layouts").start()
+    threading.Thread(target=lambda: (time.sleep(20), places_data()), daemon=True, name="places").start()
     swim.ON_NEWS = lambda acid: WAKE.set()
     swim.ON_NAS = lambda ap: (NAS_NEWS.add(ap), WAKE.set())
     swim.load_edcts(os.path.join(DATA_DIR, "swim_edcts.json"))

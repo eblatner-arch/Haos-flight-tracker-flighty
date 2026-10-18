@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.15.0
+- Esri map: plain satellite imagery ("Imagery", not "Imagery Hybrid"), with place names and borders drawn by the app instead of Esri's label pictures. Names are crisp text at every zoom and keep their size between zooms (no more blurry or jumping labels): countries in spaced capitals, states and provinces smaller, cities with a dot, larger ones first, each appearing at the zoom Natural Earth suggests. Country and state borders are thin lines. Your airports and flight labels always take priority, and names that would collide are left out.
+- The data comes from Natural Earth (public domain). The add-on downloads it once (about 10 MB, from GitHub), keeps a small file for 180 days, and the phone keeps its copy for a week.
+- Mapbox, Google and Dark keep their own built-in names.
+
 ## 4.14.1
 - Map credits in one place: a single line at the top left, level with the map buttons, always spelled out instead of a collapsible "i". Mapbox's wordmark and Google's imagery credit now sit in that line too, instead of a second line below it.
 - No more "zooming" when you drag north or south: the globe lowers its zoom number as you move toward the poles, which switched to coarser tiles (soft imagery, baked-in labels jumping bigger, most visible on Mapbox and Google). The map now keeps the same tiles as long as the globe looks the same size.
