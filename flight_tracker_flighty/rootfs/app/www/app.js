@@ -1667,6 +1667,15 @@
   let gAttrT = 0;
   function gAttr() {
     let el = document.getElementById("g-attr");
+    // Mapbox: its wordmark and credits stay visible while its tiles are on screen
+    let mb = document.getElementById("mb-attr");
+    const mbOn = mapStyle() === "mapbox" && mbTok() && GL.map;
+    if (mbOn && !mb) {
+      mb = document.createElement("div"); mb.id = "mb-attr"; mb.className = "g-attr";
+      mb.innerHTML = '<b>mapbox</b><span>&copy; Mapbox &copy; OpenStreetMap &copy; Maxar</span>';
+      document.body.appendChild(mb);
+    }
+    if (mb) mb.hidden = !mbOn;
     const on = mapStyle() === "google" && gReady() && GL.map;
     if (!on) { if (el) el.hidden = true; return; }
     if (!el) {
@@ -1685,7 +1694,13 @@
       } catch {}
     }, 800);
   }
-  const STYLES = () => ["satellite", ...(gKey() ? ["google"] : []), "dark"];
+  // ---------- Mapbox satellite (with your Mapbox token) ----------
+  // Static Tiles API, satellite-streets style: imagery with roads and place names drawn in, 512 px
+  // (@2x) pictures laid out at 256, so sharp on a Retina screen. One request per tile; Mapbox's free
+  // allowance is 200,000 a month. Not kept on the phone (Mapbox's terms).
+  const mbTok = () => ((STATE && STATE.map_tiles) || {}).mapbox || "";
+  const mbTiles = () => `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${encodeURIComponent(mbTok())}`;
+  const STYLES = () => ["satellite", ...(mbTok() ? ["mapbox"] : []), ...(gKey() ? ["google"] : []), "dark"];
 
   function darkTiles() {
     const mt = (STATE && STATE.map_tiles) || {};
@@ -1700,7 +1715,8 @@
     let st = mapStyle();
     if (st === "google" && !gReady()) { gSession(); st = "satellite"; }   // Esri until Google's session is ready
     if (st === "google" && !gKey()) st = "satellite";
-    const goo = st === "google", sat = st !== "dark", low = lowData();
+    if (st === "mapbox" && !mbTok()) st = "satellite";
+    const mb = st === "mapbox", goo = st === "google" || mb, sat = st !== "dark", low = lowData();
     // Image tiles are 256 px. The map picks its tile zoom by rounding, so a tile can be drawn up to
     // 1.4x its size, and 2x more on a Retina screen: soft, worst when the globe sits halfway between
     // two tile zooms (dragging north or south crosses one). Laid out at 181 px (256/sqrt 2) the
@@ -1716,7 +1732,9 @@
     return {
       version: 8,
       projection: { type: "globe" },
-      sources: goo
+      sources: mb
+        ? { under: under([img]), base: { type: "raster", tiles: [mbTiles()], tileSize: ts, maxzoom: 22, attribution: '&copy; Mapbox &copy; OpenStreetMap &copy; Maxar' } }
+        : goo
         ? { under: under([img]), base: { type: "raster", tiles: [gTiles()], tileSize: ts, maxzoom: 22 } }
         : sat
         ? { under: under([img]), base: { type: "raster", tiles: [img], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
@@ -2973,7 +2991,7 @@
         <a class="gl-row" href="#/add"><span>Add a flight</span>${IC.chev}</a>
         <button type="button" class="gl-row" id="p-refresh"><span>Check all flights now</span><span class="small muted" id="p-refresh-msg"></span></button>
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
-        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Esri"], ...(gKey() ? [["google", "Google"]] : []), ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Esri"], ...(mbTok() ? [["mapbox", "Mapbox"]] : []), ...(gKey() ? [["google", "Google"]] : []), ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
         <div class="gl-row"><span>Saved map tiles<small class="gl-sub" id="tc-info">${TC_ON ? "…" : "Needs the https address (the Home Assistant app)"}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="tc-clear">Clear</button>' : ""}</div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>

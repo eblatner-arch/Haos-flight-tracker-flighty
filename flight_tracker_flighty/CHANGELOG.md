@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.13.0
+- Mapbox satellite (optional): add a Mapbox access token in the add-on Configuration and Mapbox joins the map styles (Esri → Mapbox → Google → Dark, whichever you've set up). Its satellite-streets tiles are Retina-sharp with roads and place names built in, and Mapbox's credits stay on screen while they're showing. Free up to 200,000 tiles a month. Like Google's, they aren't kept on the phone.
+- Fixed: Google's logo and credit could stay on screen after switching away from Google.
+
 ## 4.12.0
 - Map tiles you've seen stay on the phone: Esri satellite, labels and the dark map are kept, so places you've already looked at open instantly, even with no signal. In testing, a reload made 0 tile downloads. Up to 6,000 tiles are kept, oldest dropped first. Settings shows the count and has a Clear button. This needs the https address (the Home Assistant app); on a plain http address tiles load as before.
 - Sharper satellite map, including when you drag north or south. The map rounds to the nearest tile zoom, and the globe zooms out slightly as you drag toward the poles, so tiles could be blown up to almost 3x on a Retina screen. Now the worst case is 2x, for about twice the tiles (the 4x version in 4.11.2 stuttered).

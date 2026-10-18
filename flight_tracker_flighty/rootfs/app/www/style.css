@@ -1041,8 +1041,10 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .map-stack button[data-lvl="red"] { color: var(--red); }
 
 /* Google's logo + imagery copyright (required with Google tiles) */
-#g-attr { position: fixed; z-index: 4; left: 10px; top: calc(var(--sat) + 40px); display: flex; align-items: center; gap: 6px;
+#g-attr, #mb-attr { position: fixed; z-index: 4; left: 10px; top: calc(var(--sat) + 40px); display: flex; align-items: center; gap: 6px;
   font-size: 10px; color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.8); pointer-events: none; max-width: 70vw; }
 #g-attr img { height: 16px; }
-#g-attr b { font-size: 13px; color: #fff; }
-body:not(.sheetmode) #g-attr { display: none; }
+#g-attr b, #mb-attr b { font-size: 13px; color: #fff; }
+#mb-attr b { letter-spacing: -0.02em; }
+body:not(.sheetmode) #g-attr, body:not(.sheetmode) #mb-attr { display: none; }
+#g-attr[hidden], #mb-attr[hidden] { display: none; }

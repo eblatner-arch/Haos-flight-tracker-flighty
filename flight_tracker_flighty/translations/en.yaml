@@ -107,3 +107,6 @@ configuration:
   google_maps_api_key:
     name: Google Maps API key (optional)
     description: "Adds Google satellite imagery (sharper, with roads and place names) as a map style. In Google Cloud, enable the Map Tiles API, create a key and restrict it to that API. Google's free allowance is 100,000 tiles a month, then $0.60 per 1,000."
+  mapbox_token:
+    name: Mapbox access token (optional)
+    description: "Adds Mapbox satellite (sharp, with roads and place names) as a map style. Use the default public token from account.mapbox.com, ideally restricted to your addresses. Mapbox's free allowance is 200,000 tiles a month."
