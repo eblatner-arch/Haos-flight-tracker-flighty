@@ -557,7 +557,16 @@ def swim_watch(now):
                 if inb.get("ident"):
                     keep.add(inb["ident"].upper())
                 f = L.get("flight") or {}
-                for code in (L.get("dep"), L.get("arr"), (f.get("destination") or {}).get("iata"), f.get("diverted_to")):
+                codes = [L.get("dep"), L.get("arr"), (f.get("destination") or {}).get("iata"), f.get("diverted_to")]
+                # the airplane's earlier legs: their callsigns (EDCTs, clearances) and airports
+                # (surface traffic on an inbound leg's page), until each has landed
+                for r in (L.get("rotation") or []) + ([inb] if inb else []):
+                    if not r or (((r.get("times") or {}).get("in") or {}).get("actual")):
+                        continue
+                    if r.get("ident"):
+                        keep.add(r["ident"].upper())
+                    codes += [(r.get("origin") or {}).get("iata"), (r.get("destination") or {}).get("iata")]
+                for code in codes:
                     icao = (airports.get(code) or {}).get("icao") if code else None
                     if icao:
                         aps.add(icao.upper())
