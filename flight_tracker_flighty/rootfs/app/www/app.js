@@ -1614,18 +1614,21 @@
   }
   function glStyle() {
     const sat = mapStyle() === "satellite", low = lowData();
-    // Imagery tiles are 256 px pictures. Laid out at 128 CSS px they land 1:1 on a Retina screen, so
-    // the earth is sharp zoomed out (at 256 they were blown up 2x: soft). Data saver keeps them at
-    // 256: a quarter of the downloads, a little softer.
-    const ts = low ? 256 : 128;
+    // data saver: each imagery tile covers 4x the area (a quarter of the downloads, a little softer).
+    // (128 px tiles were Retina-sharp but 4x the tiles: dragging stuttered and showed black holes.)
+    const ts = low ? 512 : 256;
+    // A coarse copy of the same imagery underneath (2 zoom levels lower, at most z8: a handful of
+    // tiles, cached): while you drag, anything not loaded yet shows a softer earth instead of black.
+    const under = (tiles) => ({ type: "raster", tiles, tileSize: 1024, maxzoom: 8 });
     return {
       version: 8,
       projection: { type: "globe" },
       sources: sat
-        ? { base: { type: "raster", tiles: [ESRI_IMG], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
+        ? { under: under([ESRI_IMG]), base: { type: "raster", tiles: [ESRI_IMG], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
             lbl: { type: "raster", tiles: [ESRI_LBL], tileSize: 256, maxzoom: 19 } }
-        : { base: { type: "raster", tiles: darkTiles(), tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
+        : { under: under(darkTiles()), base: { type: "raster", tiles: darkTiles(), tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
       layers: [
+        { id: "under", type: "raster", source: "under", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 0 } : { "raster-fade-duration": 0 } },
         { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
         ...(sat ? [{ id: "lbl", type: "raster", source: "lbl", minzoom: low ? 3 : 0, paint: { "raster-fade-duration": 120 } }] : []),
       ],

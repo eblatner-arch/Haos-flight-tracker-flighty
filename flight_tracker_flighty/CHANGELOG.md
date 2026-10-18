@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.11.3
+- Smooth dragging again: back to normal-size satellite tiles. The sharper tiles in 4.11.2 meant 4x as many tiles, which made the zoomed-out globe stutter and showed black squares while they loaded.
+- No more black squares while dragging: a coarse copy of the map (a handful of cached tiles) sits underneath, so a spot that hasn't loaded yet shows a softer earth until the sharp tiles arrive.
+
 ## 4.11.2
 - My Flights map opens with your routes centered on the screen and as large as the width allows. Before, it was pushed left to dodge the buttons, which made the globe look lopsided.
 - Sharper satellite imagery when zoomed out. Tiles now draw at the screen's full resolution instead of blown up 2x. That means more, smaller downloads, so Data saver keeps the old, lighter tiles.
