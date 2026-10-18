@@ -1046,3 +1046,7 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .mapbg .maplibregl-ctrl-attrib-inner { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; line-height: 1.35; }
 .attr-logo { height: 11px; vertical-align: middle; }
 .attr-mb { font-size: 11px; color: #fff; letter-spacing: -0.02em; margin-right: 2px; }
+
+/* the last map, shown while the live one starts */
+#mapshot { position: absolute; inset: 0; z-index: 1; background-size: 100% 100%; pointer-events: none; transition: opacity .35s; }
+#mapshot.gone { opacity: 0; }

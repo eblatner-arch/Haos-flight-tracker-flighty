@@ -1595,6 +1595,47 @@
   // out into a normal map, with the airport diagram and live surface traffic.
   // ================================================================================================
   const MAP_EL = document.getElementById("map");
+  // ---------- the last map, instantly ----------
+  // Opening the app, the live map takes a moment to start and pull its tiles (black until then).
+  // The last My Flights map is kept as a picture and shown at once, then fades out when the live map
+  // has drawn underneath. Only on My Flights, and only for the same screen size.
+  const SHOT_KEY = "ft-mapshot";
+  (() => {
+    if (!MAP_EL || !/^(#\/?)?$/.test(location.hash)) return;
+    try {
+      const d = JSON.parse(localStorage.getItem(SHOT_KEY) || "null");
+      if (!d || d.w !== window.innerWidth || d.h !== window.innerHeight || Date.now() - d.at > 7 * 86400e3) return;
+      const el = document.createElement("div");
+      el.id = "mapshot"; el.style.backgroundImage = `url(${d.img})`;
+      MAP_EL.appendChild(el);
+    } catch {}
+  })();
+  function dropShot() {
+    const el = document.getElementById("mapshot");
+    if (!el) return;
+    el.classList.add("gone"); setTimeout(() => el.remove(), 400);
+  }
+  let shotAt = 0;
+  function takeShot() {
+    const map = GL.map;
+    if (!map || GL.view !== "home" || map.isMoving() || Date.now() - shotAt < 60000 || window.scrollY > midY() + 60) return;
+    shotAt = Date.now();
+    // read the picture right after a frame is drawn (the canvas keeps it only until then)
+    map.once("render", () => {
+      try {
+        const c = map.getCanvas(), w = window.innerWidth, h = window.innerHeight, k = Math.min(1, 900 / Math.max(c.width, c.height));
+        const t = document.createElement("canvas"); t.width = Math.round(c.width * k); t.height = Math.round(c.height * k);
+        t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
+        // skip a blank frame (the canvas came back empty): check it isn't all black
+        const px = t.getContext("2d").getImageData(0, Math.round(t.height * 0.2), t.width, Math.round(t.height * 0.3)).data;
+        let sum = 0; for (let i = 0; i < px.length; i += 400) sum += px[i] + px[i + 1] + px[i + 2];
+        if (sum / (px.length / 400) < 30) return;
+        const img = t.toDataURL("image/jpeg", 0.7);
+        localStorage.setItem(SHOT_KEY, JSON.stringify({ img, w, h, at: Date.now() }));
+      } catch {}
+    });
+    map.triggerRepaint();
+  }
   // index.html loads the map library without holding up the app; this runs when it arrives
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
   const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [],
@@ -2169,6 +2210,15 @@
     };
     map.on("move", latFix);
     map.on("moveend", () => placeZoomFix());
+    // the live map has drawn its picture: fade the saved one out; once it's settled, save a new one
+    const shotT = setInterval(() => { if (GL.everFit && GL.ready && !map.isMoving() && map.areTilesLoaded()) { clearInterval(shotT); dropShot(); } }, 120);
+    setTimeout(() => { clearInterval(shotT); dropShot(); }, 6000);   // never leave it up if the map can't finish
+    map.on("moveend", () => {
+      clearTimeout(GL.shotT);
+      let tries = 0;
+      const t = () => { GL.shotT = setTimeout(() => { if (map.areTilesLoaded() && !map.isMoving()) takeShot(); else if (++tries < 8) t(); }, tries ? 1000 : 2000); };
+      t();
+    });
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
@@ -3290,23 +3340,34 @@
       const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);
       const mf = route.match(/^#\/hist\/(.+)$/);
       const mn = route.match(/^#\/nas\/(.+)$/);
-      if (route.startsWith("#/history/find")) await findView(route);
-      else if (mh) await (mh[1] === "stats" ? statsView(mh[2] || "") : mh[1] === "alerts" ? alertsHistoryView() : historyView(mh[2] || ""));
-      else if (mf) await histFlightView(decodeURIComponent(mf[1]));
-      else if (mn) await nasView(decodeURIComponent(mn[1]));
-      else if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
-      else if (m) await legView(m[1]);
-      else if (route.startsWith("#/add")) addView();
-      else if (route.startsWith("#/airports")) await airportsView();
-      else if (route.startsWith("#/tools")) await toolsView();
-      else if (route.startsWith("#/notify")) await notifyView();
-      else homeView();
+      const first = $app.firstElementChild;
+      const job = (async () => {
+        if (route.startsWith("#/history/find")) await findView(route);
+        else if (mh) await (mh[1] === "stats" ? statsView(mh[2] || "") : mh[1] === "alerts" ? alertsHistoryView() : historyView(mh[2] || ""));
+        else if (mf) await histFlightView(decodeURIComponent(mf[1]));
+        else if (mn) await nasView(decodeURIComponent(mn[1]));
+        else if (ma) await aircraftView(ma[1], parseInt(ma[2], 10));
+        else if (m) await legView(m[1]);
+        else if (route.startsWith("#/add")) addView();
+        else if (route.startsWith("#/airports")) await airportsView();
+        else if (route.startsWith("#/tools")) await toolsView();
+        else if (route.startsWith("#/notify")) await notifyView();
+        else homeView();
+      })();
+      // The page's copy on the phone is drawn right away (before its fresh data arrives): move the
+      // sheet to the page's resting spot now, so the map frames once, for the right room, instead
+      // of framing for the old spot and correcting when the fresh data lands (first Passport visit).
+      let placed = false;
+      if (restoreY == null && route !== lastRoute && $app.firstElementChild !== first) {
+        window.scrollTo(0, document.body.classList.contains("sheetmode") ? midY() : 0); placed = true;
+      }
+      await job;
       // hero map is drawn after its own fetch; give it a moment before clearing unused maps
       const tab = /^#\/history\/alerts/.test(route) ? "alerts" : /^#\/history\/find/.test(route) ? "search"
         : /^#\/(history|hist\/)/.test(route) ? "passport" : /^#\/(tools|notify|add)/.test(route) ? "" : "flights";
       document.querySelectorAll("#tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
       if (restoreY != null) { const y = restoreY; restoreY = null; window.scrollTo(0, y); requestAnimationFrame(() => { window.scrollTo(0, y); sheetUp(); }); }
-      else if (route !== lastRoute) window.scrollTo(0, document.body.classList.contains("sheetmode") ? midY() : 0);
+      else if (route !== lastRoute && !placed) window.scrollTo(0, document.body.classList.contains("sheetmode") ? midY() : 0);
       lastRoute = route;
     } catch (e) {
       $app.innerHTML = `<div class="card empty"><b>Can't reach the add-on</b>${esc(e.message)}</div>`;

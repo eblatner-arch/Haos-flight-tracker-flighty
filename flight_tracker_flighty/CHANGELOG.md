@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.15.5
+- No black map when the app opens: the last My Flights map is kept as a picture on the phone and shown instantly, then fades into the live map once its tiles are drawn (usually under a second). It's refreshed whenever the map settles on My Flights, and only used at the same screen size.
+- First Passport visit after opening: the list now moves to Passport's resting spot as soon as the page appears (from the phone's copy), instead of after the fresh data arrives from the add-on. The map frames once, for the right room, instead of moving a moment later. That delay is why it only happened the first time.
+
 ## 4.15.4
 - My Flights frames your routes in the open part of the map: clear of the blurred strip under the status bar (with the credit line) and of the button column on the right, so they're no longer tucked under either. A flight's page also stays clear of the top strip. Passport is unchanged.
 
