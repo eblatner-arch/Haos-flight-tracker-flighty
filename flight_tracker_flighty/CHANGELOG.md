@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.7.0
+- Radar from NOAA: the National Weather Service's MRMS mosaic (every NEXRAD radar merged and quality-controlled: ground clutter, birds and false echoes removed), the same as radar.weather.gov. Covers the US, Canada, the Caribbean, Alaska and Hawaii, refreshed every 5 minutes, sharper zoomed in. RainViewer (worldwide but unfiltered) is still a choice in Settings → Radar source.
+
 ## 4.6.0
 - Past flights' Times card says where each final time came from (United, FAA, a tower, surface radar, FlightAware...) instead of "tracked here". History now saves each actual time's source; flights saved before this version (and Flighty imports) show just "Actual". A flight still on your list gets its sources filled in on its next save.
 

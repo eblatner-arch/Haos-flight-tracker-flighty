@@ -1624,21 +1624,39 @@
       src.setData(fc); GL.src[id] = fc; GL.empty[id] = false;
     }
   }
+  // Radar. NOAA (default): the National Weather Service's MRMS mosaic, every NEXRAD radar merged and
+  // quality-controlled (ground clutter, birds and false echoes removed), as on radar.weather.gov;
+  // US, Canada, Caribbean, Alaska, Hawaii; new every 5 minutes. RainViewer: worldwide, but raw.
+  const radarSrc = () => pref("ft-radar-src", "noaa");
+  const NOAA_RADAR = "https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity/MapServer/export"
+    + "?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&layers=show:3&f=image";
+  let radarT = null;
   async function glRadar(on) {
     const map = GL.map;
     if (!map) return;
     if (map.getLayer("radar")) map.removeLayer("radar");
     if (map.getSource("radar")) map.removeSource("radar");
+    clearInterval(radarT); radarT = null;
     if (!on) return;
+    let src;
     try {
-      if (!RADAR || Date.now() - RADAR.at > 300000) {
-        const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
-        const fr = d.radar.past[d.radar.past.length - 1];
-        RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
+      if (radarSrc() === "noaa") {
+        // a new picture every 5 minutes: the address changes with it, so the phone doesn't reuse an old one
+        src = { type: "raster", tiles: [`${NOAA_RADAR}&_t=${Math.floor(Date.now() / 300000)}`], tileSize: 512, maxzoom: 10,
+          attribution: "Radar &copy; NOAA/NWS MRMS" };
+      } else {
+        if (!RADAR || Date.now() - RADAR.at > 300000) {
+          const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
+          const fr = d.radar.past[d.radar.past.length - 1];
+          RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
+        }
+        src = { type: "raster", tiles: [RADAR.url], tileSize: 256, maxzoom: 7, attribution: "Radar &copy; RainViewer" };
       }
       if (map.getSource("radar")) return;
-      map.addSource("radar", { type: "raster", tiles: [RADAR.url], tileSize: 256, maxzoom: 7, attribution: "Radar &copy; RainViewer" });
-      map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.6 } }, map.getLayer("artcc-fill") ? "artcc-fill" : undefined);
+      map.addSource("radar", src);
+      map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.65, "raster-fade-duration": 0 } },
+        map.getLayer("artcc-fill") ? "artcc-fill" : undefined);
+      radarT = setInterval(() => { if (radarOn() && !document.hidden) glRadar(true); }, 300000);
     } catch {}
   }
   // ---------- labels and airplanes, drawn by the GPU ----------
@@ -2729,6 +2747,7 @@
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
+        <div class="gl-row"><span>Radar source<small class="gl-sub">NOAA: filtered, US and nearby · RainViewer: worldwide, unfiltered</small></span><div class="seg mini">${[["noaa", "NOAA"], ["rv", "RainViewer"]].map(([k, l]) => `<button type="button" data-rs="${k}" class="${radarSrc() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <label class="gl-row"><span>Data saver<small class="gl-sub">Lighter map imagery, no radar, live position every 15 s</small></span><span class="switch"><input type="checkbox" id="p-low" ${lowData() ? "checked" : ""}><span></span></span></label>
       </div>
       <h2 class="section"><span>Add-on</span><span id="s-msg" class="small"></span></h2>
@@ -2788,6 +2807,11 @@
       $refresh.click();
     };
     document.getElementById("p-radar").onchange = (e) => setPref("ft-radar", e.target.checked ? "1" : "0");
+    $app.querySelectorAll("[data-rs]").forEach((b) => b.onclick = () => {
+      setPref("ft-radar-src", b.dataset.rs);
+      $app.querySelectorAll("[data-rs]").forEach((x) => x.classList.toggle("on", x === b));
+      if (radarOn()) glRadar(true);
+    });
     document.getElementById("p-low").onchange = (e) => { setPref("ft-lowdata", e.target.checked ? "1" : "0"); restyleAll(); };
     $app.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => {
       setPref("ft-mapstyle", b.dataset.ms);
