@@ -17,7 +17,7 @@
     tpl.innerHTML = html;
     patchChildren(target, tpl.content);
   }
-  const keepNode = (x, y) => x.classList && x.classList.contains("leaflet-container") && x.id && x.id === y.id;
+  const keepNode = (x, y) => x.classList && (x.classList.contains("leaflet-container") || x.classList.contains("maplibregl-map")) && x.id && x.id === y.id;
   function sameKind(x, y) {
     return x.nodeType === y.nodeType && x.nodeName === y.nodeName && (x.nodeType !== 1 || (x.id || "") === (y.id || ""));
   }
@@ -301,7 +301,8 @@
     (map._ftTiles || []).forEach((l) => map.removeLayer(l));
     map._ftTiles = [];
     if (mapStyle() === "satellite") {
-      map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 19, className: "sat-tiles",
+      map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 5, className: "sat-tiles", keepBuffer: 2, zIndex: 0 }).addTo(map));
+      map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 19, className: "sat-tiles", keepBuffer: 6, zIndex: 1,
         attribution: "&copy; Esri, Maxar" }).addTo(map));
       map._ftTiles.push(L.tileLayer(ESRI_LBL, { maxZoom: 20, maxNativeZoom: 19, pane: pane(map, "labels", 390) }).addTo(map));
       return;
@@ -638,7 +639,7 @@
           if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
           const m = MAPS[key];
           if (moved && m) {
-            if (m.paint === paintHome) paintHome(m, { ...m.home, focus: withChain(cur) }, false);
+            if (m.home) m.paint(m, { ...m.home, focus: withChain(cur) }, false);
             else paintMap(m, withChain(cur), false);
           }
           const te = document.getElementById("telem");
@@ -1208,7 +1209,7 @@
   async function historyView(year) {
     destroyMaps();
     const d = await api(`api/history${year ? `?year=${year}` : ""}`);
-    let h = `<div class="globe-bg" id="globe"></div><div class="sheet-gap pass"></div><section class="sheet">
+    let h = `<div class="mapbg" id="globe"></div><div class="sheet-gap pass"></div><section class="sheet">
       <div class="sheet-head"><h1>Passport</h1><div class="sh-btns">${avatar()}</div></div>
       <div class="ypills">${["", ...d.years].map((y) => `<a class="yp ${y === (year || "") ? "on" : ""}" href="#/history${y ? "/" + y : ""}">${y || "All-Time"}</a>`).join("")}</div>`;
     if (!d.flights.length) h += `<div class="card empty"><b>No flights yet</b>Your Calendar and Manual flights are saved here when they finish.</div>` + importCard(true);
@@ -1226,9 +1227,7 @@
         pl.innerHTML = passList(d);
       } else if (all) { PASS_ALL = true; pl.innerHTML = passList(d); }
     });
-    const gd = globeData(d);
-    globeLibs().then(() => drawGlobe(document.getElementById("globe"), gd))
-      .catch(() => { const g = document.getElementById("globe"); if (g) g.innerHTML = '<p class="small faint" style="text-align:center;margin-top:30vh">Globe couldn\'t load</p>'; });
+    drawGL(document.getElementById("globe"), globeData(d), { key: `pass-${year || "all"}`, paint: glPaintPass });
   }
 
   function bars(rows, fmtv, link) {
@@ -1740,7 +1739,7 @@
       map._ftRadar = L.tileLayer(RADAR.url, { opacity: 0.6, maxNativeZoom: 7, maxZoom: 20, pane: pane(map, "radar", 380), attribution: "Radar &copy; RainViewer" }).addTo(map);
     } catch {}
   }
-  const allLeaflet = () => Object.values(MAPS).map((m) => m.map).filter(Boolean);
+  const allLeaflet = () => Object.values(MAPS).filter((m) => !m.gl).map((m) => m.map).filter(Boolean);
   const TOWER = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 3h8l1.5 4.5H6.5zm-2.2 5.5h12.4l-1.4 4H7.2zM9 13.5h6l.6 7.5H8.4zM11 1h2v2h-2z"/></svg>';
   function addStack(map, home) {
     const Stack = L.Control.extend({
@@ -1753,13 +1752,13 @@
         L.DomEvent.disableClickPropagation(d);
         d.querySelector('[data-a="style"]').onclick = () => {
           setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite");
-          for (const m of allLeaflet()) addTiles(m, true);
+          restyleAll();
         };
         d.querySelector('[data-a="radar"]').onclick = () => {
           const on = !radarOn();
           setPref("ft-radar", on ? "1" : "0");
           document.querySelectorAll('.map-stack [data-a="radar"]').forEach((b) => b.classList.toggle("on", on));
-          for (const m of allLeaflet()) setRadar(m, on);
+          for (const m of Object.values(MAPS)) m.gl ? glRadar(m, on) : setRadar(m.map, on);
         };
         return d;
       },
@@ -2109,21 +2108,6 @@
   }
 
   // ---------- Passport ----------
-  const SCRIPTS = {};
-  const loadScript = (src) => SCRIPTS[src] || (SCRIPTS[src] = new Promise((res, rej) => {
-    const s = document.createElement("script");
-    s.src = src; s.onload = res; s.onerror = () => { delete SCRIPTS[src]; rej(new Error("couldn't load " + src)); };
-    document.head.appendChild(s);
-  }));
-  const GLOBE = { land: null, rot: null, data: null, el: null, cv: null, raf: 0 };
-  async function globeLibs() {
-    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js");
-    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js");
-    if (!GLOBE.land) {
-      const topo = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json").then((r) => r.json());
-      GLOBE.land = topojson.feature(topo, topo.objects.land);
-    }
-  }
   function globeData(d) {
     const A = d.airports || {}, routes = new Map(), aps = new Map();
     for (const f of d.flights) {
@@ -2131,88 +2115,9 @@
       const a = A[f.dep], b = A[f.diverted_to || f.arr];
       if (!a || !b || a.lat == null || b.lat == null) continue;
       routes.set([f.dep, f.diverted_to || f.arr].sort().join("-"), [a, b]);
-      aps.set(f.dep, a); aps.set(f.diverted_to || f.arr, b);
+      aps.set(f.dep, { ...a, code: f.dep }); aps.set(f.diverted_to || f.arr, { ...b, code: f.diverted_to || f.arr });
     }
     return { routes: [...routes.values()], airports: [...aps.values()] };
-  }
-  function drawGlobe(el, data) {
-    if (!el) return;
-    let cv = el.querySelector("canvas");
-    if (!cv) { cv = document.createElement("canvas"); el.appendChild(cv); }
-    GLOBE.el = el; GLOBE.cv = cv; GLOBE.data = data;
-    if (!GLOBE.rot) {
-      let x = 0, y = 0, z = 0;
-      for (const a of data.airports) {
-        const la = a.lat * Math.PI / 180, lo = a.lon * Math.PI / 180;
-        x += Math.cos(la) * Math.cos(lo); y += Math.cos(la) * Math.sin(lo); z += Math.sin(la);
-      }
-      const lon = data.airports.length ? Math.atan2(y, x) * 180 / Math.PI : -80;
-      const lat = data.airports.length ? Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI : 30;
-      GLOBE.rot = [-lon, -Math.max(-20, Math.min(40, lat)) + 6];
-    }
-    if (!el._wired) {
-      el._wired = true;
-      let drag = null;
-      el.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, r: [...GLOBE.rot], id: e.pointerId }; try { el.setPointerCapture(e.pointerId); } catch {} });
-      el.addEventListener("pointermove", (e) => {
-        if (!drag || e.pointerId !== drag.id) return;
-        const k = 180 / (Math.PI * (GLOBE.r || 150));
-        GLOBE.rot = [drag.r[0] + (e.clientX - drag.x) * k, Math.max(-75, Math.min(75, drag.r[1] - (e.clientY - drag.y) * k))];
-        if (!GLOBE.raf) GLOBE.raf = requestAnimationFrame(() => { GLOBE.raf = 0; renderGlobe(); });
-      });
-      const end = () => { drag = null; };
-      el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
-      window.addEventListener("resize", () => renderGlobe());
-    }
-    renderGlobe();
-  }
-  function renderGlobe() {
-    const el = GLOBE.el, cv = GLOBE.cv;
-    if (!el || !el.isConnected || !window.d3 || !GLOBE.land) return;
-    const W = el.clientWidth, H = el.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
-    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
-      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + "px"; cv.style.height = H + "px";
-    }
-    const ctx = cv.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    let seed = 7;
-    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    for (let i = 0; i < 170; i++) {
-      ctx.globalAlpha = 0.25 + rnd() * 0.65;
-      ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.arc(rnd() * W, rnd() * H, 0.3 + rnd() * 0.9, 0, 2 * Math.PI); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    const r = GLOBE.r = Math.min(W * 0.46, H * 0.3), cx = W / 2, cy = H * 0.38 + 10;
-    const proj = d3.geoOrthographic().scale(r).translate([cx, cy]).rotate(GLOBE.rot).clipAngle(90).precision(0.4);
-    const path = d3.geoPath(proj, ctx);
-    const glow = ctx.createRadialGradient(cx, cy, r * 0.96, cx, cy, r * 1.14);
-    glow.addColorStop(0, "rgba(110,160,255,.35)"); glow.addColorStop(1, "rgba(110,160,255,0)");
-    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy, r * 1.14, 0, 2 * Math.PI); ctx.fill();
-    const oc = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
-    oc.addColorStop(0, "#245c8a"); oc.addColorStop(1, "#06172e");
-    ctx.beginPath(); path({ type: "Sphere" }); ctx.fillStyle = oc; ctx.fill();
-    const lg = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
-    lg.addColorStop(0, "#7b8a63"); lg.addColorStop(0.45, "#55703f"); lg.addColorStop(1, "#6d6a4a");
-    ctx.beginPath(); path(GLOBE.land); ctx.fillStyle = lg; ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.12)"; ctx.lineWidth = 0.6; ctx.stroke();
-    ctx.beginPath(); path(d3.geoGraticule10()); ctx.strokeStyle = "rgba(255,255,255,.05)"; ctx.lineWidth = 0.6; ctx.stroke();
-    const sun = subsolar(new Date());
-    ctx.beginPath(); path(d3.geoCircle().center([sun.lon + 180, -sun.lat]).radius(90)()); ctx.fillStyle = "rgba(2,6,22,.55)"; ctx.fill();
-    ctx.beginPath();
-    for (const [a, b] of GLOBE.data.routes) path({ type: "LineString", coordinates: [[a.lon, a.lat], [b.lon, b.lat]] });
-    ctx.strokeStyle = "rgba(232,238,255,.9)"; ctx.lineWidth = 1.15; ctx.stroke();
-    const center = [-GLOBE.rot[0], -GLOBE.rot[1]];
-    for (const a of GLOBE.data.airports) {
-      if (d3.geoDistance([a.lon, a.lat], center) > Math.PI / 2 - 0.02) continue;
-      const p = proj([a.lon, a.lat]);
-      ctx.beginPath(); ctx.arc(p[0], p[1], 3.2, 0, 2 * Math.PI);
-      ctx.fillStyle = "#d8e6ff"; ctx.fill(); ctx.lineWidth = 1.4; ctx.strokeStyle = "#4c8dff"; ctx.stroke();
-    }
-    const rim = ctx.createRadialGradient(cx, cy, r * 0.72, cx, cy, r);
-    rim.addColorStop(0, "rgba(0,0,0,0)"); rim.addColorStop(1, "rgba(0,0,10,.38)");
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI); ctx.fillStyle = rim; ctx.fill();
   }
   let PASS_SORT = (() => { try { return JSON.parse(localStorage.getItem("ft-pass-sort")) || { k: "date", dir: -1 }; } catch { return { k: "date", dir: -1 }; } })();
   let PASS_ALL = false;
@@ -2274,6 +2179,256 @@
         ${planeSide("#2b4aa0")}<div class="pc-btn">All Aircraft Stats ${IC.chev}</div></a>` : ""}`;
   }
 
+
+  // ---------- 3D globe maps (MapLibre): My Flights, Passport, Airports ----------
+  // A real globe you can spin and zoom from the whole earth down to an airport, with place names.
+  // Imagery loads smoothly: the coarser tiles stay up while sharper ones arrive.
+  const CARTO_DARK = ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png`);
+  function glStyle() {
+    const sat = mapStyle() === "satellite";
+    return {
+      version: 8,
+      projection: { type: "globe" },
+      sources: sat
+        ? { base: { type: "raster", tiles: [ESRI_IMG], tileSize: 256, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
+            lbl: { type: "raster", tiles: [ESRI_LBL], tileSize: 256, maxzoom: 19 } }
+        : { base: { type: "raster", tiles: CARTO_DARK, tileSize: 256, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
+      layers: [
+        { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
+        ...(sat ? [{ id: "lbl", type: "raster", source: "lbl", paint: { "raster-fade-duration": 120 } }] : []),
+      ],
+    };
+  }
+  // The night side as a picture laid over the earth: dark where the sun is down, a soft twilight edge.
+  function nightImage() {
+    const W = 360, Hh = 360, c = document.createElement("canvas");
+    c.width = W; c.height = Hh;
+    const ctx = c.getContext("2d"), img = ctx.createImageData(W, Hh), s = subsolar(new Date()), R = Math.PI / 180;
+    const sd = Math.sin(s.lat * R), cd = Math.cos(s.lat * R);
+    for (let y = 0; y < Hh; y++) {
+      const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 0.5) / Hh)));   // Mercator rows
+      const sl = Math.sin(lat), cl = Math.cos(lat);
+      for (let x = 0; x < W; x++) {
+        const alt = Math.asin(sl * sd + cl * cd * Math.cos((-180 + (x + 0.5) - s.lon) * R)) / R;
+        const t = Math.max(0, Math.min(1, (2 - alt) / 14));
+        const i = (y * W + x) * 4;
+        img.data[i] = 2; img.data[i + 1] = 6; img.data[i + 2] = 22; img.data[i + 3] = Math.round(t * t * (3 - 2 * t) * 150);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return c.toDataURL();
+  }
+  const MERC = [[-180, 85.0511], [180, 85.0511], [180, -85.0511], [-180, -85.0511]];
+  const FC = (features) => ({ type: "FeatureCollection", features: features || [] });
+  const lineF = (pts, props) => ({ type: "Feature", properties: props || {}, geometry: { type: "LineString", coordinates: pts.map((p) => [p[1], p[0]]) } });
+  const ptF = (p, props) => ({ type: "Feature", properties: props || {}, geometry: { type: "Point", coordinates: [p[1], p[0]] } });
+  function glLayers(entry) {
+    const map = entry.map, route = css("--route");
+    const before = map.getLayer("lbl") ? "lbl" : undefined;
+    if (!map.getSource("night")) map.addSource("night", { type: "image", url: nightImage(), coordinates: MERC });
+    if (!map.getLayer("night")) map.addLayer({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
+    for (const id of ["routes", "track", "aps", "pts"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
+    const add = (l) => { if (!map.getLayer(l.id)) map.addLayer(l); };
+    add({ id: "routes", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": ["coalesce", ["get", "w"], 2.4], "line-opacity": 0.92 } });
+    add({ id: "track-edge", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#04122e", "line-width": 7, "line-opacity": 0.45 } });
+    add({ id: "track", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": route, "line-width": 4 } });
+    add({ id: "aps", type: "circle", source: "aps", paint: { "circle-radius": 4.5, "circle-color": route, "circle-stroke-color": "#fff", "circle-stroke-width": 2, "circle-pitch-alignment": "map" } });
+    add({ id: "pts", type: "circle", source: "pts", paint: { "circle-radius": 6.5, "circle-color": ["get", "c"], "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
+    if (radarOn()) glRadar(entry, true);
+  }
+  async function glRadar(entry, on) {
+    const map = entry.map;
+    if (map.getLayer("radar")) map.removeLayer("radar");
+    if (map.getSource("radar")) map.removeSource("radar");
+    if (!on) return;
+    try {
+      if (!RADAR || Date.now() - RADAR.at > 300000) {
+        const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
+        const fr = d.radar.past[d.radar.past.length - 1];
+        RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
+      }
+      if (map.getSource("radar")) return;
+      map.addSource("radar", { type: "raster", tiles: [RADAR.url], tileSize: 256, maxzoom: 7, attribution: "Radar &copy; RainViewer" });
+      map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.6 } }, map.getLayer("routes") ? "routes" : undefined);
+    } catch {}
+  }
+  function glMarkers(entry, list) {
+    (entry.markers || []).forEach((m) => m.remove());
+    entry.markers = list.map(([pos, html, opts]) => {
+      const t = document.createElement("div");
+      t.innerHTML = html;
+      return new maplibregl.Marker({ element: t.firstElementChild, ...(opts || {}) }).setLngLat([pos[1], pos[0]]).addTo(entry.map);
+    });
+  }
+  const glPlane = (pos, hdg) => [pos, `<div class="pbadge gl"><div>${PLANE}</div></div>`, { rotation: hdg || 0, rotationAlignment: "map", pitchAlignment: "map" }];
+  // Fit to the routes in the part of the screen the sheet doesn't cover.
+  function glFit(entry) {
+    const map = entry.map, b = entry.bounds;
+    const H = map.getContainer().clientHeight || window.innerHeight;
+    const g = document.querySelector(".sheet-gap"), gap = g ? g.getBoundingClientRect().height : H * 0.45;
+    const padding = { top: 60, left: 36, right: 76, bottom: Math.max(30, Math.min(H - 170, H - gap + 30)) };
+    if (entry.globeView || !b.length) {
+      const c = entry.globeView || [35, -85];
+      map.jumpTo({ center: [c[1], c[0]], zoom: entry.globeZoom || 1.6, padding });
+      return;
+    }
+    let w = 180, e = -180, s = 90, n = -90;
+    for (const [la, lo] of b) { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
+    try { map.fitBounds([[w, s], [e, n]], { padding, maxZoom: entry.maxZoom || 6.5, duration: 0 }); }
+    catch { map.jumpTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 3 }); }
+  }
+  function glStack(entry, home) {
+    const ctl = {
+      onAdd() {
+        const d = document.createElement("div");
+        d.className = "maplibregl-ctrl gl-ctrls";
+        d.innerHTML = `<div class="map-stack"><button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button>${home ? `<button type="button" data-a="apts" aria-label="Airport status">${TOWER}</button>` : ""}</div>
+          <button type="button" class="map-center" data-a="fit" aria-label="Center">${IC.locate}</button>`;
+        d.querySelector('[data-a="style"]').onclick = () => { setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite"); restyleAll(); };
+        d.querySelector('[data-a="radar"]').onclick = () => {
+          const on = !radarOn();
+          setPref("ft-radar", on ? "1" : "0");
+          document.querySelectorAll('.map-stack [data-a="radar"]').forEach((b) => b.classList.toggle("on", on));
+          for (const m of Object.values(MAPS)) m.gl ? glRadar(m, on) : setRadar(m.map, on);
+        };
+        if (home) d.querySelector('[data-a="apts"]').onclick = () => go("#/airports");
+        d.querySelector('[data-a="fit"]').onclick = () => glFit(entry);
+        return d;
+      },
+      onRemove() {},
+    };
+    entry.map.addControl(ctl, "top-right");
+  }
+  function restyleAll() {
+    for (const m of Object.values(MAPS)) {
+      if (m.gl) { m.ready = false; m.map.setStyle(glStyle(), { diff: false }); }
+      else addTiles(m.map, true);
+    }
+  }
+  function drawGL(el, data, opts) {
+    if (!el) return null;
+    const key = opts.key, have = MAPS[key];
+    if (!window.maplibregl) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return null; }
+    if (have && have.gl) {
+      if (have.el !== el) el.replaceWith(have.el);
+      usedMaps.add(key);
+      have.paint(have, data, false);
+      setTimeout(() => have.map.resize(), 30);
+      return have;
+    }
+    if (have) { try { have.map.remove(); } catch {} delete MAPS[key]; }
+    const map = new maplibregl.Map({ container: el, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
+      dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 6 });
+    map.touchZoomRotate.disableRotation();
+    map.keyboard.disable();
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), "top-left");
+    const entry = { gl: true, el, map, paint: opts.paint, bounds: [], interactive: true, full: true, ready: false, last: data, first: true };
+    entry.center = () => glFit(entry);
+    MAPS[key] = entry;
+    usedMaps.add(key);
+    glStack(entry, !!opts.home);
+    // every style load (the first, and after a Satellite/Dark switch): our layers, then the last picture
+    map.on("style.load", () => {
+      glLayers(entry);
+      entry.ready = true;
+      const fit = entry.first;
+      entry.first = false;
+      entry.paint(entry, entry.last, fit);
+    });
+    map.on("zoom", () => el.classList.toggle("z3", map.getZoom() >= 3));
+    // the night side moves: redraw it every 10 minutes while the map is up
+    entry.nightT = setInterval(() => {
+      if (!el.isConnected) { clearInterval(entry.nightT); return; }
+      const src = map.getSource("night");
+      if (src) src.updateImage({ url: nightImage(), coordinates: MERC });
+    }, 600000);
+    return entry;
+  }
+  // My Flights: every route in the next two weeks, airports, the airplane you're on.
+  function glPaintHome(entry, data, fit) {
+    entry.home = data; entry.leg = data.focus || null; entry.last = data;
+    if (!entry.ready) return;
+    const map = entry.map, routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [];
+    for (const l of data.legs) {
+      const A = ll(l.dep_ap), B = ll(l.arr_ap);
+      if (!A || !B) continue;
+      const k = [l.dep, l.arr].sort().join("-");
+      if (!seen.has(k)) { seen.add(k); routes.push(lineF(gcPoints(A, B))); }
+      aps.set(l.dep, A); aps.set(l.arr, B);
+      bounds.push(A, B);
+    }
+    const f = data.focus;
+    for (const l of data.legs) {
+      if (!["airborne", "taxi_out"].includes(l.phase) || (f && f.id === l.id)) continue;
+      const p = l.flight && l.flight.last_position, B = ll(l.arr_ap);
+      if (p && p[0] != null) marks.push(glPlane([p[0], p[1]], B ? bearing([p[0], p[1]], B) : 0));
+    }
+    let track = [];
+    entry.ownMarker = null;
+    if (f && ["airborne", "taxi_out", "landed"].includes(f.phase)) {
+      const tr = ((f.flight || {}).track || []).filter((p) => p[0] != null);
+      if (tr.length > 1) track = [lineF(smooth(tr.map((p) => [p[0], p[1]])))];
+      let pos = null, hdg = 0;
+      if (f.live) { pos = newestPos(f.live, tr); hdg = headingOf(f.live, tr); }
+      else if (tr.length) { pos = tr[tr.length - 1]; hdg = headingOf(null, tr); }
+      if (pos) { marks.push(glPlane([pos[0], pos[1]], hdg)); entry.ownHdg = hdg; entry.ownIdx = marks.length - 1; }
+    }
+    map.getSource("routes").setData(FC(routes));
+    map.getSource("track").setData(FC(track));
+    map.getSource("aps").setData(FC([...aps.values()].map((p) => ptF(p))));
+    map.getSource("pts").setData(FC());
+    glMarkers(entry, marks);
+    if (entry.ownIdx != null && marks.length) {
+      const mk = entry.markers[entry.ownIdx];
+      entry.ownMarker = { setLatLng: (p) => mk.setLngLat([p[1], p[0]]) };
+      entry.ownIdx = null;
+    }
+    entry.bounds = bounds;
+    if (fit) glFit(entry);
+  }
+  // Passport: everything you've flown, on a globe; airport codes once you zoom in.
+  function glPaintPass(entry, data, fit) {
+    entry.last = data;
+    if (!entry.ready) return;
+    const map = entry.map;
+    map.getSource("routes").setData(FC(data.routes.map(([a, b]) => lineF(gcPoints([a.lat, a.lon], [b.lat, b.lon], 48), { c: "#e8eeff", w: 1.4 }))));
+    map.getSource("aps").setData(FC(data.airports.map((a) => ptF([a.lat, a.lon]))));
+    map.setPaintProperty("aps", "circle-radius", ["interpolate", ["linear"], ["zoom"], 1, 2.6, 4, 4.5]);
+    map.setPaintProperty("aps", "circle-stroke-width", ["interpolate", ["linear"], ["zoom"], 1, 1.2, 4, 2]);
+    map.getSource("track").setData(FC());
+    map.getSource("pts").setData(FC());
+    glMarkers(entry, data.airports.map((a) => [[a.lat, a.lon], `<span class="gl-code">${esc(a.code)}</span>`, { anchor: "left", offset: [7, 0] }]));
+    if (fit) {
+      let x = 0, y = 0, z = 0;
+      for (const a of data.airports) {
+        const la = a.lat * Math.PI / 180, lo = a.lon * Math.PI / 180;
+        x += Math.cos(la) * Math.cos(lo); y += Math.cos(la) * Math.sin(lo); z += Math.sin(la);
+      }
+      entry.globeView = data.airports.length ? [Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI, Math.atan2(y, x) * 180 / Math.PI] : [30, -80];
+      entry.globeZoom = 1.35;
+      glFit(entry);
+      entry.globeView = null;   // the locate button fits the routes afterwards
+      entry.bounds = data.airports.map((a) => [a.lat, a.lon]);
+      entry.maxZoom = 4;
+    }
+  }
+  // Airports: every airport the FAA lists now, red for programs and stops, amber for delays.
+  function glPaintAirports(entry, data, fit) {
+    entry.last = data;
+    if (!entry.ready) return;
+    const map = entry.map, red = css("--red"), amber = "#ffc53d";
+    const list = data.airports.filter((a) => a.lat != null);
+    map.getSource("pts").setData(FC(list.map((a) => ptF([a.lat, a.lon], { c: issueRank(a) < 2 ? red : amber }))));
+    for (const id of ["routes", "track", "aps"]) map.getSource(id).setData(FC());
+    glMarkers(entry, list.map((a) => [[a.lat, a.lon], `<span class="gl-code on">${esc(a.code)}</span>`, { anchor: "left", offset: [9, 0] }]));
+    entry.bounds = list.length ? list.map((a) => [a.lat, a.lon]) : [];
+    entry.maxZoom = 5;
+    if (!list.length) { entry.globeView = [38, -97]; entry.globeZoom = 2.6; }
+    if (fit) glFit(entry);
+    entry.globeView = null;
+  }
+
   // ---------- views ----------
   function homeView() {
     const sortKey = (l) => (l.flight && best(l.flight.times, "out")) || l.sched_out;
@@ -2310,14 +2465,14 @@
     $app.innerHTML = h;
     // the map: every route in the next two weeks, and the airplane you're on (or about to be)
     const onMap = live.filter((l) => sortKey(l) - nowS < 14 * 86400).slice(0, 16);
-    const opt = { key: "home", paint: paintHome, controls: "basic" };
+    const opt = { key: "home", paint: glPaintHome, home: true };
     const data = (full) => ({ legs: onMap.length ? onMap : live.slice(0, 1), focus: full ? withChain(full) : null });
-    drawMap(document.getElementById("home-map"), data(focus && LEGS[focus.id]), opt);
+    drawGL(document.getElementById("home-map"), data(focus && LEGS[focus.id]), opt);
     if (focus && moving(focus)) {
       api(`api/leg/${focus.id}`).then((full) => {
         LEGS[focus.id] = full;
         const el = document.getElementById("home-map");
-        if (el) { drawMap(el, data(full), opt); liveWatch(full, "home"); }
+        if (el) { drawGL(el, data(full), opt); liveWatch(full, "home"); }
       }).catch(() => {});
     }
   }
@@ -2364,7 +2519,7 @@
       ${minor.length ? `<h2 class="ap-h">Minor Issues</h2>${minor.map(row).join("")}` : ""}
       ${!list.length ? `<div class="card empty"><b>All clear</b>No FAA ground stops, delay programs, closures or delay trends right now.</div>` : ""}
     </section>`;
-    drawMap(document.getElementById("apt-map"), { airports: list, labels: list.length <= 25 }, { key: "apts", paint: paintAirports, controls: "basic" });
+    drawGL(document.getElementById("apt-map"), { airports: list }, { key: "apts", paint: glPaintAirports });
   }
 
   // A ground stop or delay program on a map: the centers whose departures it holds, filled; the

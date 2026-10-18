@@ -950,3 +950,24 @@ body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 48px
 .apt-dot-lbl { font: 700 10px/1 -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: nowrap; }
 .sheet-head .xbtn { margin: 0; }
 @media (max-width: 380px) { .fr-cities { font-size: 17px; } .fr-times { font-size: 14px; } .ep-big { font-size: 29px; } }
+
+/* ---- 3D globe maps (MapLibre) ---- */
+.mapbg.maplibregl-map {
+  background-color: #000;
+  background-image: radial-gradient(1.2px 1.2px at 12% 18%, rgba(255,255,255,.85), transparent 60%),
+    radial-gradient(1px 1px at 63% 41%, rgba(255,255,255,.6), transparent 60%), radial-gradient(1px 1px at 37% 77%, rgba(255,255,255,.7), transparent 60%),
+    radial-gradient(1.4px 1.4px at 85% 12%, rgba(255,255,255,.8), transparent 60%), radial-gradient(1px 1px at 91% 66%, rgba(255,255,255,.5), transparent 60%),
+    radial-gradient(1px 1px at 24% 52%, rgba(255,255,255,.45), transparent 60%), radial-gradient(1.2px 1.2px at 52% 8%, rgba(255,255,255,.65), transparent 60%),
+    radial-gradient(1px 1px at 72% 88%, rgba(255,255,255,.55), transparent 60%);
+  background-size: 260px 260px;
+}
+.mapbg .maplibregl-ctrl-top-right, .mapbg .maplibregl-ctrl-top-left { top: var(--sat); }
+.gl-ctrls { display: flex; flex-direction: column; align-items: flex-end; margin: 10px 10px 0 0 !important; background: none !important; box-shadow: none !important; }
+.gl-ctrls .map-center { display: grid; place-items: center; cursor: pointer; color: #fff; padding: 0; }
+.mapbg .maplibregl-ctrl-attrib { background: rgba(0,0,0,.35) !important; color: rgba(255,255,255,.6); font-size: 9px; margin: 6px !important; }
+.mapbg .maplibregl-ctrl-attrib a { color: rgba(255,255,255,.6); }
+.mapbg .maplibregl-ctrl-attrib-button { filter: invert(1); opacity: .6; }
+.pbadge.gl { width: 28px; height: 28px; }
+.gl-code { font: 700 10px/1 -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000, 0 0 1px #000;
+  white-space: nowrap; pointer-events: none; display: none; }
+.z3 .gl-code, .gl-code.on { display: block; }

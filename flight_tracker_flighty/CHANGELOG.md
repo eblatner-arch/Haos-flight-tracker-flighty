@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.2.0
+- My Flights, Passport and Airports are now a real 3D globe (MapLibre): pinch to zoom from the whole earth down to an airport, drag to spin, with the night side and place names. Passport shows airport codes once you zoom in.
+- Smoother imagery: coarse tiles stay up while sharper ones arrive, so moving the map no longer shows it loading square by square. The flight page's map keeps a low-detail layer underneath for the same reason.
+- Passport's airport dots are smaller when zoomed out.
+
 ## 4.1.0
 - Airports: the control-tower button on the My Flights map opens every US airport the FAA lists right now (ground stops, delay programs, closures, delay trends, deicing) on a map and in a list, major issues first, your airports marked. Ground stops and delay programs open their scope map. Uses the FAA data already being fetched, no extra calls.
 - The detailed timetable is replaced by a short Times card: gate out, takeoff, landing and gate in, each with whether it's actual, an estimate or the schedule, and where it came from (the airline, the FAA, a tower, surface radar, FlightAware). EDCT shows there too.
