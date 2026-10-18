@@ -541,9 +541,10 @@ body.sheetmode main > * { pointer-events: auto; }
 body.sheetmode main > .sheet-gap { pointer-events: none; }
 .mapbg { position: fixed; inset: 0; z-index: 0; }
 .mapbg.leaflet-container { clip-path: none; contain: strict; border: 0; border-radius: 0; }
-.sheet-gap { height: 42vh; }
-.sheet-gap.d { height: 52vh; }
-.sheet-gap.pass { height: 58vh; }
+/* the gap above the sheet is tall enough to pull the sheet down to a peek; pages open scrolled
+   to the middle stop */
+.sheet-gap { height: calc(100vh - var(--peek)); }
+:root { --peek: 270px; }
 .sheet {
   position: relative; z-index: 2; max-width: 760px; margin: 0 auto; background: var(--sheet);
   border-radius: 30px 30px 0 0; padding: 8px 16px calc(130px + env(safe-area-inset-bottom));
@@ -971,3 +972,6 @@ body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 48px
 .gl-code { font: 700 10px/1 -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000, 0 0 1px #000;
   white-space: nowrap; pointer-events: none; display: none; }
 .z3 .gl-code, .gl-code.on { display: block; }
+
+/* the sheet must be at least a screen tall so it can be scrolled to every stop */
+.sheet { min-height: 100vh; }

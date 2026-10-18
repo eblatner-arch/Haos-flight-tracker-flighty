@@ -1793,11 +1793,15 @@
   }
   const planeBadge = (pos, hdg, title) => L.marker(pos, { title, zIndexOffset: 1000, icon: L.divIcon({ className: "pbadge-wrap", iconSize: [34, 34], iconAnchor: [17, 17],
     html: `<div class="pbadge"><div style="transform:rotate(${hdg || 0}deg)">${PLANE}</div></div>` }) });
+  // The sheet has three stops: peeking (pulled down, a big map), middle (where pages open) and
+  // full (scrolled up over the map). midTop: where the sheet's top sits at the middle stop.
+  const MID_F = (g) => g.classList.contains("pass") ? 0.58 : g.classList.contains("d") ? 0.52 : 0.42;
+  const midTop = () => { const g = document.querySelector(".sheet-gap"); return g ? window.innerHeight * MID_F(g) : window.innerHeight * 0.45; };
+  const midY = () => { const g = document.querySelector(".sheet-gap"); return g ? Math.max(0, Math.round(g.offsetHeight - midTop())) : 0; };
   // Padding that keeps a full-screen map's routes in the part the sheet doesn't cover.
   function fitOpts(el, maxZoom) {
     if (el && el.classList && el.classList.contains("mapbg")) {
-      const H = window.innerHeight, g = document.querySelector(".sheet-gap");
-      const gap = g ? g.getBoundingClientRect().height : H * 0.45;
+      const H = window.innerHeight, gap = midTop();
       return { paddingTopLeft: [40, 70], paddingBottomRight: [150, Math.max(40, Math.min(H - 160, H - gap + 30))], maxZoom };
     }
     return { padding: [28, 28], maxZoom };
@@ -2266,7 +2270,7 @@
   function glFit(entry) {
     const map = entry.map, b = entry.bounds;
     const H = map.getContainer().clientHeight || window.innerHeight;
-    const g = document.querySelector(".sheet-gap"), gap = g ? g.getBoundingClientRect().height : H * 0.45;
+    const gap = midTop();
     const padding = { top: 60, left: 36, right: 76, bottom: Math.max(30, Math.min(H - 170, H - gap + 30)) };
     if (entry.globeView || !b.length) {
       const c = entry.globeView || [35, -85];
@@ -3141,7 +3145,7 @@
         : /^#\/(history|hist\/)/.test(route) ? "passport" : /^#\/(tools|notify|add)/.test(route) ? "" : "flights";
       document.querySelectorAll("#tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
       if (restoreY != null) { const y = restoreY; restoreY = null; window.scrollTo(0, y); requestAnimationFrame(() => { window.scrollTo(0, y); sheetUp(); }); }
-      else if (route !== lastRoute) window.scrollTo(0, 0);
+      else if (route !== lastRoute) window.scrollTo(0, document.body.classList.contains("sheetmode") ? midY() : 0);
       lastRoute = route;
     } catch (e) {
       $app.innerHTML = `<div class="card empty"><b>Can't reach the add-on</b>${esc(e.message)}</div>`;
@@ -3173,6 +3177,20 @@
     document.body.classList.toggle("sheet-up", !!g && document.body.classList.contains("sheetmode") && window.scrollY >= g.offsetHeight - 4);
   };
   window.addEventListener("scroll", sheetUp, { passive: true });
+  // Let go between peeking and the middle stop and the sheet settles on the nearer one, like iOS.
+  let touching = false, settleT = null;
+  const settle = () => {
+    clearTimeout(settleT);
+    settleT = setTimeout(() => {
+      if (touching || !document.body.classList.contains("sheetmode")) return;
+      const m = midY(), y = window.scrollY;
+      if (m > 0 && y > 2 && y < m - 2) window.scrollTo({ top: y < m * 0.5 ? 0 : m, behavior: "smooth" });
+    }, 140);
+  };
+  window.addEventListener("scroll", settle, { passive: true });
+  document.addEventListener("touchstart", () => { touching = true; clearTimeout(settleT); }, { passive: true });
+  document.addEventListener("touchend", () => { touching = false; settle(); }, { passive: true });
+  document.addEventListener("touchcancel", () => { touching = false; settle(); }, { passive: true });
   window.addEventListener("hashchange", () => { if (location.hash && location.hash !== ROUTE) go(location.hash); });
 
   // ---------- live updates ----------

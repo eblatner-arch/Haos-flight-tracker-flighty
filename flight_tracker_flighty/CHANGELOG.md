@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.2.1
+- The sheet can be pulled down to a peek (just its header over a big map), like Flighty. Pages open at the middle stop; let go between the two and it settles on the nearer one. Scrolling up still covers the map.
+
 ## 4.2.0
 - My Flights, Passport and Airports are now a real 3D globe (MapLibre): pinch to zoom from the whole earth down to an airport, drag to spin, with the night side and place names. Passport shows airport codes once you zoom in.
 - Smoother imagery: coarse tiles stay up while sharper ones arrive, so moving the map no longer shows it loading square by square. The flight page's map keeps a low-detail layer underneath for the same reason.
