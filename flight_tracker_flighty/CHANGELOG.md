@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.18.2
+- Fixed: no surface traffic on inbound legs' pages. The add-on only collected FAA surface radar for your own flights' airports. It now also collects it for your inbound legs' airports (until each lands), and follows their callsigns in the SWIM feeds.
+
 ## 4.18.1
 - EDCTs for inbound legs: the FAA's TFMS feed carries every controlled flight, so your inbound (and its inbounds) now show their EDCT too. They're matched by callsign, departure airport and that day's departure time. It shows on the Inbound Aircraft card (an amber "EDCT 4:12 PM" pill and a line saying when), in the inbound timeline, and as a chip on each inbound leg's page. It disappears once that leg takes off. Needs the SWIM TFMS subscription.
 
