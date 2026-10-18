@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.17.0
+- Map shape: Settings → Map shape → Globe or Flat. Flat is lighter to draw, so dragging and zooming are smoother. Framing, names, borders, radar and every page work on both; the globe-only adjustments switch off on the flat map. Globe stays the default.
+
 ## 4.16.1
 - Removed the saved map picture shown while the app starts: it looked blurry, and swipes moved the live map hidden underneath it.
 - No white flash when the app opens: the page is black from the first moment.

@@ -1227,6 +1227,8 @@
   const ESRI_IMG = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
   const ESRI_LBL = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
   const mapStyle = () => pref("ft-mapstyle", "satellite");
+  // Globe (default, like Flighty) or a flat map: lighter to draw, so smoother to drag
+  const flatMap = () => pref("ft-proj", "globe") === "flat";
   const lowData = () => pref("ft-lowdata", "0") === "1";
   const radarOn = () => pref("ft-radar", "0") === "1" && !lowData();
   let RADAR = null;
@@ -1725,7 +1727,7 @@
     setTimeout(gAttr, 0);
     return {
       version: 8,
-      projection: { type: "globe" },
+      projection: { type: flatMap() ? "mercator" : "globe" },
       sources: mb
         ? { under: under([img]), base: { type: "raster", tiles: [mbTiles()], tileSize: ts, maxzoom: 22, attribution: '<b class="attr-mb">mapbox</b> &copy; Mapbox &copy; OpenStreetMap &copy; Maxar' } }
         : goo
@@ -1983,7 +1985,7 @@
   function placeZoomFix(force) {
     const map = GL.map;
     if (!map || !GL.ready || !map.getLayer("plc")) return;
-    const off = Math.round(-Math.log2(Math.max(0.2, Math.cos(map.getCenter().lat * Math.PI / 180))) * 10) / 10;
+    const off = flatMap() ? 0 : Math.round(-Math.log2(Math.max(0.2, Math.cos(map.getCenter().lat * Math.PI / 180))) * 10) / 10;
     if (!force && off === plcOff) return;
     plcOff = off;
     map.setFilter("plc", [">=", ["+", ["zoom"], off], ["get", "mz"]]);
@@ -2160,7 +2162,8 @@
     // looks the same size.
     const latFix = () => {
       if (!GL.ready) return;
-      const c = Math.max(0.25, Math.cos(map.getCenter().lat * Math.PI / 180));
+      // (the flat map doesn't change its zoom number with latitude: nothing to undo)
+      const c = flatMap() ? 1 : Math.max(0.25, Math.cos(map.getCenter().lat * Math.PI / 180));
       for (const id of ["under", "base", "lbl"]) {
         const src = map.getSource(id);
         if (!src) continue;
@@ -3130,6 +3133,7 @@
         <a class="gl-row" href="#/add"><span>Add a flight</span>${IC.chev}</a>
         <button type="button" class="gl-row" id="p-refresh"><span>Check all flights now</span><span class="small muted" id="p-refresh-msg"></span></button>
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
+        <div class="gl-row"><span>Map shape<small class="gl-sub">Flat is lighter to draw: smoother dragging and zooming</small></span><div class="seg mini">${[["globe", "Globe"], ["flat", "Flat"]].map(([k, l]) => `<button type="button" data-proj="${k}" class="${(flatMap() ? "flat" : "globe") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Esri"], ...(mbTok() ? [["mapbox", "Mapbox"]] : []), ...(gKey() ? [["google", "Google"]] : []), ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
         <div class="gl-row"><span>Saved map tiles<small class="gl-sub" id="tc-info">${TC_ON ? "…" : "Needs the https address (the Home Assistant app)"}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="tc-clear">Clear</button>' : ""}</div>
@@ -3200,6 +3204,12 @@
       if (radarOn()) glRadar(true);
     });
     document.getElementById("p-low").onchange = (e) => { setPref("ft-lowdata", e.target.checked ? "1" : "0"); restyleAll(); };
+    $app.querySelectorAll("[data-proj]").forEach((b) => b.onclick = () => {
+      setPref("ft-proj", b.dataset.proj);
+      $app.querySelectorAll("[data-proj]").forEach((x) => x.classList.toggle("on", x === b));
+      restyleAll();
+      GL.everFit = false; GL.view = null;   // frame afresh for the new shape when you go back to a map
+    });
     $app.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => {
       setPref("ft-mapstyle", b.dataset.ms);
       $app.querySelectorAll("[data-ms]").forEach((x) => x.classList.toggle("on", x === b));
