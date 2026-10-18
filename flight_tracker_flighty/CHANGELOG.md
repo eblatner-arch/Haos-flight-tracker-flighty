@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.7.1
+- Fixed: the Add a Flight page (and a Settings row) were wider than the screen, so iOS zoomed the page out. The hidden buttons behind the Mine / A friend's switch stretched across the page.
+
 ## 4.7.0
 - Radar from NOAA: the National Weather Service's MRMS mosaic (every NEXRAD radar merged and quality-controlled: ground clutter, birds and false echoes removed), the same as radar.weather.gov. Covers the US, Canada, the Caribbean, Alaska and Hawaii, refreshed every 5 minutes, sharper zoomed in. RainViewer (worldwide but unfiltered) is still a choice in Settings → Radar source.
 

@@ -1002,3 +1002,11 @@ body:not(.sheetmode) #map { visibility: hidden; }
 .map-stack, .map-center, .telem { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: rgba(38,38,42,.94) !important; }
 .mapbg .maplibregl-ctrl-attrib { backdrop-filter: none; }
 .sheet { box-shadow: 0 -4px 16px rgba(0,0,0,.35); }
+
+/* the Mine / A friend's switch: its hidden radio buttons got the form's full-width input style and,
+   positioned absolutely, stretched the page past the screen (iOS then zoomed the whole page out) */
+.seg { position: relative; }
+.seg input, .form .seg input { position: absolute; width: 1px !important; height: 1px; min-height: 0; padding: 0; border: 0; margin: 0; opacity: 0; pointer-events: none; overflow: hidden; }
+button.gl-row { box-sizing: border-box; max-width: 100%; margin: 0; }
+/* nothing on a page can push it wider than the screen */
+html, body { overflow-x: hidden; max-width: 100%; }
