@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.15.2
+- Passport opens framed right the first time: the map waits for the sheet to settle at Passport's resting spot (lower than My Flights) and frames for the room actually left, the same as the center button does.
+- My Flights leaves room around your routes, like Flighty (they fill about 80% of the space above the sheet instead of running edge to edge). A flight's page keeps a little room too; FAA program maps still use all of it.
+- Passport's routes are centered left-to-right, the same way as My Flights'.
+
 ## 4.15.1
 - The globe is framed face-on, like Flighty: the camera looks straight at the middle of your routes and the picture slides up above the sheet, zooming out as far as needed (a whole globe for Passport). Before, it aimed the camera far south of the routes to make room for the sheet, which tilted the view: routes looked squashed near the top edge of the earth (worst on Passport, after deleting a flight, and on a flight with its inbound leg), and closing a flight came back a little low.
 - Returning to My Flights frames it the same way every time.

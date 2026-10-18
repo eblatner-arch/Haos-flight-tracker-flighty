@@ -2011,7 +2011,8 @@
     if (GL.opts.kind === "nas") { padding.left = 18; padding.right = 58; }
     // My Flights: the routes centered on the screen, as wide as it allows (the buttons may overlap a
     // corner; shifting everything left to dodge them made the globe look lopsided)
-    if (GL.opts.kind === "home") { padding.left = 26; padding.right = 26; }
+    if (GL.opts.kind === "home" || !GL.opts.kind) { padding.left = 26; padding.right = 26; }   // My Flights, Passport
+    GL.fitBottom = padding.bottom;
     const dur = animate ? 900 : 0;
     // Face-on, like Flighty: the camera looks straight at the middle of the routes, and the map's
     // padding slides the whole picture into the part of the screen above the sheet. (fitBounds
@@ -2031,7 +2032,10 @@
     const W = MAP_EL.clientWidth || window.innerWidth, H = MAP_EL.clientHeight || window.innerHeight;
     const aw = Math.max(80, W - padding.left - padding.right), ah = Math.max(80, H - padding.top - padding.bottom);
     const dx = Math.max(1e-6, (e - w) / 360), dy = Math.max(1e-6, (my(n) - my(s)) / (2 * Math.PI));
-    const z = Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)));
+    // with room around them, like Flighty: My Flights' routes take about 80% of the space (some
+    // context and the globe's curve around them), a flight 85%, Passport 90%, an FAA program all of it
+    const fill = { home: 0.8, leg: 0.85, nas: 1 }[GL.opts.kind] || 0.9;
+    const z = Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)) * fill);
     map.easeTo({ center, zoom: Math.max(0.5, Math.min(z, GL.maxZoom || 7)), padding, duration: dur });
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
@@ -2146,7 +2150,25 @@
     GL.map.resize();
     paint(data, fit);
   }
-  const fitNow = (fit) => { if (fit) { glFit(!!GL.everFit); GL.everFit = true; } };
+  // always framed for where the sheet actually is (Passport opens with it lower than My Flights)
+  // A page draws its map before the router moves the sheet to that page's resting spot, so the
+  // framing waits a frame and measures the sheet where it really is (like the center button).
+  const fitNow = (fit) => {
+    if (!fit) return;
+    cancelAnimationFrame(GL.fitRaf);
+    GL.fitRaf = requestAnimationFrame(() => { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = true; });
+    // the sheet may still be gliding to the new page's resting spot (Passport rests lower): once it
+    // has settled, frame again if the room above it changed
+    clearTimeout(GL.fitT2);
+    const view = GL.view;
+    const again = (ms, left) => { GL.fitT2 = setTimeout(() => {
+      if (GL.view !== view) return;
+      const b = mapPad(false, true).bottom;
+      if (GL.fitBottom != null && Math.abs(b - GL.fitBottom) > 30) glFit(true, true);
+      else if (left) again(ms, left - 1);
+    }, ms); };
+    again(350, 2);
+  };
 
   // ---------- what each page draws ----------
   // My Flights: every route in the next two weeks, airports, the airplanes in the air.
