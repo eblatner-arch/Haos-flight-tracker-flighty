@@ -1517,9 +1517,21 @@
   const MAP_EL = document.getElementById("map");
   // index.html loads the map library without holding up the app; this runs when it arrives
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
-  const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [], layMarks: [], surf: [],
+  const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [],
     bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, leg: null, ctl: null };
   const CARTO_DARK = ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png`);
+  // CARTO watermarks tiles fetched without its free key. With your key (add-on Configuration) tiles
+  // come from its keyed address; a tile address of your own wins ({style} becomes dark_all, {key}
+  // your key, {s} the a-d servers).
+  function darkTiles() {
+    const mt = (STATE && STATE.map_tiles) || {};
+    if (mt.url) {
+      const u = mt.url.replace("{style}", "dark_all").replace("{key}", encodeURIComponent(mt.key || "")).replace("{r}", "@2x");
+      return u.includes("{s}") ? ["a", "b", "c", "d"].map((x) => u.replace("{s}", x)) : [u];
+    }
+    if (mt.key) return [`https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png?key=${encodeURIComponent(mt.key)}`];
+    return CARTO_DARK;
+  }
   function glStyle() {
     const sat = mapStyle() === "satellite", low = lowData();
     // data saver: each imagery tile covers 4x the area (a quarter of the downloads, a little softer)
@@ -1530,7 +1542,7 @@
       sources: sat
         ? { base: { type: "raster", tiles: [ESRI_IMG], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
             lbl: { type: "raster", tiles: [ESRI_LBL], tileSize: 256, maxzoom: 19 } }
-        : { base: { type: "raster", tiles: CARTO_DARK, tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
+        : { base: { type: "raster", tiles: darkTiles(), tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
       layers: [
         { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
         ...(sat ? [{ id: "lbl", type: "raster", source: "lbl", minzoom: low ? 3 : 0, paint: { "raster-fade-duration": 120 } }] : []),
@@ -1569,7 +1581,7 @@
     const map = GL.map, route = css("--route");
     const before = map.getLayer("lbl") ? "lbl" : undefined;
     if (!map.getSource("night")) map.addSource("night", { type: "image", url: nightImage(), coordinates: MERC });
-    for (const id of [...DYN, ...LAY]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
+    for (const id of [...DYN, ...LAY, "sym", "laysym", "surf"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
     const add = (l, b) => { if (!map.getLayer(l.id)) map.addLayer(l, b); };
     add({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
     add({ id: "lay-term", type: "fill", source: "lay-term", paint: { "fill-color": "#c8cdd8", "fill-opacity": 0.14 } });
@@ -1591,6 +1603,7 @@
     add({ id: "aps", type: "circle", source: "aps", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, ["coalesce", ["get", "r0"], 4.5], 4, 4.5],
       "circle-color": ["coalesce", ["get", "c"], route], "circle-stroke-color": "#fff", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, ["coalesce", ["get", "s0"], 2], 4, 2] } });
     add({ id: "pts", type: "circle", source: "pts", paint: { "circle-radius": ["coalesce", ["get", "r"], 6.5], "circle-color": ["get", "c"], "circle-stroke-color": "#fff", "circle-stroke-width": ["coalesce", ["get", "s"], 1.5] } });
+    symLayers(add);
     GL.empty = {}; GL.src = {};
     if (radarOn()) glRadar(true);
   }
@@ -1625,23 +1638,103 @@
       map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.6 } }, map.getLayer("artcc-fill") ? "artcc-fill" : undefined);
     } catch {}
   }
-  // HTML markers (labels, airplanes): each in a wrapper, so the label's own CSS can place it
-  function mkMarkers(list) {
-    return list.map(([pos, html, opts]) => {
-      const t = document.createElement("div");
-      t.className = "glm";
-      t.innerHTML = html;
-      return new maplibregl.Marker({ element: t, ...(opts || {}) }).setLngLat([pos[1], pos[0]]).addTo(GL.map);
-    });
+  // ---------- labels and airplanes, drawn by the GPU ----------
+  // Each label or airplane is a small picture drawn once (on a canvas) and handed to the map, which
+  // places, rotates and hides colliding ones itself on the GPU: nothing on the page moves while you
+  // zoom or pan. A picture's name is its recipe, so the map asks for it again after a style switch.
+  const IMG_R = 2;
+  const LBL_FONT = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif";
+  const PLANE_PATH = "M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z";
+  const imgId = (spec) => "x:" + JSON.stringify(spec);
+  function rrect(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
+  // spec: [kind, text or color, second text or color/size, left padding (the gap to its point)]
+  function drawImg(spec) {
+    const [k, a, b, pad] = spec, R = IMG_R;
+    let c = document.createElement("canvas"), ctx = c.getContext("2d");
+    const size = (w, h) => { c.width = Math.ceil(w * R); c.height = Math.ceil(h * R); ctx.setTransform(R, 0, 0, R, 0, 0); };
+    const font = (wgt, px) => `${wgt} ${px}px ${LBL_FONT}`;
+    const tw = (f, t) => { ctx.font = f; return ctx.measureText(String(t)).width; };
+    if (k === "plane" || k === "badge") {
+      const s_ = (k === "badge" ? 28 : b) || 30, W_ = s_ + 8, cx = W_ / 2;
+      size(W_, W_);
+      if (k === "badge") {
+        ctx.beginPath(); ctx.arc(cx, cx, s_ / 2 + 3, 0, 7); ctx.fillStyle = "rgba(47,111,232,.35)"; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cx, s_ / 2, 0, 7); ctx.fillStyle = "#2f6fe8"; ctx.fill();
+      }
+      const ps = k === "badge" ? s_ * 0.62 : s_, path = new Path2D(PLANE_PATH);
+      ctx.save(); ctx.translate(cx - ps / 2, cx - ps / 2); ctx.scale(ps / 24, ps / 24);
+      if (k !== "badge") { ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1; }
+      ctx.fillStyle = k === "badge" ? "#fff" : a || "#fff"; ctx.fill(path);
+      if (k !== "badge") { ctx.shadowColor = "transparent"; ctx.lineWidth = 0.6; ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.stroke(path); }
+      ctx.restore();
+    } else if (k === "city") {
+      const f1 = font(600, 12.5), f2 = font(700, 12.5), w1 = a ? tw(f1, a) + 15 : 0, w2 = tw(f2, b) + 15, h = 22;
+      size(w1 + w2 + 2, h + 2);
+      ctx.save(); rrect(ctx, 1, 1, w1 + w2, h, 7); ctx.clip();
+      ctx.fillStyle = "#2f6fe8"; ctx.fillRect(1, 1, w1, h); ctx.fillStyle = "#1b4fbd"; ctx.fillRect(1 + w1, 1, w2, h); ctx.restore();
+      ctx.fillStyle = "#fff"; ctx.textBaseline = "middle";
+      if (a) { ctx.font = f1; ctx.fillText(a, 8.5, 1 + h / 2); }
+      ctx.font = f2; ctx.fillText(b, 1 + w1 + 7.5, 1 + h / 2);
+    } else if (["pill", "stag", "rwy", "twy"].includes(k)) {
+      const st = { pill: [700, 11.5, "#fff", b || "#2f6fe8", 7, 7, 21], stag: [600, 10, "#fff", b || "rgba(28,28,30,.85)", 5, 5, 16],
+        rwy: [800, 10, "#fff", "#a3191f", 2, 4, 16], twy: [800, 9.5, "#f6c445", "#0b0b0b", 2, 3, 14] }[k];
+      const f = font(st[0], st[1]), w = tw(f, a) + st[5] * 2, h = st[6];
+      size(w + 2, h + 2); rrect(ctx, 1, 1, w, h, st[4]); ctx.fillStyle = st[3]; ctx.fill();
+      if (k === "twy") { ctx.lineWidth = 1; ctx.strokeStyle = "#f6c445"; ctx.stroke(); }
+      ctx.font = f; ctx.fillStyle = st[2]; ctx.textBaseline = "middle"; ctx.fillText(a, 1 + st[5], 1 + h / 2 + 0.5);
+    } else {   // text with a dark halo: airport codes, route fixes, terminals, gates, centers
+      const st = { code: [700, 10, "#fff"], fix: [600, 9, "#c3c7cf"], term: [700, 11, "rgba(255,255,255,.9)"], gate: [600, 9, "#b8bcc4"],
+        ctr: [800, b ? 12 : 10, b || "#7c7c82"] }[k] || [600, 10, "#fff"];
+      const f = font(st[0], st[1]), w = tw(f, a) + 6, h = st[1] + 8;
+      size(w, h); ctx.font = f; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.85)"; ctx.strokeText(a, 3, h / 2);
+      ctx.fillStyle = st[2]; ctx.fillText(a, 3, h / 2);
+    }
+    if (pad) {   // a transparent gap on the left: the label sits beside its point, not on it
+      const c2 = document.createElement("canvas"), x2 = c2.getContext("2d");
+      c2.width = c.width + Math.round(pad * R); c2.height = c.height; x2.drawImage(c, Math.round(pad * R), 0);
+      c = c2; ctx = x2;
+    }
+    return { width: c.width, height: c.height, data: new Uint8Array(ctx.getImageData(0, 0, c.width, c.height).data.buffer) };
+  }
+  // A label or airplane: L picks the layer (lbl always shown, code from zoom 3, fix from zoom 7,
+  // plane rotated with the map), anc the side of the picture on the point.
+  const symF = (p, spec, L, anc, rot) => ({ type: "Feature", properties: { img: imgId(spec), L, anc: anc || "center", rot: rot || 0 },
+    geometry: { type: "Point", coordinates: [p[1], p[0]] } });
+  const planeMk = (pos, hdg, color, badge, size) => symF(pos, badge ? ["badge"] : ["plane", color || "#fff", size || 0], "plane", "center", hdg);
+  let symT = 0;
+  const flushSym = () => {
+    if (symT) return;
+    symT = requestAnimationFrame(() => { symT = 0; const s_ = GL.ready && GL.map.getSource("sym"); if (s_) s_.setData(FC(GL.markers.filter((f) => !f.properties.hide))); });
+  };
   function glMarkers(list) {
-    GL.markers.forEach((m) => m.remove());
-    GL.markers = mkMarkers(list);
-    return GL.markers;
+    GL.markers = list;
+    const s_ = GL.ready && GL.map.getSource("sym");
+    if (s_) s_.setData(FC(list));
+    return list;
   }
-  const planeMk = (pos, hdg, color, badge) => [pos, badge ? `<div class="pbadge gl"><div>${PLANE}</div></div>` : `<div class="gl-plane" style="color:${color}">${PLANE}</div>`,
-    { rotation: hdg || 0, rotationAlignment: "map", pitchAlignment: "map" }];
-  const mkHandle = (mk) => mk ? { setLatLng: (p) => mk.setLngLat([p[1], p[0]]), setOpacity: (o) => { mk.getElement().style.opacity = String(o); } } : null;
+  // move or hide one airplane without redrawing anything else
+  const mkHandle = (f) => f ? { setLatLng: (p) => { f.geometry.coordinates = [p[1], p[0]]; flushSym(); },
+    setOpacity: (o) => { f.properties.hide = o ? 0 : 1; flushSym(); } } : null;
+  const SYM = (overlap) => ({ "icon-image": ["get", "img"], "icon-anchor": ["get", "anc"], "icon-allow-overlap": overlap, "icon-ignore-placement": overlap, "icon-padding": 1 });
+  function symLayers(add) {
+    const not = ["!=", ["get", "hide"], 1];
+    add({ id: "sym-fix", type: "symbol", source: "sym", minzoom: 7, filter: ["all", ["==", ["get", "L"], "fix"], not], layout: SYM(false) });
+    add({ id: "sym-code", type: "symbol", source: "sym", minzoom: 3, filter: ["all", ["==", ["get", "L"], "code"], not], layout: SYM(false) });
+    add({ id: "lay-a", type: "symbol", source: "laysym", minzoom: 12.5, filter: ["==", ["get", "L"], "a"], layout: SYM(true) });
+    add({ id: "lay-t", type: "symbol", source: "laysym", minzoom: 14, filter: ["==", ["get", "L"], "t"], layout: SYM(false) });
+    add({ id: "lay-g", type: "symbol", source: "laysym", minzoom: 15, filter: ["==", ["get", "L"], "g"], layout: SYM(false) });
+    add({ id: "surf-dot", type: "circle", source: "surf", filter: ["==", ["get", "L"], "dot"], paint: { "circle-radius": 2.5, "circle-color": "#8e8e93" } });
+    add({ id: "surf-plane", type: "symbol", source: "surf", filter: ["==", ["get", "L"], "plane"],
+      layout: { ...SYM(true), "icon-rotate": ["get", "rot"], "icon-rotation-alignment": "map" } });
+    add({ id: "surf-tag", type: "symbol", source: "surf", filter: ["==", ["get", "L"], "tag"], layout: SYM(false) });
+    add({ id: "sym-lbl", type: "symbol", source: "sym", filter: ["all", ["==", ["get", "L"], "lbl"], not], layout: SYM(true) });
+    add({ id: "sym-plane", type: "symbol", source: "sym", filter: ["all", ["==", ["get", "L"], "plane"], not],
+      layout: { ...SYM(true), "icon-rotate": ["get", "rot"], "icon-rotation-alignment": "map" } });
+  }
   // Fit the page's routes into the part of the screen the sheet doesn't cover (at its middle stop).
   function glFit(animate) {
     const map = GL.map;
@@ -1707,10 +1800,15 @@
     if (GL.map) return true;
     if (!window.maplibregl || !MAP_EL) return false;
     const map = GL.map = new maplibregl.Map({ container: MAP_EL, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
-      dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 8 });
+      dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 8,
+      pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
     map.touchZoomRotate.disableRotation();
     map.keyboard.disable();
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "top-left");
+    map.on("styleimagemissing", (e) => {
+      if (!e.id || !e.id.startsWith("x:") || map.hasImage(e.id)) return;
+      try { map.addImage(e.id, drawImg(JSON.parse(e.id.slice(2))), { pixelRatio: IMG_R }); } catch {}
+    });
     glControls();
     // every style load (the first, and after a Satellite/Dark switch): our layers, then the page's picture
     map.on("style.load", () => {
@@ -1788,7 +1886,7 @@
       routes: FC(data.routes.map(([a, b]) => lineF(gcPoints([a.lat, a.lon], [b.lat, b.lon], 48), { c: "#e8eeff", w: 1.4 }))),
       aps: FC(data.airports.map((a) => ptF([a.lat, a.lon], { r0: 2.6, s0: 1.2 }))) };
     glSet({ routes: GL.passFC.routes, aps: GL.passFC.aps });
-    glMarkers(data.airports.map((a) => [[a.lat, a.lon], `<span class="gl-code">${esc(a.code)}</span>`, { anchor: "left", offset: [7, 0] }]));
+    glMarkers(data.airports.map((a) => symF([a.lat, a.lon], ["code", a.code, 0, 6], "code", "left")));
     GL.ownMarker = GL.inbMarker = null;
     GL.bounds = data.airports.map((a) => [a.lat, a.lon]); GL.maxZoom = 4;
     if (fit) {
@@ -1808,7 +1906,7 @@
     GL.leg = null;
     const red = css("--red"), amber = "#ffc53d", list = data.airports.filter((a) => a.lat != null);
     glSet({ pts: list.map((a) => ptF([a.lat, a.lon], { c: issueRank(a) < 2 ? red : amber })) });
-    glMarkers(list.map((a) => [[a.lat, a.lon], `<span class="gl-code on">${esc(a.code)}</span>`, { anchor: "left", offset: [9, 0] }]));
+    glMarkers(list.map((a) => symF([a.lat, a.lon], ["code", a.code, 0, 8], "lbl", "left")));
     GL.ownMarker = GL.inbMarker = null;
     GL.bounds = list.map((a) => [a.lat, a.lon]); GL.maxZoom = 5;
     if (!list.length) { GL.globeView = [38, -97]; GL.globeZoom = 2.6; }
@@ -1839,7 +1937,7 @@
       wps.forEach((p) => bounds.push(p));
       if (atc) for (const [la, lo, name] of (f.swim_route.fixes || []).slice(1, -1)) {
         fixes.push(ptF([la, lo]));
-        marks.push([[la, lo], `<span class="fix-lbl">${esc(name)}</span>`]);
+        marks.push(symF([la, lo], ["fix", name, 0, 3], "fix", "left"));
       }
     } else if (A && B) {
       const g = gcPoints(A, B);
@@ -1871,13 +1969,13 @@
       if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
       else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
       if (ip) { inbIdx = marks.length; marks.push(planeMk([ip[0], ip[1]], ih, violet)); GL.inbHdg = ih; if (inbOpen) bounds.push([ip[0], ip[1]]); }
-      if (ia && inbOpen) { bounds.push(ia); marks.push([ia, `<span class="apt-label inb"><b>${esc((inb.origin || {}).iata || "")}</b></span>`, { anchor: "left", offset: [8, 0] }]); }
+      if (ia && inbOpen) { bounds.push(ia); marks.push(symF(ia, ["pill", (inb.origin || {}).iata || "", violet, 8], "lbl", "left")); }
     }
     for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
       if (!pos) continue;
       bounds.push(pos);
       aps.push(ptF(pos));
-      marks.push([pos, `<span class="apt-label city">${cityOf(ap) ? `<span>${esc(cityOf(ap))}</span>` : ""}<b>${esc(ap.iata || "")}</b></span>`, { anchor: "left", offset: [10, 0] }]);
+      marks.push(symF(pos, ["city", cityOf(ap) || "", ap.iata || "", 9], "lbl", "left"));
     }
     let pos = null, hdg = 0, own = -1;
     if (leg.live) { pos = newestPos(leg.live, tr); hdg = headingOf(leg.live, tr); }
@@ -1913,8 +2011,7 @@
   function clearLayout() {
     if (!GL.map) return;
     if (GL.ready) for (const id of LAY) { const s = GL.map.getSource(id); if (s) s.setData(FC()); }
-    GL.layMarks.forEach((m) => m.remove());
-    GL.layMarks = [];
+    if (GL.ready) { const s_ = GL.map.getSource("laysym"); if (s_) s_.setData(FC()); }
     GL.layoutFor = null; GL.layoutShown = false;
   }
   async function layoutCheck() {
@@ -1933,7 +2030,7 @@
     if (!L_ || GL.leg !== leg || map.getZoom() < 13) return;
     clearLayout();
     for (const id of LAY) GL.map.getSource(id).setData(L_[id]);
-    GL.layMarks = mkMarkers(L_.labels);
+    GL.map.getSource("laysym").setData(L_.labels);
     GL.layoutFor = ap.code; GL.layoutShown = true;
   }
   function buildLayout(d) {
@@ -1951,7 +2048,8 @@
     };
     const centroid = (pts) => [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length];
     const near = (ref, p, km) => (placed[ref] || []).some((q) => kmBetween(p, q) < km);
-    const lbl = (pos, text, cls) => labels.push([pos, `<span class="ap-lbl ${cls}">${esc(text)}</span>`]);
+    const KIND = { "ap-term": ["term", "a"], "ap-rwy": ["rwy", "a"], "ap-twy": ["twy", "t"], "ap-gate": ["gate", "g"] };
+    const lbl = (pos, text, cls) => labels.push(symF(pos, [KIND[cls][0], String(text)], KIND[cls][1]));
     for (const f of d.features) {
       if (f.k === "terminal" && Array.isArray(f.g[0])) {
         term.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring(f.g)] } });
@@ -1972,7 +2070,7 @@
         lbl(f.g, f.ref, "ap-gate");
       }
     }
-    return { "lay-term": FC(term), "lay-rwy": FC(rwy), "lay-twy": FC(twy), labels };
+    return { "lay-term": FC(term), "lay-rwy": FC(rwy), "lay-twy": FC(twy), labels: FC(labels) };
   }
 
   // ---------- live position (every 5 s while the flight or its inbound is moving) ----------
@@ -2025,7 +2123,7 @@
   function stopSurface() {
     if (SURF.timer) clearTimeout(SURF.timer);
     SURF.timer = null; SURF.id = null;
-    GL.surf.forEach((m) => m.remove()); GL.surf = [];
+    const ss = GL.ready && GL.map.getSource("surf"); if (ss) ss.setData(FC());
     GL.lastSurface = null; GL.surfaceMine = 0;
     if (GL.ctl) GL.ctl.classList.remove("has-surf");
   }
@@ -2066,7 +2164,6 @@
     surfaceWatch(l);
   }
   function paintSurface(d) {
-    GL.surf.forEach((m) => m.remove()); GL.surf = [];
     const only = pref("ft-surf-all", "0") !== "1", ids = pref("ft-surf-ids", "0") === "1";
     const all = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
     const tg = only ? all.filter((t) => t.mine || (t.xpdr && t.kind !== "vehicle")) : all;
@@ -2085,19 +2182,21 @@
       SURF.zoomed = true;
     }
     // zoomed out past the airport, surface traffic is clutter over the route
-    if (GL.map.getZoom() < 11) { GL.surfaceMine = 0; if (GL.ownMarker) GL.ownMarker.setOpacity(1); return; }
+    if (GL.map.getZoom() < 11) { GL.surfaceMine = 0; if (GL.ownMarker) GL.ownMarker.setOpacity(1); const s0 = GL.map.getSource("surf"); if (s0) s0.setData(FC()); return; }
     const mine = tg.some((t) => t.mine);
     GL.surfaceMine = mine ? Date.now() : 0;
     if (GL.ownMarker) GL.ownMarker.setOpacity(mine ? 0 : 1);
     const route = css("--route"), list = [];
+    const surfSrc = GL.map.getSource("surf");
     for (const t of tg) {
       const label = [t.cs, t.type].filter(Boolean).join(" · ") || (t.kind === "vehicle" ? "Vehicle" : "Unidentified");
-      if (!t.mine && (t.kind === "vehicle" || (!t.cs && !t.type))) { list.push([[t.lat, t.lon], `<i class="surf-dot" title="${esc(label)}"></i>`]); continue; }
+      if (!t.mine && (t.kind === "vehicle" || (!t.cs && !t.type))) { list.push({ type: "Feature", properties: { L: "dot" }, geometry: { type: "Point", coordinates: [t.lon, t.lat] } }); continue; }
       const sz = t.mine ? 22 : 15;
-      const tag = t.mine ? `<span class="surf-tag mine">${esc(label)}</span>` : ids && (t.cs || t.squawk) ? `<span class="surf-tag">${esc(t.cs || t.squawk)}</span>` : "";
-      list.push([[t.lat, t.lon], `<div class="surf-ac" title="${esc(label)}"><div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : "#fff"};opacity:${t.mine ? 1 : 0.85};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>${tag}</div>`]);
+      list.push(planeMk([t.lat, t.lon], t.hdg || 0, t.mine ? route : "rgba(255,255,255,.88)", false, sz));
+      const tag = t.mine ? label : ids && (t.cs || t.squawk) ? t.cs || t.squawk : "";
+      if (tag) list.push(symF([t.lat, t.lon], ["stag", tag, t.mine ? "#2f6fe8" : 0, sz / 2 + 4], "tag", "left"));
     }
-    GL.surf = mkMarkers(list);
+    if (surfSrc) surfSrc.setData(FC(list));
   }
 
   // ---------- views ----------
@@ -2204,7 +2303,7 @@
     const prog = apPos[n.airport];
     if (prog) {
       pts.push(ptF(prog, { c: hot, r: 6.5, s: 2 }));
-      marks.push([prog, `<span class="apt-label" style="background:${hot}"><b>${esc(n.airport)}</b>&nbsp;${n.kind === "gs" ? "ground stop" : "delay program"}</span>`, { anchor: "left", offset: [10, 0] }]);
+      marks.push(symF(prog, ["pill", `${n.airport} ${n.kind === "gs" ? "ground stop" : "delay program"}`, hot, 10], "lbl", "left"));
       bounds.push(prog);
     }
     for (const u of g.uses) for (const i of u.impact) {
@@ -2212,7 +2311,7 @@
       if (!p) continue;
       const c = i.airborne ? muted : i.hit === true ? hot : i.hit === false ? ok : muted;
       pts.push(ptF(p, { c, r: 5, s: 0 }));
-      marks.push([p, `<span class="apt-label" style="background:${c}">${esc(i.from)} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}</span>`, { anchor: "left", offset: [9, 0] }]);
+      marks.push(symF(p, ["pill", `${i.from} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}`, c, 9], "lbl", "left"));
       bounds.push(p);
     }
     const view = `nas-${key}`, base = { pts, marks, bounds };
@@ -2236,7 +2335,7 @@
         // centers with a lot of ocean get their label over land, where it reads as theirs
         let lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;
         if (CTR_LABEL_AT[id]) [lat, lon] = CTR_LABEL_AT[id];
-        ctr.push([[lat, lon], `<span class="ctr-lbl ${inS ? "on" : ""}" style="${inS ? `color:${hot}` : ""}">${esc(id)}</span>`]);
+        ctr.push(symF([lat, lon], ["ctr", id, inS ? hot : 0], "lbl"));
       }
     }
     NAS_FC[key] = { artcc: FC(feats), ctr, bounds: sb };

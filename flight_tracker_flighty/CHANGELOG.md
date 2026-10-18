@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.5.0
+- Fixed: the Dark map ignored your CARTO key (and tile address) from the add-on configuration since 4.2, so CARTO stamped "API KEY REQUIRED" over it. It uses them again.
+- Smoother zooming and panning: airport labels, route fixes, airport codes, the airport diagram's runway, taxiway and gate labels, surface traffic and the airplanes are now drawn by the map on the GPU instead of as page elements moved on every frame (hundreds of them zoomed in at a big airport). Taxiway and gate labels that would overlap are thinned out automatically.
+- The map draws at most 2x the screen's resolution (iPhones are 3x: less than half the pixels, no visible difference on moving imagery).
+- The map buttons and speed pill no longer blur the map behind them (that blur was redrawn on every frame).
+
 ## 4.4.0
 - The My Flights map shows every upcoming flight's route (it was only the next two weeks, 16 at most). It frames the coming week.
 - The sheet has a top stop: let go between the middle and the top and it settles on the nearer one, like peeking and the middle.

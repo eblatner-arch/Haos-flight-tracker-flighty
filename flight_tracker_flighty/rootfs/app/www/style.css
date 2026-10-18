@@ -996,3 +996,9 @@ body:not(.sheetmode) #map { visibility: hidden; }
 .surf-tag.mine { background: #2f6fe8; }
 
 .gl-sub { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+/* ---- smoother map: nothing blurs what's behind it while the map moves (the blur was redrawn on
+   every frame of a pan or zoom); a lighter sheet shadow ---- */
+.map-stack, .map-center, .telem { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: rgba(38,38,42,.94) !important; }
+.mapbg .maplibregl-ctrl-attrib { backdrop-filter: none; }
+.sheet { box-shadow: 0 -4px 16px rgba(0,0,0,.35); }
