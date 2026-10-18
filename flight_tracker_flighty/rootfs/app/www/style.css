@@ -1040,11 +1040,9 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .map-stack button[data-lvl="amber"] { color: var(--amber); }
 .map-stack button[data-lvl="red"] { color: var(--red); }
 
-/* Google's logo + imagery copyright (required with Google tiles) */
-#g-attr, #mb-attr { position: fixed; z-index: 4; left: 10px; top: calc(var(--sat) + 40px); display: flex; align-items: center; gap: 6px;
-  font-size: 10px; color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.8); pointer-events: none; max-width: 70vw; }
-#g-attr img { height: 16px; }
-#g-attr b, #mb-attr b { font-size: 13px; color: #fff; }
-#mb-attr b { letter-spacing: -0.02em; }
-body:not(.sheetmode) #g-attr, body:not(.sheetmode) #mb-attr { display: none; }
-#g-attr[hidden], #mb-attr[hidden] { display: none; }
+/* the map's credit line: one small pill, top left, always spelled out */
+.mapbg .maplibregl-ctrl-attrib.maplibregl-compact { min-height: 0; }
+.mapbg .maplibregl-ctrl-attrib { border-radius: 9px; padding: 2px 7px !important; margin: 8px 0 0 10px !important; max-width: calc(100vw - 90px); }
+.mapbg .maplibregl-ctrl-attrib-inner { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; line-height: 1.35; }
+.attr-logo { height: 11px; vertical-align: middle; }
+.attr-mb { font-size: 11px; color: #fff; letter-spacing: -0.02em; margin-right: 2px; }

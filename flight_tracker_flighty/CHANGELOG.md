@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.14.1
+- Map credits in one place: a single line at the top left, level with the map buttons, always spelled out instead of a collapsible "i". Mapbox's wordmark and Google's imagery credit now sit in that line too, instead of a second line below it.
+- No more "zooming" when you drag north or south: the globe lowers its zoom number as you move toward the poles, which switched to coarser tiles (soft imagery, baked-in labels jumping bigger, most visible on Mapbox and Google). The map now keeps the same tiles as long as the globe looks the same size.
+
 ## 4.14.0
 - HTTPS on the direct port: turn on "HTTPS on the direct port" in the add-on Configuration and the add-on's own web port serves https with your certificate from /ssl (fullchain.pem + privkey.pem by default, the Duck DNS add-on's names). Open it by the certificate's name, e.g. https://yourname.duckdns.org:<port>/. On https the map-tile cache works there too.
 - The same port still answers plain http, so the Home Assistant app (which reaches the add-on that way) is unaffected.

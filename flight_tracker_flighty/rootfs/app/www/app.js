@@ -1665,32 +1665,25 @@
   const gTiles = () => `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${encodeURIComponent(GSESS.s)}&key=${encodeURIComponent(gKey())}`;
   // Google's terms: its logo and the imagery copyright for what's on screen.
   let gAttrT = 0;
+  // Credits live in one place: the map's own credit line, top left, always spelled out (not a
+  // collapsible "i"). Google's imagery copyright depends on what's on screen, so it's refreshed
+  // after the map stops moving.
+  const G_LOGO = '<b class="attr-mb">Google</b>';
+  function setAttr(html) {
+    const src = GL.map && GL.ready && GL.map.getSource("base");
+    if (!src || src.attribution === html) return;
+    src.attribution = html;
+    try { GL.attrib && GL.attrib._updateAttributions(); } catch {}
+  }
   function gAttr() {
-    let el = document.getElementById("g-attr");
-    // Mapbox: its wordmark and credits stay visible while its tiles are on screen
-    let mb = document.getElementById("mb-attr");
-    const mbOn = mapStyle() === "mapbox" && mbTok() && GL.map;
-    if (mbOn && !mb) {
-      mb = document.createElement("div"); mb.id = "mb-attr"; mb.className = "g-attr";
-      mb.innerHTML = '<b>mapbox</b><span>&copy; Mapbox &copy; OpenStreetMap &copy; Maxar</span>';
-      document.body.appendChild(mb);
-    }
-    if (mb) mb.hidden = !mbOn;
-    const on = mapStyle() === "google" && gReady() && GL.map;
-    if (!on) { if (el) el.hidden = true; return; }
-    if (!el) {
-      el = document.createElement("div"); el.id = "g-attr";
-      el.innerHTML = '<img alt="Google" src="https://developers.google.com/static/maps/documentation/images/google_on_non_white.png" onerror="this.replaceWith(Object.assign(document.createElement(\'b\'),{textContent:\'Google\'}))"><span></span>';
-      document.body.appendChild(el);
-    }
-    el.hidden = false;
+    if (!(mapStyle() === "google" && gReady() && GL.map)) return;
     clearTimeout(gAttrT);
     gAttrT = setTimeout(async () => {
       try {
         const b = GL.map.getBounds(), z = Math.max(0, Math.round(GL.map.getZoom()));
         const q = new URLSearchParams({ session: GSESS.s, key: gKey(), zoom: z, north: Math.min(85, b.getNorth()), south: Math.max(-85, b.getSouth()), east: b.getEast(), west: b.getWest() });
         const j = await (await fetch(`https://tile.googleapis.com/tile/v1/viewport?${q}`)).json();
-        el.querySelector("span").textContent = j.copyright || "";
+        setAttr(`${G_LOGO} ${esc(j.copyright || "")}`);
       } catch {}
     }, 800);
   }
@@ -1733,9 +1726,9 @@
       version: 8,
       projection: { type: "globe" },
       sources: mb
-        ? { under: under([img]), base: { type: "raster", tiles: [mbTiles()], tileSize: ts, maxzoom: 22, attribution: '&copy; Mapbox &copy; OpenStreetMap &copy; Maxar' } }
+        ? { under: under([img]), base: { type: "raster", tiles: [mbTiles()], tileSize: ts, maxzoom: 22, attribution: '<b class="attr-mb">mapbox</b> &copy; Mapbox &copy; OpenStreetMap &copy; Maxar' } }
         : goo
-        ? { under: under([img]), base: { type: "raster", tiles: [gTiles()], tileSize: ts, maxzoom: 22 } }
+        ? { under: under([img]), base: { type: "raster", tiles: [gTiles()], tileSize: ts, maxzoom: 22, attribution: G_LOGO } }
         : sat
         ? { under: under([img]), base: { type: "raster", tiles: [img], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar" },
             lbl: { type: "raster", tiles: [tc(ESRI_LBL)], tileSize: 256, maxzoom: 19 } }
@@ -2034,7 +2027,7 @@
       pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
     map.touchZoomRotate.disableRotation();
     map.keyboard.disable();
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), "top-left");
+    map.addControl(GL.attrib = new maplibregl.AttributionControl({ compact: false }), "top-left");
     map.on("styleimagemissing", (e) => {
       if (!e.id || !e.id.startsWith("x:") || map.hasImage(e.id)) return;
       try { map.addImage(e.id, drawImg(JSON.parse(e.id.slice(2))), { pixelRatio: IMG_R }); } catch {}
@@ -2051,6 +2044,23 @@
     const zc = () => { const z = map.getZoom() + 1; for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
     map.on("zoom", zc); zc();
     map.on("moveend", () => { layoutCheck(); surfaceNow(); gAttr(); });
+    // The globe keeps its size as you drag north or south by lowering the zoom number (by
+    // log2 cos(latitude)), and tiles are picked from that number: halfway across, the map switched
+    // to the next coarser tiles, so the picture went soft and baked-in labels jumped bigger. Scaling
+    // each source's tile size by cos(latitude) undoes that: the same tiles as long as the globe
+    // looks the same size.
+    const latFix = () => {
+      if (!GL.ready) return;
+      const c = Math.max(0.25, Math.cos(map.getCenter().lat * Math.PI / 180));
+      for (const id of ["under", "base", "lbl"]) {
+        const src = map.getSource(id);
+        if (!src) continue;
+        if (!src._ftTs) src._ftTs = src.tileSize;
+        src.tileSize = src._ftTs * c;
+      }
+    };
+    map.on("move", latFix);
+    map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
     setInterval(() => { const src = GL.ready && map.getSource("night"); if (src) src.updateImage({ url: nightImage(), coordinates: MERC }); }, 600000);
