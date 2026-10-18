@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.17.2
+- The page declares itself dark from its very first byte (color scheme and background on the page itself), so the web view starts dark instead of flashing its default gray for a frame between the launch image and the app.
+
 ## 4.17.1
 - No gray flash when the Home Screen app opens: iOS shows a launch image while the app starts. It showed gray because there wasn't one; now it's black, for every current iPhone size. The app's manifest colors are black too. iOS reads these when the app is added to the Home Screen, so remove the Flighty icon and add it again from Safari once.
 
