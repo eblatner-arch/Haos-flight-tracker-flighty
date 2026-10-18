@@ -215,7 +215,7 @@ def push_event(event, title, message, level="info", leg=None, tag=None, out_time
         STATE["alerts"] = (STATE["alerts"] + [{**a, "leg": (leg or {}).get("id"), "display": (leg or {}).get("display"),
                                                "route": f"{(leg or {}).get('dep', '')}→{(leg or {}).get('arr', '')}"
                                                if leg else ""}])[-ALERT_KEEP:]
-    notify(a)
+    notify({**a, "leg": (leg or {}).get("id")})
 
 
 def save_state():
@@ -244,11 +244,24 @@ def find_ingress():
     """Where a tapped notification should open: the add-on's sidebar panel in the HA app.
     notification_url overrides it; otherwise the panel path is /<add-on slug>."""
     manual = (CFG.get("notification_url") or "").strip()
+    INGRESS["full"] = False
     if manual:
-        if "://" in manual:  # pasted a full browser URL: keep just the path
-            manual = "/" + manual.split("://", 1)[1].split("/", 1)[-1] if "/" in manual.split("://", 1)[1] else "/"
-        INGRESS["path"] = manual if manual.startswith("/") else "/" + manual
+        scheme, _, rest = manual.partition("://")
+        host, _, path = rest.partition("/")
+        path = path.split("#", 1)[0].split("?", 1)[0].strip("/")
+        if rest and scheme.lower() not in ("http", "https"):
+            # another app's link (shortcuts://run-shortcut?name=…): sent as-is, iOS hands it to that app
+            INGRESS["path"], INGRESS["full"] = manual, True
+        elif rest and not path:
+            # the add-on's own web address (http://homeassistant.local:8099/): opens in Safari, and the
+            # tapped flight's page opens directly
+            INGRESS["path"], INGRESS["full"] = f"{scheme}://{host}/", True
+        elif rest:  # a Home Assistant page address: keep just the panel path, opened in the HA app
+            INGRESS["path"] = "/" + path
+        else:
+            INGRESS["path"] = manual if manual.startswith("/") else "/" + manual
         INGRESS["how"] = "notification_url option"
+        log.info("Notifications open %s", INGRESS["path"])
         return
     slug = None
     try:
@@ -311,7 +324,7 @@ def _flush_batch():
             flights = [a["message"].split(": ", 1)[0] for a in lst]
             t = f"{lst[0]['title']} · {len(lst)} of your flights"
             msg = f"{detail}\n{', '.join(flights)}"
-        _send({**lst[0], "title": t, "message": msg, "level": lvl, "tag": f"batch-{key}",
+        _send({**lst[0], "leg": lst[0].get("leg") if len({a.get("leg") for a in lst}) == 1 else None, "title": t, "message": msg, "level": lvl, "tag": f"batch-{key}",
                "ts": any(a.get("ts") for a in lst)})
 
 
@@ -324,8 +337,11 @@ def _send(alert):
             # support ships (home-assistant/iOS#4672). Older apps ignore these keys.
             "notification_icon": "mdi:airplane", "notification_icon_color": "#FFFFFF", "color": "#3B4FB8"}
     if INGRESS["path"]:
-        data["url"] = INGRESS["path"]
-        data["clickAction"] = INGRESS["path"]
+        url = INGRESS["path"]
+        if INGRESS.get("full") and url.endswith("/") and alert.get("leg"):
+            url += f"#/leg/{alert['leg']}"  # the web app opens on the flight the push is about
+        data["url"] = url
+        data["clickAction"] = url
     if alert.get("ts", alert["level"] in ("warn", "critical")):
         data["push"] = {"interruption-level": "time-sensitive"}
         data["ttl"] = 0
@@ -2526,7 +2542,7 @@ def update_leg(browser, lid):
         STATE["alerts"] = STATE["alerts"][-ALERT_KEEP:]
     bump()
     for a in new_alerts:
-        notify(a)
+        notify({**a, "leg": lid})
     log.info("%s %s→%s: %s%s", L.get("display"), L.get("dep"), L.get("arr"),
              alerting.status_label(L, CFG), f" ({L['note']})" if L.get("note") else "")
     # AeroAPI answers in a second; go straight on to the FlightAware pages (comparison and the

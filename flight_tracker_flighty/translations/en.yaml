@@ -10,7 +10,7 @@ configuration:
     description: Your phone's notify service without "notify.", e.g. mobile_app_erics_iphone. Blank sends alerts to Home Assistant notifications instead.
   notification_url:
     name: Notification link (optional)
-    description: Where tapping a push opens in the Home Assistant app. Leave blank to open the Flights panel. If that doesn't work, open Flights in a browser and paste the address from the address bar here.
+    description: "Where tapping a push opens. Blank: the Flights panel in the Home Assistant app. The add-on's own web address (e.g. http://homeassistant.local:8099/, needs the 8099 port set): opens in Safari straight on that flight's page. Another app's link (e.g. shortcuts://run-shortcut?name=Flighty): opens that app."
   aeroapi_key:
     name: AeroAPI key (optional)
     description: FlightAware AeroAPI Personal key. Used a few times per flight (yours and followed) for the airline's tail assignment and inbound flight. Blank turns it off.

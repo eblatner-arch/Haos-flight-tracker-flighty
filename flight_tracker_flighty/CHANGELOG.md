@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.10.0
+- Notification link now takes a full address. Put the add-on's own web address there (e.g. `http://homeassistant.local:8099/`, with the 8099 port set under Network) and tapping a push opens Safari right on the flight it's about. A link to another app (e.g. `shortcuts://run-shortcut?name=Flighty`) is sent unchanged, so iOS opens that app. Blank still opens the Flights panel in the Home Assistant app. A pasted Home Assistant page address (one with a path) still opens that panel in the app, as before.
+- iOS can't open a Home Screen web app from a notification. A web link always opens in Safari.
+
 ## 4.9.0
 - Every page opens instantly: as soon as the app opens (and when you come back to it, at most every 5 minutes) it fetches every page's data in the background, one request at a time behind what you're looking at: your next flights first, then Passport, Airports, Alerts, the rest of your upcoming flights, Settings and Notifications. Each is kept on the phone, so it opens at once (in testing, 2–50 ms) and still opens with no signal; it then refreshes in place if anything changed. Data saver fetches only the next 3 flights.
 - Alerts, Notifications and Settings draw from the phone's copy first too.
