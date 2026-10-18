@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.11.2
+- My Flights map opens with your routes centered on the screen and as large as the width allows. Before, it was pushed left to dodge the buttons, which made the globe look lopsided.
+- Sharper satellite imagery when zoomed out. Tiles now draw at the screen's full resolution instead of blown up 2x. That means more, smaller downloads, so Data saver keeps the old, lighter tiles.
+
 ## 4.11.1
 - Program map opens framed on the centers it covers (usually the whole US), using the full width of the screen. Before, the West Coast centers' ocean areas zoomed it out to the whole globe.
 - Map labels are just airport codes now (SAN, SFO), without "delay program" or "you · held".

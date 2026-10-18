@@ -1614,8 +1614,10 @@
   }
   function glStyle() {
     const sat = mapStyle() === "satellite", low = lowData();
-    // data saver: each imagery tile covers 4x the area (a quarter of the downloads, a little softer)
-    const ts = low ? 512 : 256;
+    // Imagery tiles are 256 px pictures. Laid out at 128 CSS px they land 1:1 on a Retina screen, so
+    // the earth is sharp zoomed out (at 256 they were blown up 2x: soft). Data saver keeps them at
+    // 256: a quarter of the downloads, a little softer.
+    const ts = low ? 256 : 128;
     return {
       version: 8,
       projection: { type: "globe" },
@@ -1842,6 +1844,9 @@
     // a program's centers usually span the whole country, wider than a phone: use the full width
     // (center labels sit on their centers, nothing hangs off to the right)
     if (GL.opts.kind === "nas") { padding.left = 18; padding.right = 58; }
+    // My Flights: the routes centered on the screen, as wide as it allows (the buttons may overlap a
+    // corner; shifting everything left to dodge them made the globe look lopsided)
+    if (GL.opts.kind === "home") { padding.left = 26; padding.right = 26; }
     map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     const dur = animate ? 900 : 0;
     if (GL.globeView || !b.length) {
