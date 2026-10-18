@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.11.1
+- Program map opens framed on the centers it covers (usually the whole US), using the full width of the screen. Before, the West Coast centers' ocean areas zoomed it out to the whole globe.
+- Map labels are just airport codes now (SAN, SFO), without "delay program" or "you · held".
+
 ## 4.11.0
 - Ground stop / GDP cards are one line now: the airport, the program, until when, and whether it includes your flight. Tap to open the scope, the map and the FAA advisory. They remember whether you left them open.
 - The airport-status (tower) button on the map turns amber for a delay program that includes one of your flights or its inbound, red for a ground stop or closure that does. Otherwise it stays white.

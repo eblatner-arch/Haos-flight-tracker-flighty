@@ -1839,6 +1839,9 @@
     if (!map) return;
     const b = GL.bounds;
     const padding = mapPad(GL.opts.kind === "leg" || GL.opts.kind === "nas", now);
+    // a program's centers usually span the whole country, wider than a phone: use the full width
+    // (center labels sit on their centers, nothing hangs off to the right)
+    if (GL.opts.kind === "nas") { padding.left = 18; padding.right = 58; }
     map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     const dur = animate ? 900 : 0;
     if (GL.globeView || !b.length) {
@@ -2383,7 +2386,8 @@
   // program airport; and where your flight (or its inbound) departs, red if it's held, green if not.
   let ARTCC = null;
   const NAS_FC = {};   // each program's center shapes, built once
-  const CTR_LABEL_AT = { ZNY: [41.05, -76.45] };
+  const CTR_LABEL_AT = { ZNY: [41.05, -76.45], ZOA: [39.2, -120.6], ZLA: [34.8, -116.8], ZSE: [45.6, -120.4], ZMA: [26.8, -81.0],
+    ZJX: [31.2, -82.6], ZBW: [43.6, -71.8], ZHU: [30.6, -93.8], ZDC: [37.6, -77.8] };
   async function nasView(key) {
     const legs = (STATE.legs || []).filter((l) => (l.nas || []).some((n) => n.key === key));
     let g = nasGroups(legs).find((x) => x.n.key === key);
@@ -2409,7 +2413,7 @@
     const prog = apPos[n.airport];
     if (prog) {
       pts.push(ptF(prog, { c: hot, r: 6.5, s: 2 }));
-      marks.push(symF(prog, ["pill", `${n.airport} ${n.kind === "gs" ? "ground stop" : "delay program"}`, hot, 10], "lbl", "left"));
+      marks.push(symF(prog, ["pill", n.airport, hot, 10], "lbl", "left"));
       bounds.push(prog);
     }
     for (const u of g.uses) for (const i of u.impact) {
@@ -2417,7 +2421,7 @@
       if (!p) continue;
       const c = i.airborne ? muted : i.hit === true ? hot : i.hit === false ? ok : muted;
       pts.push(ptF(p, { c, r: 5, s: 0 }));
-      marks.push(symF(p, ["pill", `${i.from} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}`, c, 9], "lbl", "left"));
+      if (i.from !== n.airport) marks.push(symF(p, ["pill", i.from, c, 9], "lbl", "left"));
       bounds.push(p);
     }
     const view = `nas-${key}`, base = { pts, marks, bounds };
@@ -2435,13 +2439,13 @@
       // all of a center's shapes (low and high altitude) as one area
       feats.push({ type: "Feature", properties: { c: inS ? hot : muted, o: inS ? 0.22 : 0, w: inS ? 1.5 : 0.8, lo: inS ? 0.9 : 0.5 },
         geometry: { type: "MultiPolygon", coordinates: c.rings.map((r) => [ring(r)]) } });
-      if (inS) c.rings.forEach((r) => r.forEach((p) => sb.push(p)));
       const big = c.rings.slice().sort((a, b) => b.length - a.length)[0];
       if (big && big.length) {
         // centers with a lot of ocean get their label over land, where it reads as theirs
         let lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;
         if (CTR_LABEL_AT[id]) [lat, lon] = CTR_LABEL_AT[id];
         ctr.push(symF([lat, lon], ["ctr", id, inS ? hot : 0], "lbl"));
+        if (inS) sb.push([lat, lon]);
       }
     }
     NAS_FC[key] = { artcc: FC(feats), ctr, bounds: sb };
