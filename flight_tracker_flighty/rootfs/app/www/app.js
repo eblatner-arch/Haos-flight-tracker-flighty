@@ -2536,62 +2536,103 @@
   }
 
   // ---------- add a flight ----------
+  // Flight number and date (today unless you change it). Within AeroAPI's reach (the past 9 days to
+  // 2 days ahead, with a key set) one query lists every flight with that number that day and you
+  // tap yours; further out, or without a key, you type the airports and it's added at once.
   function addView() {
     destroyMaps();
     const manual = STATE.legs.filter((l) => l.manual);
-    const today = new Date().toISOString().slice(0, 10);
-    const earliest = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
+    const tz = STATE.home_tz || undefined;
+    const iso = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t));
+    const today = iso(Date.now()), earliest = iso(Date.now() - 9 * 86400000), reach = iso(Date.now() + 2 * 86400000);
     $app.innerHTML = `
       <a class="back" href="#/">‹ My Flights</a>
       <h1 class="ptitle">Add a Flight</h1>
-      <div class="card">
-        <p class="small muted" style="margin:0 0 14px">Flight number with its airline code, and the airports, so a flight number that flies several legs picks the right one. Leave the date blank for the next departure.</p>
-        <form id="addform" class="form">
-          <div class="seg" role="radiogroup">
-            <label><input type="radio" name="f-kind" value="manual" checked><span>Mine</span></label>
-            <label><input type="radio" name="f-kind" value="friend"><span>A friend's</span></label>
-          </div>
-          <p class="small faint" style="margin:-4px 0 4px" id="f-kind-help">Tracked like your calendar flights and kept in History.</p>
-          <label>Flight number<input id="f-ident" placeholder="UA1234" autocapitalize="characters" autocomplete="off" required></label>
-          <div class="form-2">
-            <label>From<input id="f-dep" placeholder="EWR" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
-            <label>To<input id="f-arr" placeholder="SFO" maxlength="4" autocapitalize="characters" autocomplete="off" required></label>
-          </div>
-          <label>Date (optional)<input id="f-date" type="date" min="${earliest}"></label>
-          <p class="small faint" style="margin:-4px 0 0">Past flights work up to 10 days back (that's as far as AeroAPI and FlightAware's free pages go). They go straight into History.</p>
-          <button class="btn primary" type="submit">Add</button>
-          <div id="f-msg" class="small"></div>
-        </form>
-      </div>
-      ${manual.length ? `<h2 class="section">Added in the app</h2>` + manual.map((l) => `<div class="row">
-          <div class="when">${esc(l.display || l.ident)} ${kindTag(l)}<small>${l.date ? esc(new Date(l.date + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "next"}</small></div>
-          <div class="what"><div class="r">${esc(l.dep)} → ${esc(l.arr)}</div><div class="s">${esc(l.flight ? l.status : (l.note || "Looking up…"))}</div></div>
-          <button class="btn" data-remove="${esc(l.id)}">Remove</button></div>`).join("") : ""}
-      <p class="small faint" style="margin:16px 4px">Which pushes each kind gets is set on the bell page (Calendar, Manual, Friends). Your own flights are saved to History when they finish; friends' flights aren't. App-added flights leave this list a day and a half after departure.</p>`;
+      <form id="addform" class="form add-form" autocomplete="off">
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="f-kind" value="manual" checked><span>Mine</span></label>
+          <label><input type="radio" name="f-kind" value="friend"><span>A friend's</span></label>
+        </div>
+        <p class="small faint" style="margin:-4px 0 2px" id="f-kind-help">Tracked like your calendar flights and kept in History.</p>
+        <div class="form-2">
+          <label>Flight<input id="f-ident" placeholder="UA1234" autocapitalize="characters" spellcheck="false" required></label>
+          <label>Date<input id="f-date" type="date" min="${earliest}" value="${today}"></label>
+        </div>
+        <div id="f-aps" class="form-2" hidden>
+          <label>From<input id="f-dep" placeholder="EWR" maxlength="4" autocapitalize="characters"></label>
+          <label>To<input id="f-arr" placeholder="SFO" maxlength="4" autocapitalize="characters"></label>
+        </div>
+        <button class="btn primary" type="submit" id="f-go">Find flights</button>
+        <div id="f-msg" class="small"></div>
+      </form>
+      <div id="f-results"></div>
+      ${manual.length ? `<h2 class="section">Added in the App</h2><div class="flist">${manual.map(row).join("")}</div>` : ""}
+      <p class="small faint" style="margin:16px 4px">Looking up a flight number is one AeroAPI query (the flight you pick reuses it, so tracking doesn't spend another). Your own flights are saved to History when they finish; friends' aren't. App-added flights leave the list a day and a half after departure.</p>`;
+    const $ = (id) => document.getElementById(id);
+    const msg = $("f-msg"), res = $("f-results"), aps = $("f-aps"), go_ = $("f-go");
+    const kind = () => (document.querySelector('[name="f-kind"]:checked') || {}).value || "manual";
     $app.querySelectorAll('[name="f-kind"]').forEach((r) => r.onchange = () => {
-      document.getElementById("f-kind-help").textContent = r.value === "manual" && r.checked ? "Tracked like your calendar flights and kept in History." : "Live tracking and pushes only; not saved to History.";
+      $("f-kind-help").textContent = kind() === "manual" ? "Tracked like your calendar flights and kept in History." : "Live tracking and pushes only; not saved to History.";
     });
-    document.getElementById("addform").onsubmit = async (e) => {
-      e.preventDefault();
-      const msg = document.getElementById("f-msg");
+    // airports needed: beyond AeroAPI's 2 days (no waiting, no query), no key, or no flights found
+    const askAirports = (why) => {
+      aps.hidden = false; go_.textContent = "Add";
+      $("f-dep").required = $("f-arr").required = true;
+      msg.className = "small muted"; msg.textContent = why || "";
+      res.innerHTML = "";
+    };
+    const reset = () => { aps.hidden = true; go_.textContent = "Find flights"; $("f-dep").required = $("f-arr").required = false; msg.textContent = ""; res.innerHTML = ""; };
+    const far = () => { const d = $("f-date").value; return d && d > reach; };
+    const onDate = () => { if (far() || !STATE.aeroapi) askAirports(far() ? "More than 2 days out: enter the airports (added right away)." : "Enter the airports."); else reset(); };
+    $("f-date").onchange = onDate;
+    $("f-ident").oninput = () => { if (!aps.hidden && !far() && STATE.aeroapi) reset(); };
+    onDate();
+    const add = async (body) => {
       msg.className = "small muted"; msg.textContent = "Adding…";
       try {
-        const r = await fetch("api/flights", { method: "POST", body: JSON.stringify({
-          ident: document.getElementById("f-ident").value, dep: document.getElementById("f-dep").value,
-          arr: document.getElementById("f-arr").value, date: document.getElementById("f-date").value,
-          kind: (document.querySelector('[name="f-kind"]:checked') || {}).value || "manual" }) });
+        const r = await fetch("api/flights", { method: "POST", body: JSON.stringify({ ...body, kind: kind() }) });
         changed("api/flights");
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || r.status);
-        msg.textContent = "Added. Looking it up on FlightAware…";
         await load();
-        setTimeout(() => go(`#/leg/${d.id}`), 600);
+        go(`#/leg/${d.id}`);
       } catch (err) { msg.className = "small err"; msg.textContent = err.message; }
     };
-    $app.querySelectorAll("[data-remove]").forEach((b) => b.onclick = async () => {
-      await api("api/flights/remove", { method: "POST", body: JSON.stringify({ id: b.dataset.remove }) });
-      await load(); addView();
-    });
+    $("addform").onsubmit = async (e) => {
+      e.preventDefault();
+      const ident = $("f-ident").value.trim().toUpperCase().replace(/\s/g, ""), date = $("f-date").value;
+      if (!aps.hidden) return add({ ident, dep: $("f-dep").value, arr: $("f-arr").value, date });
+      msg.className = "small muted"; msg.textContent = "Looking up…"; res.innerHTML = "";
+      let d;
+      try { d = await api(`api/lookup?${new URLSearchParams({ ident, date })}`); }
+      catch (err) { return askAirports(`Couldn't look it up (${err.message}). Enter the airports.`); }
+      if (d.error) { msg.className = "small err"; msg.textContent = d.error; return; }
+      if (d.mode !== "list") return askAirports(d.reason);
+      if (!d.flights.length) return askAirports(`No ${ident} flights found on ${date}. Check the number, or enter the airports.`);
+      msg.textContent = "";
+      res.innerHTML = `<h2 class="section">${esc(d.flights[0].display || ident)} · ${esc(fmt(Date.parse(date + "T12:00:00") / 1000, undefined, { weekday: "short", month: "short", day: "numeric" }))}</h2>
+        <div class="flist pick">${d.flights.map((f, i) => {
+          const o = f.out || {}, n = f.in || {}, so = o.estimated || o.scheduled, si = n.estimated || n.scheduled;
+          const late = o.scheduled && so && so - o.scheduled >= 300;
+          return `<button type="button" class="frow pickrow" data-i="${i}">
+            <div class="fw"><span class="fw-ic">${IC.plus}</span></div>
+            <div class="fr-main">
+              <div class="fr-top">${alBadge(airlineCode({ display: f.display }))}<span class="fr-no">${esc(flno({ display: f.display }))}</span>
+                <span class="fr-st ${f.cancelled ? "red" : late ? "amber" : ""}">${esc(f.cancelled ? "Cancelled" : f.status || "")}</span></div>
+              <div class="fr-cities">${esc(f.dep_city || f.dep)} to ${esc(f.arr_city || f.arr)}</div>
+              <div class="fr-times"><span class="ft"><i class="ti">${IC.dep}</i>${esc(f.dep)} <b class="${late ? "amber" : ""}">${so ? hm(so, f.dep_tz) : "—"}</b></span>
+                <span class="ft"><i class="ti">${IC.arr}</i>${esc(f.arr)} <b>${si ? hm(si, f.arr_tz) : "—"}</b></span></div>
+              ${f.aircraft_type || f.tail ? `<div class="fr-warn" style="color:var(--muted)">${esc([f.aircraft_type, f.tail].filter(Boolean).join(" · "))}</div>` : ""}
+            </div></button>`;
+        }).join("")}</div>
+        <button type="button" class="linkbtn" id="f-other" style="margin:10px 0 0">Not listed? Enter the airports</button>`;
+      res.querySelectorAll("[data-i]").forEach((b) => b.onclick = () => {
+        const f = d.flights[+b.dataset.i];
+        b.disabled = true;
+        add({ ident: d.ident, fa_id: f.fa_id, date: d.date });
+      });
+      $("f-other").onclick = () => askAirports("");
+    };
   }
 
   // ---------- notification settings ----------

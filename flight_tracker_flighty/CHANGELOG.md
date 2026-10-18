@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.8.0
+- Add a Flight: type the flight number (the date is today unless you change it) and tap Find flights. With an AeroAPI key and a date from 9 days back to 2 days ahead, one AeroAPI query lists every flight with that number that day (route, times, aircraft, tail); tap yours. The flight you pick reuses that answer as its first lookup, so adding it doesn't spend a second query. Later dates (or no key) ask for the airports and add right away, no waiting.
+- "Not listed? Enter the airports" for anything the lookup doesn't show.
+- Fixed: the map's credit line showed on pages without a map.
+
 ## 4.7.1
 - Fixed: the Add a Flight page (and a Settings row) were wider than the screen, so iOS zoomed the page out. The hidden buttons behind the Mine / A friend's switch stretched across the page.
 

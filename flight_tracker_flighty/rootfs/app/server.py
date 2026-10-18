@@ -1155,6 +1155,89 @@ def add_manual(ident, dep, arr, date, kind="manual"):
     return lid
 
 
+# ---------------------------------------------------------------- add a flight: number + date -> pick
+# One AeroAPI query returns every flight with that number over the day, fully detailed. The one you
+# pick becomes the tracker's first lookup (no second query). Kept 10 minutes so picking reuses it.
+LOOKUPS = {}    # (ident, date) -> {"at", "flights"}
+PRESEED = {}    # leg id -> the AeroAPI flight picked from a lookup, used as its first lookup
+
+
+def _local_date(ts, tzname):
+    try:
+        tz = ZoneInfo(tzname) if tzname else HOME_TZ
+    except Exception:
+        tz = HOME_TZ
+    return datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+
+
+def api_lookup(q):
+    ident = _x({"ident": q.get("ident")})["ident"]
+    if not IDENT_RE.match(ident or ""):
+        return {"error": "Enter a flight number like UA1234 or UAL1234"}
+    now = time.time()
+    date = (q.get("date") or "").strip() or datetime.now(HOME_TZ).strftime("%Y-%m-%d")
+    try:
+        d0 = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=HOME_TZ).timestamp()
+    except ValueError:
+        return {"error": "Date must be YYYY-MM-DD"}
+    if not aero_on():
+        return {"mode": "manual", "date": date, "reason": "Enter the airports (looking up a flight number needs an AeroAPI key)."}
+    if d0 > now + 2 * 86400 - 3600 or d0 + 86400 < now - 9 * 86400:
+        return {"mode": "manual", "date": date, "reason": "AeroAPI covers the past 9 days to 2 days ahead: enter the airports."}
+    key = (ident, date)
+    hit = LOOKUPS.get(key)
+    if not hit or now - hit["at"] > 600:
+        cost = float(CFG.get("aeroapi_cost_per_query") or 0.005)
+        _, spent = aero_month(now)
+        if spent + cost > float(CFG.get("aeroapi_monthly_budget") or 0) + 1e-9:
+            return {"mode": "manual", "date": date, "reason": "This month's AeroAPI budget is used up: enter the airports."}
+        rec = {"at": now, "leg": ident, "leg_id": None, "reason": "flight lookup", "billed": True, "pages": 1}
+        try:
+            flights, pages = aeroapi.query(CFG["aeroapi_key"].strip(), ident, d0 - 6 * HOUR, d0 + 30 * HOUR)
+            rec.update(pages=pages or 1, billed=bool(pages), ok=True, found=bool(flights))
+        except Exception as e:
+            msg = str(e).splitlines()[0][:200]
+            rec.update(ok=False, error=msg, billed="rejected" not in msg and "rate limit" not in msg)
+            with LOCK:
+                STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
+            return {"mode": "manual", "date": date, "reason": f"AeroAPI: {msg}. Enter the airports instead."}
+        with LOCK:
+            STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
+        hit = LOOKUPS[key] = {"at": now, "flights": flights}
+        for k in [k for k, v in LOOKUPS.items() if now - v["at"] > 3600]:
+            del LOOKUPS[k]
+    out = []
+    for f in hit["flights"]:
+        t = f.get("times") or {}
+        so = (t.get("out") or {}).get("scheduled") or (t.get("off") or {}).get("scheduled")
+        o, d = f.get("origin") or {}, f.get("destination") or {}
+        if not so or _local_date(so, o.get("tz")) != date:
+            continue
+        oa, da = airports.get(o.get("iata") or o.get("icao")), airports.get(d.get("iata") or d.get("icao"))
+        out.append({"fa_id": f.get("fa_id"), "ident": f.get("ident"), "display": f.get("display_ident") or ident,
+                    "dep": o.get("iata") or o.get("icao"), "arr": d.get("iata") or d.get("icao"),
+                    "dep_city": oa.get("city") or o.get("city") or "", "arr_city": da.get("city") or d.get("city") or "",
+                    "dep_tz": o.get("tz") or oa.get("tz"), "arr_tz": d.get("tz") or da.get("tz"),
+                    "out": t.get("out") or {}, "in": t.get("in") or {}, "status": f.get("status_text") or "",
+                    "cancelled": f.get("cancelled"), "aircraft_type": f.get("aircraft_type"), "tail": f.get("tail")})
+    out.sort(key=lambda x: x["out"].get("scheduled") or 0)
+    return {"mode": "list", "date": date, "ident": ident, "flights": out}
+
+
+def add_picked(body):
+    """Add the flight picked from a lookup; its AeroAPI answer becomes the first lookup."""
+    fid, date = body.get("fa_id"), (body.get("date") or "").strip()
+    ident = _x({"ident": body.get("ident")})["ident"]
+    hit = LOOKUPS.get((ident, date)) or {}
+    f = next((x for x in hit.get("flights") or [] if x.get("fa_id") == fid), None)
+    if not f:
+        raise ValueError("That lookup expired; search again")
+    o, d = f.get("origin") or {}, f.get("destination") or {}
+    lid = add_manual(ident, o.get("iata") or o.get("icao"), d.get("iata") or d.get("icao"), date, body.get("kind") or "manual")
+    PRESEED[lid] = json.loads(json.dumps(f))
+    return lid
+
+
 def set_kind(lid, kind):
     with LOCK:
         for x in STATE["manual"]:
@@ -2256,7 +2339,16 @@ def update_leg(browser, lid):
     fast = lid in SWIM_FAST
     SWIM_FAST.discard(lid)
     try:
-        if first_lookup_due(L, now):
+        pre = PRESEED.pop(lid, None)
+        if pre:
+            # picked from a lookup: that AeroAPI answer is the first lookup (already paid for)
+            first = pre
+            a = L.setdefault("aero", {})
+            a.update(at=now, calls=a.get("calls", 0) + 1, reason="flight lookup", found=True, error=None,
+                     tail=first.get("tail") or a.get("tail"), inbound_id=first.get("inbound_fa_id"),
+                     fa_id=first.get("fa_id"), aircraft_type=first.get("aircraft_type"))
+            L["fa_id"] = first.get("fa_id") or L.get("fa_id")
+        elif first_lookup_due(L, now):
             first = aero_call(L, now, "first lookup")
             if first:
                 L["fa_id"] = first.get("fa_id") or L.get("fa_id")
@@ -3462,6 +3554,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/alerts":
             with LOCK:
                 return self._send(200, {"alerts": list(reversed(STATE["alerts"]))})
+        if path == "/api/lookup":
+            return self._send(200, api_lookup(self._query()))
         if path == "/api/airports/status":
             return self._send(200, api_airports_status())
         if path == "/api/artcc":
@@ -3619,8 +3713,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/flights":
             body = self._json()
             try:
-                lid = add_manual(body.get("ident"), body.get("dep"), body.get("arr"), body.get("date"),
-                                 body.get("kind") or "manual")
+                lid = add_picked(body) if body.get("fa_id") else add_manual(body.get("ident"), body.get("dep"), body.get("arr"),
+                                                                            body.get("date"), body.get("kind") or "manual")
             except ValueError as e:
                 return self._send(400, {"error": str(e)})
             save_state()

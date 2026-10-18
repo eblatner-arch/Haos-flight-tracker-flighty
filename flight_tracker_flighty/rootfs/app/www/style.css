@@ -1010,3 +1010,16 @@ body:not(.sheetmode) #map { visibility: hidden; }
 button.gl-row { box-sizing: border-box; max-width: 100%; margin: 0; }
 /* nothing on a page can push it wider than the screen */
 html, body { overflow-x: hidden; max-width: 100%; }
+
+/* Add a Flight */
+.add-form { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.add-form .form-2 { grid-template-columns: 1.2fr 1fr; }
+.pickrow { width: 100%; background: none; border: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.pickrow:disabled { opacity: .5; }
+.pickrow .fw-ic { background: rgba(10,132,255,.18); color: #5aa9ff; }
+.form input[type="date"] { min-height: 46px; }
+#f-aps[hidden] { display: none !important; }
+.add-form .form-2 { grid-template-columns: 1fr 1.25fr; }
+#f-ident { text-transform: uppercase; }
+#f-ident::placeholder { text-transform: none; }
+body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !important; }
