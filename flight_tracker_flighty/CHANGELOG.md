@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.16.1
+- Removed the saved map picture shown while the app starts: it looked blurry, and swipes moved the live map hidden underneath it.
+- No white flash when the app opens: the page is black from the first moment.
+
 ## 4.16.0
 - The app opens instantly: on the add-on's https address (the Home Screen app), the page and its files are kept on the phone by a small service worker and open with no wait for the add-on (before, each launch waited for a round trip over Tailscale: about a second of black). A fresh copy is fetched in the background each time, so an add-on update shows up on the next launch after it. Through Home Assistant the page's address changes every session, so this applies only to the direct address.
 - The saved map picture now works on iPhone (it was reading the map after Safari had already cleared it, so nothing was saved), and it shows from the first moment.

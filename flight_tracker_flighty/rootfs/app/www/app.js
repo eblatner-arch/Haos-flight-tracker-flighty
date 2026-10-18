@@ -1595,50 +1595,7 @@
   // out into a normal map, with the airport diagram and live surface traffic.
   // ================================================================================================
   const MAP_EL = document.getElementById("map");
-  // ---------- the last map, instantly ----------
-  // Opening the app, the live map takes a moment to start and pull its tiles (black until then).
-  // The last My Flights map is kept as a picture and shown at once, then fades out when the live map
-  // has drawn underneath. Only on My Flights, and only for the same screen size.
-  const SHOT_KEY = "ft-mapshot";
-  (() => {
-    if (!MAP_EL || !/^(#\/?)?$/.test(location.hash)) return;
-    try {
-      const d = JSON.parse(localStorage.getItem(SHOT_KEY) || "null");
-      // (a Home Screen app can report a slightly different height while it starts)
-      if (!d || Math.abs(d.w - window.innerWidth) > 4 || Math.abs(d.h - window.innerHeight) > 60 || Date.now() - d.at > 7 * 86400e3) return;
-      const el = document.createElement("div");
-      el.id = "mapshot"; el.style.backgroundImage = `url(${d.img})`;
-      MAP_EL.appendChild(el);
-      document.body.classList.add("sheetmode");   // the map layer is hidden outside sheet pages
-    } catch {}
-  })();
-  function dropShot() {
-    const el = document.getElementById("mapshot");
-    if (!el) return;
-    el.classList.add("gone"); setTimeout(() => el.remove(), 400);
-  }
-  let shotAt = 0;
-  function takeShot() {
-    const map = GL.map;
-    if (!map || GL.view !== "home" || map.isMoving() || Date.now() - shotAt < 60000 || window.scrollY > midY() + 60) return;
-    shotAt = Date.now();
-    // draw a frame now and read it straight away: the canvas keeps its picture only until the
-    // browser shows it (reading it later gives a blank image, as on iPhone)
-    {
-      try {
-        map.redraw();
-        const c = map.getCanvas(), w = window.innerWidth, h = window.innerHeight, k = Math.min(1, 900 / Math.max(c.width, c.height));
-        const t = document.createElement("canvas"); t.width = Math.round(c.width * k); t.height = Math.round(c.height * k);
-        t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
-        // skip a blank frame (the canvas came back empty): check it isn't all black
-        const px = t.getContext("2d").getImageData(0, Math.round(t.height * 0.2), t.width, Math.round(t.height * 0.3)).data;
-        let sum = 0; for (let i = 0; i < px.length; i += 400) sum += px[i] + px[i + 1] + px[i + 2];
-        if (sum / (px.length / 400) < 30) return;
-        const img = t.toDataURL("image/jpeg", 0.7);
-        localStorage.setItem(SHOT_KEY, JSON.stringify({ img, w, h, at: Date.now() }));
-      } catch {}
-    }
-  }
+
   // index.html loads the map library without holding up the app; this runs when it arrives
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
   const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [],
@@ -2213,15 +2170,6 @@
     };
     map.on("move", latFix);
     map.on("moveend", () => placeZoomFix());
-    // the live map has drawn its picture: fade the saved one out; once it's settled, save a new one
-    const shotT = setInterval(() => { if (GL.everFit && GL.ready && !map.isMoving() && map.areTilesLoaded()) { clearInterval(shotT); dropShot(); } }, 120);
-    setTimeout(() => { clearInterval(shotT); dropShot(); }, 6000);   // never leave it up if the map can't finish
-    map.on("moveend", () => {
-      clearTimeout(GL.shotT);
-      let tries = 0;
-      const t = () => { GL.shotT = setTimeout(() => { if (map.areTilesLoaded() && !map.isMoving()) takeShot(); else if (++tries < 8) t(); }, tries ? 1000 : 2000); };
-      t();
-    });
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
@@ -3294,6 +3242,7 @@
   // The last state is kept on the phone, so the app draws at once on open (even on a weak signal)
   // and then refreshes when the add-on answers.
   const SNAP_KEY = "ft-state-v1";
+  try { localStorage.removeItem("ft-mapshot"); } catch {}   // the old saved map picture (removed in 4.16.1)
   function loadSnapshot() {
     try { const s = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); return s && s.legs ? s : null; } catch { return null; }
   }
