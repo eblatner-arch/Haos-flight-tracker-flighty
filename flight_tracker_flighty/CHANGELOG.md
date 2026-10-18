@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.20.0
+- An inbound leg's page is now the same page as your flight: the status banner, departure and arrival with times, gates and terminals, the progress line, Good to Know (weather, FAA programs at its airports, time zone change), its own Inbound Aircraft card (the leg before it, with the turn), the Times card with who reported each time, the Aircraft card, Flight Details, METARs and the map. Plus the strip of the airplane's day at the top and the FAA Data Log at the bottom. Tapping a leg in its Inbound Aircraft card goes one further back.
+
 ## 4.19.0
 - Inbound legs use the FAA's data exactly like your own flight: your inbound, its inbound and so on read the same SWIM feeds (TFMS, TFDM towers, STDDS surface radar, the airline's own messages) with the same priority over FlightAware. So an inbound shows "In the air" the moment the FAA reports its takeoff, with the FAA's landing estimate and taxi-in, instead of waiting for FlightAware (it could sit at "Taxiing" well after takeoff). Turn times and lateness use those times too. A SWIM message about any inbound leg refreshes your flight within seconds, as one about your own flight does.
 - Data Log on each inbound leg's page: what the FAA, towers, surface radar and the airline said and when. The four times on the page say who reported each one (FAA, IAD tower, United, FlightAware…).

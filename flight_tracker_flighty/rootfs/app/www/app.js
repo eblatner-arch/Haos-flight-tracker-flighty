@@ -428,6 +428,8 @@
     return leg;
   }
 
+  // An inbound leg's page is your flight's page: the same layout, cards and map, for that leg
+  // (its own inbound below it), plus the strip of the airplane's day and the FAA data log.
   async function aircraftView(id, n) {
     let leg;
     try { leg = await api(`api/leg/${id}?rotation=1`); } catch { go("#/"); return; }
@@ -436,72 +438,38 @@
     const h = rot[n];
     destroyMaps();
     if (!h) { $app.innerHTML = `<div class="sheet-gap"></div><section class="sheet">${sheetHead("No inbound linked yet", esc(flno(leg)), `#/leg/${id}`)}<div class="card empty"><b>No inbound linked yet</b>FlightAware hasn't linked the flight bringing your aircraft.</div></section>`; return; }
-    const t = h.times || { out: {}, off: {}, on: {}, in: {} };
-    const o = h.origin || {}, d = h.destination || {};
-    const tzA = o.tz, tzB = d.tz;
-    const tsrc = h.time_src || {};
-    const cell = (lbl, x, tz, key) => {
-      const v = x ? (x.actual || x.estimated || x.scheduled) : null;
-      let k = x && x.actual ? "actual" : x && x.estimated ? "estimated" : x && x.scheduled ? "scheduled" : "";
-      const who = key && k !== "scheduled" && (tsrc[key] || {})[k];   // who said so: FAA, a tower, the airline...
-      if (who) k += ` · ${esc(who)}`;
-      const d = x && x.scheduled && v ? (v - x.scheduled) / 60 : 0;
-      return `<div class="tcell"><div class="lbl">${lbl}</div><div class="v ${d >= 5 ? "late" : d <= -5 ? "early" : ""}">${hm(v, tz)}</div><div class="s">${k}${x && x.scheduled && v && Math.abs(v - x.scheduled) >= 300 ? ` · sched ${hm(x.scheduled, tz)}` : ""}</div></div>`;
+    const t = h.times || { out: {}, off: {}, on: {}, in: {} }, o = h.origin || {}, d = h.destination || {};
+    const nxt = rot[n + 1] || null;
+    // the turn into this leg: its inbound's gate arrival to this leg's departure
+    const outB = best(t, "out"), inB = nxt ? best(nxt.times || {}, "in") : null;
+    const vl = {
+      id: `${id}~${n}`, ident: h.ident, display: h.display_ident || h.ident, airline: leg.airline,
+      dep: o.iata || o.icao, arr: d.iata || d.icao, dep_ap: o, arr_ap: d, flight: h, phase: h.phase, status: h.status,
+      sched_out: (t.out || {}).scheduled || (t.off || {}).scheduled, sched_in: (t.in || {}).scheduled || (t.on || {}).scheduled,
+      rotation: rot.slice(n + 1), inbound: nxt, turn: outB && inB ? Math.round((outB - inB) / 60) : null,
+      problems: [], // FAA programs that touch this leg: at its arrival, or departure-side ones at its departure
+      nas: (leg.nas || []).filter((x) => x.airport === d.iata || (x.airport === o.iata && (x.kind === "closure" || x.dir === "dep"))).map((x) => ({ ...x, impact: [] })),
+      wx: leg.wx || {}, fa_id: h.fa_id, source: "FlightAware", updated: h.fetched, watching: true,
+      finished: ["arrived", "cancelled", "diverted"].includes(h.phase), history: [], alerts: [], chain: [],
+      live: n === 0 ? leg.inbound_live : null,
+      _ac: { parent: leg, id, n, rot },
     };
-    const finished = ["arrived", "cancelled", "diverted"].includes(h.phase);
-    const flying = ["taxi_out", "airborne", "landed"].includes(h.phase);
-    const more = n + 1 < rot.length;
-    // the whole day as a strip, newest (your flight) on the left
-    const strip = [`<a class="rot-step mine" href="#/leg/${id}"><b>${esc(leg.display || "You")}</b><span>${esc(leg.dep)}→${esc(leg.arr)}</span></a>`]
-      .concat(rot.map((r, i) => `<a class="rot-step ${i === n ? "on" : ""} ph-${slug(r.phase)}" href="#/aircraft/${id}/${i}"><b>${esc(r.display_ident || r.ident || "?")}</b><span>${esc((r.origin || {}).iata || "?")}→${esc((r.destination || {}).iata || "?")}</span><i>${esc(r.status)}</i></a>`))
-      .join('<span class="rot-arrow">‹</span>');
-    $app.innerHTML = `
-      <div class="sheet-gap d"></div>
-      <section class="sheet detail">
-      ${sheetHead(`${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}`, `${esc(h.display_ident || h.ident || "")} • ${n === 0 ? "Your inbound" : `${n + 1} legs back`}`,
-        n === 0 ? `#/leg/${id}` : `#/aircraft/${id}/${n - 1}`, alBadge(airlineCode({ display: h.display_ident || h.ident, airline: leg.airline }), "lg"))}
-      <div class="rot-strip" style="margin-top:10px">${strip}</div>
-      <div class="card">
-        <div class="hero-top"><div class="flightno">${esc(h.display_ident || h.ident || "")}<span class="tag">${n === 0 ? "YOUR INBOUND" : `${n + 1} LEGS BACK`}</span></div><span class="pill ${slug(h.status)}">${esc(h.status)}</span></div>
-        <div class="route">
-          <div class="ap"><div class="code">${esc(o.iata || "?")}</div><div class="city">${esc(o.city || o.name || "")}</div></div>
-          <div class="mid"><span class="dur">${t.out && t.in && best(t, "in") && best(t, "out") ? dur(best(t, "in") - best(t, "out")) : ""}</span></div>
-          <div class="ap right"><div class="code">${esc(d.iata || "?")}</div><div class="city">${esc(d.city || d.name || "")}</div></div>
-        </div>
-        <div class="grid4" style="margin-top:14px">
-          ${cell(`Gate out · ${tzAbbr(best(t, "out"), tzA)}`, t.out, tzA, "out")}
-          ${cell(`Gate in · ${tzAbbr(best(t, "in"), tzB)}`, t.in, tzB, "in")}
-          ${cell("Takeoff", t.off, tzA, "off")}
-          ${cell("Landing", t.on, tzB, "on")}
-        </div>
-        <div class="chips">
-          ${o.gate ? `<div class="chip"><div class="k">${esc(o.iata || "")} gate</div><div class="v">${esc(o.gate)}</div></div>` : ""}
-          ${d.gate ? `<div class="chip"><div class="k">${esc(d.iata || "")} gate</div><div class="v">${esc(d.gate)}</div></div>` : ""}
-          ${h.aircraft_type || h.tail ? `<div class="chip"><div class="k">Aircraft</div><div class="v">${esc([h.aircraft_type, h.tail].filter(Boolean).join(" · "))}</div></div>` : ""}
-          ${h.edct && h.edct.at ? `<div class="chip changed"><div class="k">EDCT</div><div class="v">${hm(h.edct.at, tzA)} ${esc(tzAbbr(h.edct.at, tzA))}${h.edct.for ? ` · ${esc(h.edct.for)}` : ""}</div></div>` : ""}
-          ${h.dep_delay ? `<div class="chip ${h.dep_delay >= 15 ? "changed" : ""}"><div class="k">Departure</div><div class="v">${h.dep_delay > 0 ? "+" : ""}${h.dep_delay} min</div></div>` : ""}
-        </div>
-      </div>
-      ${finished ? `<div class="card small muted">This leg has ${esc(h.status.toLowerCase())}${h.phase === "arrived" && t.in.actual ? ` (${hm(t.in.actual, tzB)} ${tzAbbr(t.in.actual, tzB)})` : ""}, so the airplane's earlier legs don't matter. This is as far back as it goes.</div>`
-        : flying ? `<div class="card small muted">The airplane is on this leg now, so nothing earlier matters.</div>`
-        : more ? `<a class="card rot-next" href="#/aircraft/${id}/${n + 1}"><span class="small muted">Before this, the airplane flies</span><b>${esc(rot[n + 1].display_ident || "")} ${esc((rot[n + 1].origin || {}).iata || "")}→${esc((rot[n + 1].destination || {}).iata || "")}</b><span class="pill ${slug(rot[n + 1].status)}">${esc(rot[n + 1].status)}</span></a>`
-        : `<div class="card small muted">${h.inbound_fa_id ? "The earlier leg will appear on the next check." : "FlightAware hasn't linked the leg before this one yet."}</div>`}
-      ${fold(`ac-log`, "Data Log", `<div class="card">${(h.log || []).length ? h.log.map((x) => `<div class="hl"><div class="hl-t">${hm(x.at)}<span class="faint"> · ${esc(x.src || "")}</span></div><div class="small">${esc(x.text)}</div></div>`).join("")
-        : `<div class="small muted">Nothing from the FAA's feeds for this leg yet${STATE && STATE.swim && STATE.swim.status === "connected" ? "" : " (SWIM isn't connected)"}. Times come from FlightAware until they report it.</div>`}
-        <div class="small faint" style="margin-top:8px">Times above say who reported each one. The log is cleared 15 minutes after this leg is at the gate.</div></div>`, false)}
-      <p class="small faint" style="margin:4px 4px 10px">${h.fetched ? `Data from FlightAware, fetched ${ago(h.fetched)}${finished ? "" : " · refreshes every 10 min"}` : "Data from FlightAware with your flight's last check"}</p>
-      ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}</section>`;
-    const earlier = h.phase === "scheduled" ? chainFrom(rot, n + 1) : [];
-    // surface traffic at this leg's airports too: where the airplane is on the ground (its departure
-    // before takeoff, its arrival once landed), or whichever of them you zoom in on
-    const surf = { key: `ac-${id}-${n}`, lid: id, route: `#/aircraft/${id}/${n}`, view: `ac-${id}-${n}`, ident: (h.ident || h.display_ident || "").replace(/\s/g, ""),
-      ap: () => ["scheduled", "taxi_out"].includes(h.phase) ? o.iata : ["landed", "arrived"].includes(h.phase) ? d.iata : null };
-    wireFolds();
-    showMap(`ac-${id}-${n}`, paintLeg, { id: surf.key, _surf: surf, dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
-      chain: [], live: null, display: h.display_ident }, { kind: "leg" });
-    surfaceWatch({ id: surf.key }, surf);
+    drawLeg(vl.id, vl);
   }
 
+  // the airplane's whole day as a strip, newest (your flight) on the left
+  function rotStrip(ac) {
+    const { parent, id, n, rot } = ac;
+    return `<div class="rot-strip" style="margin:10px 0 12px">${[`<a class="rot-step mine" href="#/leg/${id}"><b>${esc(parent.display || "You")}</b><span>${esc(parent.dep)}→${esc(parent.arr)}</span></a>`]
+      .concat(rot.map((r, i) => `<a class="rot-step ${i === n ? "on" : ""} ph-${slug(r.phase)}" href="#/aircraft/${id}/${i}"><b>${esc(r.display_ident || r.ident || "?")}</b><span>${esc((r.origin || {}).iata || "?")}→${esc((r.destination || {}).iata || "?")}</span><i>${esc(r.status)}</i></a>`))
+      .join('<span class="rot-arrow">‹</span>')}</div>`;
+  }
+  // what the FAA, towers, surface radar and the airline said about an inbound leg
+  function acLog(h) {
+    return fold("ac-log", "Data Log", `<div class="card">${(h.log || []).length ? h.log.map((x) => `<div class="hl"><div class="hl-t">${hm(x.at)}<span class="faint"> · ${esc(x.src || "")}</span></div><div class="small">${esc(x.text)}</div></div>`).join("")
+      : `<div class="small muted">Nothing from the FAA's feeds for this leg yet${STATE && STATE.swim && STATE.swim.status === "connected" ? "" : " (SWIM isn't connected)"}. Times come from FlightAware until they report it.</div>`}
+      <div class="small faint" style="margin-top:8px">The Times card says who reported each time. The log is cleared 15 minutes after this leg is at the gate.</div></div>`, false);
+  }
   function problemBanners(leg) {
     const nf = notFound(leg) && leg.note && /^Not found/.test(leg.note) ? `<div class="banner warn"><span class="dot warn"></span><div>${esc(leg.note)}</div></div>` : "";
     return nf + (leg.problems || []).filter((p) => !p.nas && !p.delay).map((p) => `<div class="banner ${p.level}"><span class="dot ${p.level}"></span><div>${esc(p.text)}</div></div>`).join("");
@@ -1447,7 +1415,9 @@
     const tcls = turn == null ? "" : turn < 0 ? "bad" : turn < minTurn ? "tight" : "";
     const landed = !!((it.in || {}).actual);
     const tpct = landed || (turn != null && turn < 0) ? 100 : turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
-    let tl = `<a class="tl-row me" href="#/leg/${leg.id}"><span class="tl-up">${IC.dep}</span><b>This Flight</b><span class="${lateTone(tone(dm, T.outKnown))}">${esc(me)}</span></a>`;
+    const ac = leg._ac, legHref = ac ? `#/aircraft/${ac.id}/${ac.n}` : `#/leg/${leg.id}`;
+    const acHref = (i) => ac ? `#/aircraft/${ac.id}/${ac.n + 1 + i}` : `#/aircraft/${leg.id}/${i}`;
+    let tl = `<a class="tl-row me" href="${legHref}"><span class="tl-up">${IC.dep}</span><b>This Flight</b><span class="${lateTone(tone(dm, T.outKnown))}">${esc(me)}</span></a>`;
     rot.slice(0, 3).forEach((r, i) => {
       const o = r.origin || {}, d = r.destination || {}, rt = r.times || {};
       const rin = best(rt, "in"), rm = minsLate(rin, (rt.in || {}).scheduled), rk = !!((rt.in || {}).actual || (rt.in || {}).estimated);
@@ -1455,12 +1425,12 @@
         : r.phase === "taxi_out" ? `Taxiing${(rt.out || {}).actual ? ` since ${hm(rt.out.actual, o.tz)}` : ""} · arrives ${hm(rin, d.tz)}`
         : r.phase === "cancelled" ? "Cancelled" : `Departs ${hm(best(rt, "out"), o.tz)}${r.edct && r.edct.at ? ` · EDCT ${hm(r.edct.at, o.tz)}` : ""}`;
       tl += `<div class="tl-node"><i></i>${esc(d.iata || "")}</div>
-        <a class="tl-row" href="#/aircraft/${leg.id}/${i}"><div><b>${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}</b><span>${esc(r.display_ident || "")} · ${esc(sub)}</span></div>
+        <a class="tl-row" href="${acHref(i)}"><div><b>${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}</b><span>${esc(r.display_ident || "")} · ${esc(sub)}</span></div>
           <span class="${tone(rm, rk)}">${r.phase === "cancelled" ? "Cancelled" : lateWord(rm, rk)}</span></a>`;
     });
     const last = rot[Math.min(rot.length, 3) - 1];
     tl += `<div class="tl-node"><i></i>${esc((last.origin || {}).iata || "")}</div>`;
-    if (rot.length > 3) tl += `<a class="tl-more" href="#/aircraft/${leg.id}/3"><span>${rot.length - 3}</span>Show More Flights</a>`;
+    if (rot.length > 3) tl += `<a class="tl-more" href="${acHref(3)}"><span>${rot.length - 3}</span>Show More Flights</a>`;
     return `<div class="gk-card">
       <div class="ib-head"><b>Inbound Aircraft</b><span>${esc([i0.tail, i0.aircraft_type].filter(Boolean).join(" · "))}</span></div>
       <span class="ib-pill ${ptn}">${esc(pill)}</span>
@@ -2933,6 +2903,7 @@
       ["Calendar", leg.summary],
     ].filter(([, v]) => v);
     destroyMaps();
+    const ac = leg._ac;
     const T0 = tms(leg);
     const fa_ = leg.fa_id ? `https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}` : leg.ident ? `https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}` : "";
     $app.innerHTML = `
@@ -2940,8 +2911,9 @@
       <div class="sheet-gap d"></div>
       <section class="sheet detail">
         ${sheetHead(`${esc(cityOf(leg.dep_ap, leg.dep))} to ${esc(cityOf(leg.arr_ap, leg.arr))}`,
-          `${esc(flno(leg))} • ${esc(fmt(T0.out, tzA, { weekday: "short", day: "numeric", month: "short" }).toUpperCase())}${leg.dh ? " • DH" : ""}${leg.extra ? ` • ${leg.kind === "manual" ? "MANUAL" : "FRIEND"}` : ""}`,
-          "#/", alBadge(airlineCode(leg), "lg"))}
+          `${esc(flno(leg))} • ${ac ? (ac.n === 0 ? "YOUR INBOUND" : `${ac.n + 1} LEGS BACK`) : esc(fmt(T0.out, tzA, { weekday: "short", day: "numeric", month: "short" }).toUpperCase())}${leg.dh ? " • DH" : ""}${leg.extra ? ` • ${leg.kind === "manual" ? "MANUAL" : "FRIEND"}` : ""}`,
+          ac ? (ac.n === 0 ? `#/leg/${ac.id}` : `#/aircraft/${ac.id}/${ac.n - 1}`) : "#/", alBadge(airlineCode(leg), "lg"))}
+        ${ac ? rotStrip(ac) : ""}
         ${statusBanner(leg)}
         ${nasGroups([leg]).filter((g) => MAJOR.includes(g.n.kind)).map(nasAlert).join("")}
         ${problemBanners(leg)}
@@ -2953,9 +2925,9 @@
         ${timesCard(leg)}
         ${aircraftF(leg)}
         <div class="actions">
-          ${leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
-          ${STATE.aeroapi ? '<button class="btn" id="leg-aero">Check AeroAPI now</button>' : ""}
-          ${leg.manual ? `<button class="btn" id="leg-kind">${leg.kind === "manual" ? "Make it a friend's flight" : "It's my flight"}</button><button class="btn" id="leg-remove">Remove</button>` : ""}
+          ${ac || leg.finished ? "" : '<button class="btn" id="leg-refresh">Refresh this flight</button>'}
+          ${!ac && STATE.aeroapi ? '<button class="btn" id="leg-aero">Check AeroAPI now</button>' : ""}
+          ${!ac && leg.manual ? `<button class="btn" id="leg-kind">${leg.kind === "manual" ? "Make it a friend's flight" : "It's my flight"}</button><button class="btn" id="leg-remove">Remove</button>` : ""}
           ${fa_ ? `<a class="btn" href="${fa_}" target="_blank" rel="noopener">FlightAware ↗</a>` : ""}
         </div>
         ${fold("leg-details", "Flight Details", `<div class="card"><div class="kv">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("")}</div>
@@ -2971,8 +2943,21 @@
             : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
           ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
         </div>`).join("")}${leg.history_more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${leg.history_more} older</button>` : ""}</div>`, false) : ""}
+        ${ac ? acLog(leg.flight) : ""}
         ${leg.shot ? fold("leg-shot", "Latest Screenshot", `<div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('details').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>`, false) : ""}
       </section>`;
+    if (ac) {
+      // the same map as a flight page, for this leg: surface traffic where that airplane is on the ground
+      const h = leg.flight, o = leg.dep_ap, d = leg.arr_ap, key = `ac-${ac.id}-${ac.n}`;
+      const surf = { key, lid: ac.id, route: `#/aircraft/${ac.id}/${ac.n}`, view: key, ident: (h.ident || h.display_ident || "").replace(/\s/g, ""),
+        ap: () => ["scheduled", "taxi_out"].includes(h.phase) ? o.iata : ["landed", "arrived"].includes(h.phase) ? d.iata : null };
+      const earlier = h.phase === "scheduled" ? chainFrom(ac.rot, ac.n + 1) : [];
+      wireFolds();
+      showMap(key, paintLeg, { id: key, _surf: surf, dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
+        chain: [], live: null, display: h.display_ident }, { kind: "leg" });
+      surfaceWatch({ id: key }, surf);
+      return;
+    }
     showMap(`leg-${leg.id}`, paintLeg, withChain(leg), { kind: "leg" });
     surfaceWatch(leg);
     liveWatch(leg);
