@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.17.4
+- No black screen when zooming all the way out from an airport: the soft backdrop under the map now always uses the whole world's coarsest imagery (zoom 0-3, 85 tiles, about 2 MB), downloaded once and kept on the phone. Mid-flight from an airport out to your routes there's always earth underneath, sharpening as tiles arrive, instead of black where nothing was loaded yet.
+
 ## 4.17.3
 - Zooming out from an airport with the center button (or any big jump in zoom) now flies: the camera rises in an arc and settles over your routes, instead of sliding sideways while zooming out, which on the globe looked like passing through the earth. Short moves still glide as before.
 

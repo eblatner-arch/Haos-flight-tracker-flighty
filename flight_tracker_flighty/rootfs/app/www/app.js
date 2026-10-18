@@ -1635,6 +1635,21 @@
     }, 30000);
   }
   const tc = (u) => TC_ON ? u.replace(/^https:\/\//, "tc://") : u;
+  // Once: the whole world's coarsest imagery (zoom 0-3, 85 tiles, about 2 MB) into the phone's tile
+  // store, so the backdrop under the map is never missing, wherever and however far you zoom.
+  async function warmWorld() {
+    if (!TC_ON || lowData()) return;
+    try {
+      if (localStorage.getItem("ft-world-warm") === "1") return;
+      const c = await caches.open(TC_NAME);
+      for (let z = 0; z <= 3; z++) for (let x = 0; x < 2 ** z; x++) for (let y = 0; y < 2 ** z; y++) {
+        const u = ESRI_IMG.replace("{z}", z).replace("{x}", x).replace("{y}", y);
+        if (await c.match(u)) continue;
+        try { const r = await fetch(u); if (r.ok) await c.put(u, r); } catch {}
+      }
+      localStorage.setItem("ft-world-warm", "1");
+    } catch {}
+  }
   async function tileCacheInfo() {
     try { const c = await caches.open(TC_NAME); const n = (await c.keys()).length; const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null; return { n, bytes: est ? est.usage : null }; } catch { return null; }
   }
@@ -1722,7 +1737,9 @@
     const ts = goo ? 256 : low ? 512 : 181;
     // A coarse copy of the imagery underneath (2 zoom levels lower, at most z8: a handful of tiles,
     // cached): while you drag, anything not loaded yet shows a softer earth instead of black.
-    const under = (tiles) => ({ type: "raster", tiles, tileSize: 1024, maxzoom: 8 });
+    // At most zoom 3 (85 tiles for the whole world, kept on the phone, see warmWorld): something is
+    // always underneath, anywhere at any zoom, even mid-flight from an airport out to the globe.
+    const under = (tiles) => ({ type: "raster", tiles, tileSize: 1024, maxzoom: 3 });
     const img = tc(ESRI_IMG), dark = darkTiles().map(tc);
     setTimeout(gAttr, 0);
     return {
@@ -2181,6 +2198,7 @@
     };
     map.on("move", latFix);
     map.on("moveend", () => placeZoomFix());
+    setTimeout(warmWorld, 8000);
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
