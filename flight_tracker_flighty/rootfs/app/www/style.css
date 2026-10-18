@@ -971,7 +971,26 @@ body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 48px
 .pbadge.gl { width: 28px; height: 28px; }
 .gl-code { font: 700 10px/1 -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000, 0 0 1px #000;
   white-space: nowrap; pointer-events: none; display: none; }
-.z3 .gl-code, .gl-code.on { display: block; }
+.z4 .gl-code, .gl-code.on { display: block; }
 
 /* the sheet must be at least a screen tall so it can be scrolled to every stop */
 .sheet { min-height: 100vh; }
+
+/* ---- one map behind every page ---- */
+#map { position: fixed; inset: 0; z-index: 0; }
+body:not(.sheetmode) #map { visibility: hidden; }
+.glm { pointer-events: none; }
+.gl-plane { width: 30px; height: 30px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); }
+.gl-plane svg { width: 100%; height: 100%; display: block; }
+.apt-label.inb { background: var(--violet); }
+.gl-ctrls .only-home, .gl-ctrls .only-leg, .gl-ctrls .only-surf { display: none !important; }
+.gl-ctrls[data-kind="home"] .only-home, .gl-ctrls[data-kind="leg"] .only-leg { display: grid !important; }
+.gl-ctrls[data-kind="leg"].has-surf .only-surf { display: grid !important; }
+.gl-ctrls .map-center.xpdr { font: 800 9px/1 -apple-system, system-ui, sans-serif; color: #fff; }
+.gl-ctrls .map-center.xpdr.on { color: #5aa9ff; }
+.surf-dot { display: block; width: 5px; height: 5px; border-radius: 50%; background: #8e8e93; }
+.surf-ac { position: relative; display: grid; place-items: center; }
+.surf-ac svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+.surf-tag { position: absolute; left: 100%; top: 50%; transform: translate(4px, -50%); white-space: nowrap; font: 600 10px/1.2 -apple-system, system-ui, sans-serif;
+  color: #fff; background: rgba(28,28,30,.8); border-radius: 5px; padding: 1px 5px; }
+.surf-tag.mine { background: #2f6fe8; }

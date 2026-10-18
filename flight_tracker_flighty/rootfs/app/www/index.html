@@ -13,7 +13,6 @@
 <!-- fonts load without holding up the first draw -->
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet"></noscript>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -24,6 +23,7 @@
   <span id="updated" class="muted small"></span>
   <button id="refresh" hidden aria-label="Refresh now"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button>
 </header>
+<div id="map" class="mapbg"></div>
 <main id="app"><div class="loading">Loading…</div></main>
 <nav class="tabbar" id="tabbar">
   <div class="tab-pill">
@@ -33,7 +33,6 @@
   </div>
   <a class="tab-search" href="#/history/find" data-tab="search" aria-label="Search"><svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM15.5 15.5 20 20"/></svg></a>
 </nav>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script defer src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
 <script defer src="app.js"></script>
 </body>

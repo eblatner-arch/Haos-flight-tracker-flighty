@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.3.0
+- One map for the whole app. It's made once and stays up: going between My Flights, a flight, Passport, Airports or a ground stop only swaps what's drawn on it, and the camera glides to the new page's routes. Imagery already loaded stays loaded.
+- Flights are on the globe too: zoomed out it's the earth, zoomed in it flattens into a normal map with the airport diagram (runways, taxiways, gates) and live surface traffic, as before.
+- Ground stop and delay program maps are on the same map, centers shaded.
+- Leaflet is gone; one map library (MapLibre) instead of two.
+- Framing leaves room for the map buttons, the speed pill and airport labels; the airport buttons center the airport above the sheet.
+
 ## 4.2.1
 - The sheet can be pulled down to a peek (just its header over a big map), like Flighty. Pages open at the middle stop; let go between the two and it settles on the nearer one. Scrolling up still covers the map.
 

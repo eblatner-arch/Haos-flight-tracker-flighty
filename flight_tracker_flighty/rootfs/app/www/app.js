@@ -17,7 +17,7 @@
     tpl.innerHTML = html;
     patchChildren(target, tpl.content);
   }
-  const keepNode = (x, y) => x.classList && (x.classList.contains("leaflet-container") || x.classList.contains("maplibregl-map")) && x.id && x.id === y.id;
+  const keepNode = () => false;
   function sameKind(x, y) {
     return x.nodeType === y.nodeType && x.nodeName === y.nodeName && (x.nodeType !== 1 || (x.id || "") === (y.id || ""));
   }
@@ -42,10 +42,7 @@
   const $updated = document.getElementById("updated");
   const $refresh = document.getElementById("refresh");
   let STATE = null;
-  // Maps survive re-renders: keyed, moved back into the new page, layers repainted in place.
-  const MAPS = {};
   const LEGS = {};  // last full copy of each flight, for instant redraws
-  let usedMaps = new Set();
   let lastRoute = null;
   let ROUTE = location.hash && location.hash.length > 2 ? location.hash : "#/";
   // Back remembers where you were: each step forward saves the page and its scroll position;
@@ -111,30 +108,9 @@
   };
   const best = (t, k) => t && t[k] ? (t[k].actual || t[k].estimated || t[k].scheduled) : null;
   const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z]+/g, "-");
-  const destroyMaps = () => { usedMaps = new Set(); };
-  function sweepMaps() {
-    for (const k of Object.keys(MAPS)) {
-      if (!usedMaps.has(k)) { try { MAPS[k].map.remove(); } catch {} delete MAPS[k]; }
-    }
-  }
+  const destroyMaps = () => {};
 
-  // Map dragging is decided per touch: before anything else sees a touch, each map's dragging is
-  // switched on only if the finger landed inside that map's visible box. A swipe that starts
-  // anywhere else can't move a map, whatever iOS decides the touch hit.
   const EDGE = 24;  // px from the left edge where a swipe means "back"
-  function gateMapDrag(e) {
-    const p = e.touches ? e.touches[0] : e;
-    if (!p) return;
-    const edge = e.touches && p.clientX <= EDGE && document.querySelector("#app a.back");
-    for (const m of Object.values(MAPS)) {
-      if (!m.interactive || !m.map.dragging) continue;
-      const r = m.el.getBoundingClientRect();
-      const inside = !edge && p.clientX >= r.left && p.clientX <= r.right && p.clientY >= r.top && p.clientY <= r.bottom;
-      if (inside && !m.map.dragging.enabled()) m.map.dragging.enable();
-      else if (!inside && m.map.dragging.enabled()) m.map.dragging.disable();
-    }
-  }
-  for (const ev of ["touchstart", "pointerdown", "mousedown"]) document.addEventListener(ev, gateMapDrag, { capture: true, passive: true });
 
   // Swipe in from the left edge to go back (to wherever the page's "‹" or ✕ link points), like iOS.
   // On map pages the sheet slides away and the map stays put.
@@ -286,579 +262,10 @@
   }
   const ll = (ap) => ap && ap.lat != null && ap.lon != null ? [ap.lat, ap.lon] : null;
 
-  function planeMarker(pos, heading, color, title) {
-    const icon = L.divIcon({
-      className: "plane-icon",
-      html: `<div style="color:${color};transform:rotate(${heading || 0}deg)">${PLANE}</div>`,
-      iconSize: [30, 30], iconAnchor: [15, 15],
-    });
-    return L.marker(pos, { icon, title, zIndexOffset: 1000 });
-  }
-
-  // Basemaps: satellite imagery with place names (Flighty's look, the default), or CARTO's dark
-  // OpenStreetMap map. Switched with the map button; the choice is remembered on this phone.
-  function addTiles(map, dark) {
-    (map._ftTiles || []).forEach((l) => map.removeLayer(l));
-    map._ftTiles = [];
-    if (mapStyle() === "satellite") {
-      map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 5, className: "sat-tiles", keepBuffer: 2, zIndex: 0 }).addTo(map));
-      map._ftTiles.push(L.tileLayer(ESRI_IMG, { maxZoom: 20, maxNativeZoom: 19, className: "sat-tiles", keepBuffer: 6, zIndex: 1,
-        attribution: "&copy; Esri, Maxar" }).addTo(map));
-      map._ftTiles.push(L.tileLayer(ESRI_LBL, { maxZoom: 20, maxNativeZoom: 19, pane: pane(map, "labels", 390) }).addTo(map));
-      return;
-    }
-    // CARTO now watermarks tiles fetched without its free key. With your key (add-on Configuration)
-    // tiles come from its keyed address (?key=…); a tile address of your own wins: {style} becomes
-    // dark_all or light_all, {key} your key. If tiles keep failing it steps down: keyless CARTO,
-    // then Esri's gray map (OpenStreetMap's own servers refuse apps like this one).
-    dark = true;
-    const mt = (STATE && STATE.map_tiles) || {};
-    const style = dark ? "dark_all" : "light_all";
-    const esri = (name) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
-    const carto = "&copy; OpenStreetMap contributors &copy; CARTO";
-    const chain = [];
-    if (mt.url) chain.push([mt.url.replace("{style}", style).replace("{key}", encodeURIComponent(mt.key || "")), { maxZoom: 20, subdomains: "abcd", attribution: carto }]);
-    else if (mt.key) chain.push([`https://basemaps.cartocdn.com/rastertiles/${style}/{z}/{x}/{y}.png?key=${encodeURIComponent(mt.key)}`, { maxZoom: 20, attribution: carto }]);
-    chain.push([`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`, { maxZoom: 20, subdomains: "abcd", attribution: carto }]);
-    chain.push([esri(dark ? "World_Dark_Gray_Base" : "World_Light_Gray_Base"), { maxZoom: 20, maxNativeZoom: 16, attribution: "Tiles &copy; Esri" }]);
-    let i = 0, layer = null, errors = 0, loaded = 0;
-    const use = () => {
-      if (layer) map.removeLayer(layer);
-      const [url, opts] = chain[i];
-      errors = 0; loaded = 0;
-      layer = L.tileLayer(url, opts).addTo(map);
-      map._ftTiles = [layer];
-      layer.on("tileload", () => { loaded++; });
-      layer.on("tileerror", () => {
-        // a few bad tiles happen; give up on a source only when it loads nothing
-        if (++errors >= 4 && loaded === 0 && i < chain.length - 1) { i++; use(); }
-      });
-    };
-    use();
-  }
-
-  // Airport layout labels: zoomed in on one of the flight's airports, runways, terminals, taxiways
-  // and gates are labelled (OpenStreetMap data, fetched once per airport by the add-on). Smaller
-  // things appear as you zoom further: runways and terminals from 14, taxiways 15, gates 16.
-  const LAYOUTS = {};
-  const LOG_ALL = new Set();   // flights whose whole lookup log you asked to see
   function kmBetween(a, b) {
     const R = Math.PI / 180, x = (b[1] - a[1]) * R * Math.cos((a[0] + b[0]) / 2 * R), y = (b[0] - a[0]) * R;
     return Math.hypot(x, y) * 6371;
   }
-  function layoutZoom(entry) {
-    const z = entry.map.getZoom(), c = entry.map.getContainer();
-    for (const n of [8, 15, 16, 17]) c.classList.toggle(`z${n}`, z >= n);
-  }
-  async function layoutCheck(entry) {
-    const map = entry.map, leg = entry.leg;
-    if (!leg) return;
-    layoutZoom(entry);
-    if (map.getZoom() < 14) { if (entry.layout && map.hasLayer(entry.layout)) map.removeLayer(entry.layout); return; }
-    const c = map.getCenter(), here = [c.lat, c.lng];
-    const ap = [leg.dep_ap, leg.arr_ap].map((a) => a && ll(a) ? { code: a.iata || a.icao, pos: ll(a) } : null)
-      .filter((a) => a && a.code && kmBetween(here, a.pos) < 8)[0];
-    if (!ap) return;
-    if (entry.layoutFor === ap.code) {
-      if (!map.hasLayer(entry.layout)) entry.layout.addTo(map);
-      if (entry.layout.rwyWidth) entry.layout.rwyWidth(map);
-      return;
-    }
-    if (!LAYOUTS[ap.code]) {
-      LAYOUTS[ap.code] = api(`api/airport/${encodeURIComponent(ap.code)}/layout`).catch(() => { delete LAYOUTS[ap.code]; return null; });
-    }
-    const d = await LAYOUTS[ap.code];
-    if (!d || !d.features || entry.layoutFor === ap.code) return;
-    if (entry.layout) map.removeLayer(entry.layout);
-    entry.layout = paintLayout(d.features).addTo(map);
-    entry.layoutFor = ap.code;
-    if (entry.layout.rwyWidth) entry.layout.rwyWidth(map);
-  }
-  function paintLayout(features) {
-    const g = L.layerGroup(), muted = css("--muted"), faint = css("--faint");
-    const lbl = (pos, text, cls) => g.addLayer(L.marker(pos, { interactive: false, keyboard: false,
-      icon: L.divIcon({ className: "", iconSize: null, html: `<span class="ap-lbl ${cls}">${esc(text)}</span>` }) }));
-    const mid = (pts) => {
-      let tot = 0; const seg = [];
-      for (let i = 1; i < pts.length; i++) { const d = kmBetween(pts[i - 1], pts[i]); seg.push(d); tot += d; }
-      let half = tot / 2;
-      for (let i = 0; i < seg.length; i++) {
-        if (half <= seg[i]) { const t = seg[i] ? half / seg[i] : 0; return [[pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t], tot]; }
-        half -= seg[i];
-      }
-      return [pts[0], tot];
-    };
-    const centroid = (pts) => [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length];
-    const placed = {};
-    const near = (ref, p, km) => (placed[ref] || []).some((q) => kmBetween(p, q) < km);
-    for (const f of features) {
-      if (f.k === "terminal") {
-        g.addLayer(L.polygon(f.g, { color: muted, weight: 1, opacity: 0.6, fillColor: muted, fillOpacity: 0.12, interactive: false }));
-        if (f.name || f.ref) lbl(centroid(f.g), f.name || f.ref, "ap-term");
-      }
-    }
-    // Runways drawn on top of the basemap, about their real width (45 m) at every zoom, with a
-    // dashed centerline, so they stand out from the taxiways on the dark map.
-    const rwys = [], twys = [];
-    for (const f of features) {
-      if (f.k !== "runway" || !Array.isArray(f.g[0])) continue;
-      const body = L.polyline(f.g, { color: css("--text"), opacity: 0.22, weight: 8, lineCap: "butt", interactive: false });
-      const cl = L.polyline(f.g, { color: css("--text"), opacity: 0.55, weight: 1, dashArray: "8 8", interactive: false });
-      g.addLayer(body); g.addLayer(cl); rwys.push(body);
-    }
-    g.rwyWidth = (map) => {
-      const z = map.getZoom(), lat = map.getCenter().lat;
-      const mpp = 156543.03 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
-      const w = Math.max(3, Math.min(60, 45 / mpp));
-      rwys.forEach((r) => r.setStyle({ weight: w }));
-      // taxiways about 23 m wide, with the yellow centerline painted on them
-      const tw = Math.max(2, Math.min(30, 23 / mpp));
-      twys.forEach((r) => r.setStyle({ weight: tw }));
-    };
-    for (const f of features) {
-      if (f.k === "runway" && f.ref) lbl(mid(f.g)[0], f.ref.replace(/^0/, "").replace(/\/0/, "/"), "ap-rwy");
-      else if (f.k === "taxiway" && f.ref) {
-        const body = L.polyline(f.g, { color: css("--text"), opacity: 0.12, weight: 4, lineJoin: "round", interactive: false });
-        g.addLayer(body); twys.push(body);
-        g.addLayer(L.polyline(f.g, { color: css("--amber"), opacity: 0.45, weight: 1, interactive: false, className: "twy-cl" }));
-        const [p, len] = mid(f.g);
-        if (len < 0.08 || near(f.ref, p, 0.35)) continue;
-        (placed[f.ref] = placed[f.ref] || []).push(p);
-        lbl(p, f.ref, "ap-twy");
-      } else if ((f.k === "gate" || f.k === "stand") && f.ref && !Array.isArray(f.g[0])) {
-        if (near("gate:" + f.ref, f.g, 0.05)) continue;
-        (placed["gate:" + f.ref] = placed["gate:" + f.ref] || []).push(f.g);
-        lbl(f.g, f.ref, "ap-gate");
-      }
-    }
-    return g;
-  }
-
-  function drawMap(el, leg, { interactive = true, key = null, paint = null, controls = "full" } = {}) {
-    if (!el) return;
-    if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
-    key = key || el.id;
-    const have = MAPS[key];
-    if (!have && el.classList.contains("leaflet-container")) {
-      // a kept map element now belongs to a different flight: swap in a clean container
-      const f = document.createElement("div");
-      f.id = el.id; f.className = el.dataset.cls || "";
-      el.replaceWith(f); el = f;
-    }
-    if (have) {
-      if (have.el !== el) el.replaceWith(have.el);
-      usedMaps.add(key);
-      have.paint(have, leg, false);
-      setTimeout(() => have.map.invalidateSize(), 30);
-      return;
-    }
-    const dark = true;
-    const full = el.classList.contains("mapbg");
-    el.dataset.cls = el.className;
-    // padding 0: the route layer is exactly the map's size instead of 10% larger
-    const map = L.map(el, { renderer: L.svg({ padding: 0 }), zoomControl: interactive && !full, attributionControl: !full, dragging: interactive,
-      scrollWheelZoom: interactive, touchZoom: interactive, doubleClickZoom: interactive, boxZoom: false, keyboard: false, worldCopyJump: true });
-    if (map.attributionControl) map.attributionControl.setPrefix("");   // no "Leaflet" flag; the map credits stay
-    if (full) map.addControl(L.control.attribution({ position: "topleft", prefix: "" }));
-    addTiles(map, dark);
-    const entry = { el, map, layer: L.layerGroup().addTo(map), bounds: [], interactive, full, paint: paint || paintMap };
-    entry.center = () => entry.bounds.length ? map.fitBounds(entry.bounds, fitOpts(el, paint ? 7 : 9)) : map.setView([39.5, -98.35], 3);
-    MAPS[key] = entry;
-    usedMaps.add(key);
-    if (interactive && L.Control) {
-      addStack(map, key === "home");
-      const Btn = L.Control.extend({
-        options: { position: "topright" },
-        onAdd() {
-          const b = L.DomUtil.create("button", "map-center");
-          b.type = "button"; b.title = "Center on route"; b.setAttribute("aria-label", "Center on route");
-          b.innerHTML = IC.locate;
-          L.DomEvent.disableClickPropagation(b);
-          L.DomEvent.on(b, "click", (e) => { L.DomEvent.preventDefault(e); entry.center(); });
-          return b;
-        },
-      });
-      map.addControl(new Btn());
-    }
-    if (interactive && L.Control && controls === "full") {
-      // Jump to the departure or arrival airport, zoomed in enough to see the surface traffic.
-      const TAKEOFF = '<svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 1.82 3.16.77 1.33 1.6-.43 5.31-1.42 4.35-1.16L21 11.49c.81-.23 1.28-1.05 1.07-1.85z"/></svg>';
-      const LANDING = '<svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm7.18-5.73 4.35 1.16 5.31 1.42c.8.21 1.62-.26 1.84-1.06.21-.8-.26-1.62-1.06-1.84l-5.31-1.42-2.76-9.02L10.12 2v8.28L5.15 8.95l-.93-2.32-1.45-.39v5.17l1.6.43 5.31 1.43z"/></svg>';
-      for (const [side, svg, what] of [["dep_ap", TAKEOFF, "departure"], ["arr_ap", LANDING, "arrival"]]) {
-        const Go = L.Control.extend({
-          options: { position: "topright" },
-          onAdd() {
-            const b = L.DomUtil.create("button", "map-center");
-            b.type = "button"; b.title = `Zoom to the ${what} airport`; b.setAttribute("aria-label", b.title);
-            b.innerHTML = svg; b.style.marginTop = "6px";
-            L.DomEvent.disableClickPropagation(b);
-            L.DomEvent.on(b, "click", (e) => {
-              L.DomEvent.preventDefault(e);
-              const ap = entry.leg && entry.leg[side], p = ll(ap);
-              if (p) map.setView(p, 15);
-            });
-            return b;
-          },
-        });
-        map.addControl(new Go());
-      }
-      const Xp = L.Control.extend({
-        options: { position: "topright" },
-        onAdd() {
-          const b = L.DomUtil.create("button", "map-center xpdr");
-          b.type = "button"; b.setAttribute("aria-label", "Transponder filter");
-          b.textContent = "XPDR";
-          b.style.display = "none"; b.style.marginTop = "6px";
-          L.DomEvent.disableClickPropagation(b);
-          L.DomEvent.on(b, "click", (e) => {
-            L.DomEvent.preventDefault(e);
-            try { localStorage.setItem("ft-surf-all", localStorage.getItem("ft-surf-all") === "1" ? "0" : "1"); } catch {}
-            if (entry.lastSurface) paintSurface(entry, entry.lastSurface);
-          });
-          entry.xpdrBtn = b;
-          return b;
-        },
-      });
-      map.addControl(new Xp());
-      const Id = L.Control.extend({
-        options: { position: "topright" },
-        onAdd() {
-          const b = L.DomUtil.create("button", "map-center xpdr");
-          b.type = "button"; b.setAttribute("aria-label", "Show callsigns");
-          b.textContent = "ID";
-          b.style.display = "none"; b.style.marginTop = "6px";
-          L.DomEvent.disableClickPropagation(b);
-          L.DomEvent.on(b, "click", (e) => {
-            L.DomEvent.preventDefault(e);
-            try { localStorage.setItem("ft-surf-ids", localStorage.getItem("ft-surf-ids") === "1" ? "0" : "1"); } catch {}
-            if (entry.lastSurface) paintSurface(entry, entry.lastSurface);
-          });
-          entry.idBtn = b;
-          return b;
-        },
-      });
-      map.addControl(new Id());
-    }
-    if (interactive) {
-      oneFingerZoom(map, el);
-      map.on("zoomend moveend", () => { layoutCheck(entry); surfaceNow(entry); });
-      map.on("zoomend", () => { if (entry.lastSurface) paintSurface(entry, entry.lastSurface); });
-    }
-    entry.paint(entry, leg, true);
-    setTimeout(() => { map.invalidateSize(); entry.center(); }, 60);
-  }
-
-  // Double-tap and hold, then slide down to zoom in or up to zoom out (like Apple and Google Maps);
-  // a plain double tap zooms in one step. Driven the way Leaflet drives a pinch: the tiles already on
-  // screen are scaled while your finger moves (nothing reloads mid-gesture, so the map never blanks),
-  // then it settles on a whole zoom level with Leaflet's own zoom animation.
-  function oneFingerZoom(map, el) {
-    map.doubleClickZoom.disable();
-    let last = 0, lastPt = null, zt = null;
-    const target = (z) => {  // keep the spot under your finger where it is
-      const size = map.getSize().divideBy(2);
-      return map.unproject(map.project(zt.ll, z).subtract(zt.pt.subtract(size)), z);
-    };
-    el.addEventListener("touchstart", (e) => {
-      if (e.touches.length !== 1) { zt = null; return; }
-      const t = e.touches[0], now = Date.now();
-      if (now - last < 320 && lastPt && Math.hypot(t.clientX - lastPt.x, t.clientY - lastPt.y) < 40) {
-        const pt = map.mouseEventToContainerPoint(t);
-        zt = { y: t.clientY, z0: map.getZoom(), z: map.getZoom(), moved: false, pt, ll: map.containerPointToLatLng(pt), started: false };
-        if (map.dragging) map.dragging.disable();
-        e.preventDefault(); e.stopPropagation();
-        last = 0;
-      } else { last = now; lastPt = { x: t.clientX, y: t.clientY }; }
-    }, { capture: true, passive: false });
-    el.addEventListener("touchmove", (e) => {
-      if (!zt) return;
-      e.preventDefault(); e.stopPropagation();
-      const dy = e.touches[0].clientY - zt.y;
-      if (!zt.moved && Math.abs(dy) < 5) return;
-      if (!zt.started) { map._stop(); map._moveStart(true, false); zt.started = true; }
-      zt.moved = true;
-      zt.z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zt.z0 + dy / 90));
-      const c = target(zt.z), z = zt.z;
-      cancelAnimationFrame(zt.raf);
-      zt.raf = requestAnimationFrame(() => map._move(c, z, { pinch: true, round: false }));
-    }, { capture: true, passive: false });
-    const end = (e) => {
-      if (!zt) return;
-      const g = zt;
-      zt = null;
-      cancelAnimationFrame(g.raf);
-      if (e.cancelable) e.preventDefault();
-      e.stopPropagation();
-      if (!g.moved) { map.setZoomAround(g.pt, Math.min(map.getMaxZoom(), Math.round(g.z0) + 1)); return; }
-      zt = g;
-      const z = map._limitZoom(Math.round(g.z)), c = target(z);
-      zt = null;
-      if (map._zoomAnimated) map._animateZoom(c, z, true, map.options.zoomSnap);
-      else map._resetView(c, z);
-    };
-    el.addEventListener("touchend", end, { capture: true, passive: false });
-    el.addEventListener("touchcancel", end, { capture: true, passive: false });
-  }
-
-
-  // Live surface traffic (FAA STDDS) on a flight's map while it's on the ground at an airport with
-  // surface radar: everything on the field, your flight highlighted. Polls only while that
-  // flight's page is open: every 3 s while there's traffic to show, every 20 s otherwise.
-  const SURF = { id: null, timer: null, zoomed: false };
-  // Between full refreshes the flight's own position (and its inbound's) moves every 5 s: only
-  // the new position and track points are fetched, and the map repaints in place.
-  // Runs for the flight page's map and for the big map on the Flights screen; stops by itself
-  // once that map is gone. A request that hangs (weak cellular) is dropped after 8 s.
-  const LIVEW = { id: null, key: null, timer: null };
-  function liveWatch(leg, key) {
-    key = key || `leg-${leg.id}`;
-    const moving = ["taxi_out", "airborne", "landed"].includes(leg.phase) ||
-      (leg.inbound && ["taxi_out", "airborne"].includes(leg.inbound.phase));
-    if (!moving) { if (LIVEW.key === key) { clearTimeout(LIVEW.timer); LIVEW.id = LIVEW.key = LIVEW.timer = null; } return; }
-    if (LIVEW.key === key && LIVEW.timer) return;
-    if (LIVEW.timer) clearTimeout(LIVEW.timer);
-    LIVEW.id = leg.id; LIVEW.key = key;
-    const id = leg.id;
-    const tick = async () => {
-      LIVEW.timer = null;
-      const entry = MAPS[key];
-      if (LIVEW.key !== key || !entry || !entry.el.isConnected) { if (LIVEW.key === key) LIVEW.id = LIVEW.key = null; return; }
-      const cur = LEGS[id];
-      if (cur && !document.hidden) {
-        const tr = (cur.flight && cur.flight.track) || [], itr = (cur.inbound && cur.inbound.track) || [];
-        const since = Math.min(tr.length ? tr[tr.length - 1][4] || 0 : 0, itr.length ? itr[itr.length - 1][4] || 0 : Infinity);
-        const ctl = window.AbortController ? new AbortController() : null;
-        const stop = ctl && setTimeout(() => ctl.abort(), 8000);
-        try {
-          const d = await api(`api/live/${encodeURIComponent(id)}?since=${Math.floor(since || 0)}`, ctl ? { signal: ctl.signal } : undefined);
-          let moved = false;
-          if (d.live && (!cur.live || d.live.at > cur.live.at)) { cur.live = d.live; moved = true; }
-          if (d.inbound_live && (!cur.inbound_live || d.inbound_live.at > cur.inbound_live.at)) { cur.inbound_live = d.inbound_live; moved = true; }
-          const add = (arr, pts) => { const last = arr.length ? arr[arr.length - 1][4] || 0 : 0; for (const p of pts || []) if ((p[4] || 0) > last) { arr.push(p); moved = true; } };
-          if (cur.flight) { cur.flight.track = cur.flight.track || []; add(cur.flight.track, d.track); }
-          if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
-          const m = MAPS[key];
-          if (moved && m) {
-            if (m.home) m.paint(m, { ...m.home, focus: withChain(cur) }, false);
-            else paintMap(m, withChain(cur), false);
-          }
-          const te = document.getElementById("telem");
-          if (te && cur.live && key === `leg-${id}`) te.innerHTML = telem(cur.live);
-          // between fixes, carry the airplane forward along its heading
-          const fresh = (lv, trk) => { const l = (trk || []).filter((p) => p && p[0] != null).pop(); return !(l && (l[4] || 0) > (lv.at || 0) + 5); };
-          if (m && m.ownMarker && cur.live && cur.phase === "airborne" && fresh(cur.live, cur.flight && cur.flight.track)) { const a = aheadOf(cur.live, m.ownHdg || 0, Date.now()); if (a) m.ownMarker.setLatLng(a); }
-          if (m && m.inbMarker && cur.inbound_live && cur.inbound && cur.inbound.phase === "airborne" && fresh(cur.inbound_live, cur.inbound.track)) { const a = aheadOf(cur.inbound_live, m.inbHdg || 0, Date.now()); if (a) m.inbMarker.setLatLng(a); }
-        } catch {} finally { if (stop) clearTimeout(stop); }
-      }
-      LIVEW.timer = setTimeout(tick, 5000);
-    };
-    LIVEW.timer = setTimeout(tick, 5000);
-  }
-
-  function stopSurface() {
-    if (SURF.timer) clearTimeout(SURF.timer);
-    SURF.timer = null; SURF.id = null;
-    for (const m of Object.values(MAPS)) { if (m.surface) m.surface.clearLayers(); if (m.aptBtn) m.aptBtn.style.display = "none"; if (m.xpdrBtn) m.xpdrBtn.style.display = "none"; if (m.idBtn) m.idBtn.style.display = "none"; }
-  }
-  function surfaceWatch(leg) {
-    if (!STATE || !STATE.stdds || STATE.stdds.status !== "connected") { stopSurface(); return; }
-    if (SURF.id !== leg.id) { stopSurface(); SURF.id = leg.id; SURF.zoomed = false; }
-    if (SURF.timer) return;
-    const id = leg.id;
-    const tick = async () => {
-      SURF.timer = null;
-      if (SURF.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (SURF.id === id) stopSurface(); return; }
-      let d = null;
-      const ent = MAPS[`leg-${id}`];
-      const ap = ent ? zoomedAirport(ent, 13) : null;
-      try { d = await api(`api/surface/${encodeURIComponent(id)}${ap ? `?ap=${encodeURIComponent(ap)}` : ""}`); } catch {}
-      if (SURF.id !== id) return;
-      const entry = MAPS[`leg-${id}`];
-      if (entry) paintSurface(entry, d || {});
-      SURF.timer = setTimeout(tick, d && d.targets && d.targets.length ? 3000 : 20000);
-    };
-    SURF.timer = setTimeout(tick, 0);
-  }
-  // The flight airport the map is zoomed in on (center within 8 km, at least zoom z), or null.
-  function zoomedAirport(entry, z) {
-    const leg = entry.leg;
-    if (!leg || entry.map.getZoom() < z) return null;
-    const c = entry.map.getCenter(), here = [c.lat, c.lng];
-    const a = [leg.dep_ap, leg.arr_ap].find((a) => a && ll(a) && kmBetween(here, ll(a)) < 8);
-    return a ? a.iata || a.icao : null;
-  }
-  // zoomed in on an airport: look for surface traffic now rather than at the next 20 s poll
-  function surfaceNow(entry) {
-    if (!SURF.id || !entry.leg || entry.leg.id !== SURF.id || !zoomedAirport(entry, 13)) return;
-    if (entry.surfAp === zoomedAirport(entry, 13)) return;
-    entry.surfAp = zoomedAirport(entry, 13);
-    if (SURF.timer) clearTimeout(SURF.timer);
-    SURF.timer = null;
-    const l = entry.leg;
-    SURF.id = null;
-    surfaceWatch(l);
-  }
-
-  function paintSurface(entry, d) {
-    if (!entry.surface) entry.surface = L.layerGroup().addTo(entry.map);
-    entry.surface.clearLayers();
-    let only = true, ids = false;
-    try { only = localStorage.getItem("ft-surf-all") !== "1"; ids = localStorage.getItem("ft-surf-ids") === "1"; } catch {}
-    if (entry.idBtn) {
-      entry.idBtn.classList.toggle("on", ids);
-      entry.idBtn.title = ids ? "Hide callsigns" : "Show callsigns";
-    }
-    const all = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
-    const tg = only ? all.filter((t) => t.mine || (t.xpdr && t.kind !== "vehicle")) : all;
-    if (entry.xpdrBtn) {
-      entry.xpdrBtn.style.display = all.length ? "" : "none";
-      if (entry.idBtn) entry.idBtn.style.display = all.length ? "" : "none";
-      entry.xpdrBtn.classList.toggle("on", only);
-      entry.xpdrBtn.title = only ? "Showing aircraft with transponders on (tap for everything)" : "Showing everything on the surface (tap for transponders only)";
-    }
-    entry.airport = all.length && d.center ? d.center : null;
-    entry.lastSurface = d;
-    if (entry.aptBtn) entry.aptBtn.style.display = entry.airport ? "" : "none";
-    if (!SURF.zoomed && entry.interactive && entry.airport && ["taxi_out", "landed"].includes(d.phase)) {
-      const me = all.find((t) => t.mine);
-      entry.map.setView(me ? [me.lat, me.lon] : entry.airport, 15);
-      SURF.zoomed = true;
-    }
-    // zoomed out past the airport, surface traffic is just clutter over the route (and its tags
-    // pile up): draw it from zoom 12 in
-    if (entry.map.getZoom() < 12) {
-      entry.surfaceMine = 0;
-      if (entry.ownMarker) entry.ownMarker.setOpacity(1);
-      return;
-    }
-    const mine = tg.some((t) => t.mine);
-    entry.surfaceMine = mine ? Date.now() : 0;
-    if (entry.ownMarker) entry.ownMarker.setOpacity(mine ? 0 : 1);
-    if (!tg.length) return;
-    const route = css("--route"), muted = css("--muted");
-    for (const t of tg) {
-      const label = [t.cs, t.type].filter(Boolean).join(" · ") || (t.kind === "vehicle" ? "Vehicle" : "Unidentified");
-      if (!t.mine && (t.kind === "vehicle" || (!t.cs && !t.type))) {
-        entry.surface.addLayer(L.circleMarker([t.lat, t.lon], { radius: 2.5, color: muted, fillColor: muted, fillOpacity: 0.8, weight: 0 }).bindTooltip(label, { className: "surf-tip" }));
-        continue;
-      }
-      const sz = t.mine ? 22 : 15;
-      const icon = L.divIcon({ className: "surf-icon", iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
-        html: `<div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : css("--text")};opacity:${t.mine ? 1 : 0.85};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>` });
-      const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: t.mine ? 1200 : 500 });
-      if (t.mine) m.bindTooltip(label, { direction: "top", offset: [0, -sz / 2], permanent: true, className: "surf-tip" });
-      else if (ids && (t.cs || t.squawk)) m.bindTooltip(t.cs || t.squawk, { direction: "right", offset: [sz / 2, 0], permanent: true, className: "surf-tip surf-id" });
-      else m.bindTooltip(label, { direction: "top", offset: [0, -sz / 2], className: "surf-tip" });
-      entry.surface.addLayer(m);
-    }
-  }
-
-  function paintMap(entry, leg, fit) {
-    const { layer, interactive } = entry;
-    entry.leg = leg;
-    layer.clearLayers();
-    if (entry.full) addNight(entry);
-    const add = (x) => x.addTo(layer);
-    entry.inbMarker = null;
-    const route = css("--route"), violet = css("--violet"), muted = css("--faint");
-    const bounds = [];
-    const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
-    const f = leg.flight || {};
-    // The route ahead: the FAA's trajectory along the route ATC has cleared (it follows every
-    // amendment), else FlightAware's filed waypoints. In the air it's drawn from the airplane on,
-    // so flown track + where it is + the (new) route ahead read as one line.
-    const atc = f.swim_route && (f.swim_route.pts || []).length > 1 ? f.swim_route.pts : null;
-    const wps = atc || (f.waypoints || []).filter((p) => p[0] != null);
-    let here = null;
-    if (leg.live && ["airborne", "taxi_out"].includes(leg.phase)) here = [leg.live.lat, leg.live.lon];
-    else if (leg.phase === "airborne") { const tr = (f.track || []).filter((p) => p[0] != null); if (tr.length) here = [tr[tr.length - 1][0], tr[tr.length - 1][1]]; }
-    if (wps.length > 1) {
-      let ahead = wps;
-      if (here && leg.phase === "airborne") {
-        let bi = 0, bd = Infinity;
-        wps.forEach((p, i) => { const d = kmBetween(here, p); if (d < bd) { bd = d; bi = i; } });
-        ahead = [here, ...wps.slice(bi + 1)];
-      }
-      add(L.polyline(ahead, { color: route, weight: 2, opacity: atc ? 0.75 : 0.55, dashArray: "6 6" }));
-      wps.forEach((p) => bounds.push(p));
-      if (atc && interactive) {
-        for (const [la, lo, name] of (f.swim_route.fixes || []).slice(1, -1)) {
-          add(L.circleMarker([la, lo], { radius: 1.5, color: route, weight: 0, fillColor: route, fillOpacity: 0.8, interactive: false }));
-          add(L.marker([la, lo], { interactive: false, keyboard: false,
-            icon: L.divIcon({ className: "", iconSize: null, html: `<span class="fix-lbl">${esc(name)}</span>` }) }));
-        }
-      }
-    } else if (A && B) {
-      const g = gcPoints(A, B);
-      add(L.polyline(g, { color: muted, weight: 2, opacity: 0.8, dashArray: "4 7" }));
-      g.forEach((p) => bounds.push(p));
-    }
-    const track = (f.track || []).filter((p) => p[0] != null);
-    if (track.length > 1) {
-      const sm = smooth(track.map((p) => [p[0], p[1]]));
-      add(L.polyline(sm, { color: "#04122e", weight: 7.5, opacity: 0.45 }));
-      add(L.polyline(sm, { color: route, weight: 4, opacity: 1 }));
-    }
-    // the airplane's live position is fresher than the drawn track: join them so it sits on its line
-    if (leg.live && track.length && ["airborne", "taxi_out", "landed"].includes(leg.phase))
-      add(L.polyline([[track[track.length - 1][0], track[track.length - 1][1]], [leg.live.lat, leg.live.lon]], { color: route, weight: 4, opacity: 1 }));
-    const inb = leg.inbound;
-    // The inbound (and the airplane's earlier legs) only frame the map while they still matter:
-    // not yet arrived and your flight not yet off the gate. Afterwards they're drawn faintly and
-    // centering is on your own route.
-    const inbOpen = !!inb && !["arrived", "cancelled", "diverted"].includes(inb.phase) && leg.phase === "scheduled";
-    const ibounds = inbOpen ? bounds : [];
-    if (inb) {
-      const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
-      if (itr.length > 1) add(L.polyline(smooth(itr.map((p) => [p[0], p[1]])), { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
-      if (leg.inbound_live && itr.length) add(L.polyline([[itr[itr.length - 1][0], itr[itr.length - 1][1]], [leg.inbound_live.lat, leg.inbound_live.lon]], { color: violet, weight: 2.5, opacity: inbOpen ? 0.9 : 0.35 }));
-      // its planned route (dashed) only while it's still to fly: once it has landed its track says it all
-      const iw = (inb.waypoints || []).filter((p) => p[0] != null), iPlan = !["landed", "arrived", "cancelled", "diverted"].includes(inb.phase);
-      if (!iPlan) {}
-      else if (iw.length > 1) add(L.polyline(iw, { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
-      else if (ia && A) add(L.polyline(gcPoints(ia, A), { color: violet, weight: 1.5, opacity: 0.45, dashArray: "5 6" }));
-      let ip = null, ih = 0;
-      if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
-      else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
-      if (ip) { entry.inbMarker = add(planeMarker([ip[0], ip[1]], ih, violet, "Inbound")); entry.inbHdg = ih; ibounds.push([ip[0], ip[1]]); }
-      if (ia && interactive && inbOpen) { ibounds.push(ia); add(L.marker(ia, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${violet}">${esc(inb.origin.iata || "")}</span>`, iconSize: null }) })); }
-    }
-    // Earlier legs of the same airplane that still matter (not yet arrived), fainter the further back.
-    (leg.chain || []).forEach((c, i) => {
-      const ca = ll(c.origin), cb = ll(c.destination), op = Math.max(0.35, 0.75 - i * 0.15);
-      const ct = (c.track || []).filter((p) => p[0] != null);
-      if (ct.length > 1) add(L.polyline(smooth(ct.map((p) => [p[0], p[1]])), { color: violet, weight: 2, opacity: op }));
-      const cw = (c.waypoints || []).filter((p) => p[0] != null);
-      if (["landed", "arrived", "cancelled", "diverted"].includes(c.phase)) {}
-      else if (cw.length > 1) add(L.polyline(cw, { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
-      else if (ca && cb) add(L.polyline(gcPoints(ca, cb), { color: violet, weight: 1.3, opacity: op * 0.6, dashArray: "3 6" }));
-      if (c.phase === "airborne" && ct.length) {
-        const p = ct[ct.length - 1];
-        add(planeMarker([p[0], p[1]], ct.length > 1 ? bearing(ct[ct.length - 2], p) : 0, violet, c.display_ident || "Earlier leg"));
-        ibounds.push([p[0], p[1]]);
-      }
-      if (ca) { ibounds.push(ca); add(L.marker(ca, { icon: L.divIcon({ className: "", html: `<span class="apt-label faint" style="border-color:${violet}">${esc(c.origin.iata || "")}</span>`, iconSize: null }) })); }
-    });
-    for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
-      if (!pos) continue;
-      bounds.push(pos);
-      add(L.circleMarker(pos, { radius: 5.5, color: "#fff", weight: 2, fillColor: route, fillOpacity: 1 }));
-      add(L.marker(pos, { icon: L.divIcon({ className: "", html: `<span class="apt-label city">${interactive && cityOf(ap) ? `<span>${esc(cityOf(ap))}</span>` : ""}<b>${esc(ap.iata || "")}</b></span>`, iconSize: null, iconAnchor: [-9, 11] }) }));
-    }
-    let pos = null, hdg = 0;
-    if (leg.live) { pos = newestPos(leg.live, track); hdg = headingOf(leg.live, track); }
-    else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && track.length) {
-      pos = track[track.length - 1]; hdg = headingOf(null, track);
-    } else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) { pos = f.last_position; }
-    // on the airport surface radar, that (more exact) target is your airplane: don't draw it twice
-    entry.ownMarker = pos && !(entry.surfaceMine && Date.now() - entry.surfaceMine < 10000)
-      ? add(planeMarker([pos[0], pos[1]], hdg, "#fff", leg.display)) : null;
-    entry.ownHdg = hdg;
-    entry.bounds = bounds;
-    if (fit || !interactive) entry.center();
-  }
-
-
   // ---------- pieces ----------
   function statusPill(leg) {
     let txt = leg.status;
@@ -961,7 +368,7 @@
     n = Math.max(0, Math.min(n, rot.length - 1));
     const h = rot[n];
     destroyMaps();
-    if (!h) { $app.innerHTML = `<div class="mapbg" id="ac-map"></div><div class="sheet-gap"></div><section class="sheet">${sheetHead("No inbound linked yet", esc(flno(leg)), `#/leg/${id}`)}<div class="card empty"><b>No inbound linked yet</b>FlightAware hasn't linked the flight bringing your aircraft.</div></section>`; return; }
+    if (!h) { $app.innerHTML = `<div class="sheet-gap"></div><section class="sheet">${sheetHead("No inbound linked yet", esc(flno(leg)), `#/leg/${id}`)}<div class="card empty"><b>No inbound linked yet</b>FlightAware hasn't linked the flight bringing your aircraft.</div></section>`; return; }
     const t = h.times || { out: {}, off: {}, on: {}, in: {} };
     const o = h.origin || {}, d = h.destination || {};
     const tzA = o.tz, tzB = d.tz;
@@ -979,7 +386,6 @@
       .concat(rot.map((r, i) => `<a class="rot-step ${i === n ? "on" : ""} ph-${slug(r.phase)}" href="#/aircraft/${id}/${i}"><b>${esc(r.display_ident || r.ident || "?")}</b><span>${esc((r.origin || {}).iata || "?")}→${esc((r.destination || {}).iata || "?")}</span><i>${esc(r.status)}</i></a>`))
       .join('<span class="rot-arrow">‹</span>');
     $app.innerHTML = `
-      <div class="mapbg" id="ac-map"></div>
       <div class="sheet-gap d"></div>
       <section class="sheet detail">
       ${sheetHead(`${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}`, `${esc(h.display_ident || h.ident || "")} • ${n === 0 ? "Your inbound" : `${n + 1} legs back`}`,
@@ -1012,8 +418,8 @@
       <p class="small faint" style="margin:4px 4px 10px">${h.fetched ? `Data from FlightAware, fetched ${ago(h.fetched)}${finished ? "" : " · refreshes every 10 min"}` : "Data from FlightAware with your flight's last check"}</p>
       ${h.fa_id ? `<p style="margin:4px"><a class="btn" href="https://www.flightaware.com/live/flight/id/${encodeURIComponent(h.fa_id)}" target="_blank" rel="noopener">FlightAware ↗</a></p>` : ""}</section>`;
     const earlier = h.phase === "scheduled" ? chainFrom(rot, n + 1) : [];
-    drawMap(document.getElementById("ac-map"), { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
-      chain: [], live: null, display: h.display_ident }, { key: `ac-${id}-${n}` });
+    showMap(`ac-${id}-${n}`, paintLeg, { dep_ap: o, arr_ap: d, flight: h, phase: h.phase, inbound: earlier[0] || null,
+      chain: [], live: null, display: h.display_ident }, { kind: "leg" });
   }
 
   function problemBanners(leg) {
@@ -1209,7 +615,7 @@
   async function historyView(year) {
     destroyMaps();
     const d = await api(`api/history${year ? `?year=${year}` : ""}`);
-    let h = `<div class="mapbg" id="globe"></div><div class="sheet-gap pass"></div><section class="sheet">
+    let h = `<div class="sheet-gap pass"></div><section class="sheet">
       <div class="sheet-head"><h1>Passport</h1><div class="sh-btns">${avatar()}</div></div>
       <div class="ypills">${["", ...d.years].map((y) => `<a class="yp ${y === (year || "") ? "on" : ""}" href="#/history${y ? "/" + y : ""}">${y || "All-Time"}</a>`).join("")}</div>`;
     if (!d.flights.length) h += `<div class="card empty"><b>No flights yet</b>Your Calendar and Manual flights are saved here when they finish.</div>` + importCard(true);
@@ -1227,7 +633,7 @@
         pl.innerHTML = passList(d);
       } else if (all) { PASS_ALL = true; pl.innerHTML = passList(d); }
     });
-    drawGL(document.getElementById("globe"), globeData(d), { key: `pass-${year || "all"}`, paint: glPaintPass });
+    showMap(`pass-${year || "all"}`, paintPass, globeData(d));
   }
 
   function bars(rows, fmtv, link) {
@@ -1506,7 +912,6 @@
     const sub = [f.diverted_to ? `Planned to ${f.arr}.` : "", f.continued_by ? `Reached ${f.final_ap || f.arr} at ${hm(f.final_arrival, f.arr_tz)}${am != null ? `, ${fdur(am * 60)} after the original schedule` : ""}.` : "",
       cont ? "Continuation of a diverted flight; its lateness is counted on that flight." : ""].filter(Boolean).join(" ");
     $app.innerHTML = `
-      <div class="mapbg" id="hist-map"></div>
       <div class="sheet-gap d"></div>
       <section class="sheet detail">
         ${sheetHead(`${esc(cityOf(P.dep_ap, f.dep))} to ${esc(cityOf(P.arr_ap, P.arr))}`,
@@ -1529,8 +934,8 @@
         <div class="actions">${!f.has_track && bfToken(f) ? `<button class="btn" id="h-bf">Copy for track backfill</button>` : ""}<button class="btn danger" id="h-del">Delete from History</button></div>
         ${!f.has_track && bfToken(f) ? `<p class="small faint" style="margin:8px 0 0">No flown track yet. Copy, then in GitHub run Backfill tracks with this pasted in the flights box, and import its tracks download here.</p>` : ""}
       </section>`;
-    drawMap(document.getElementById("hist-map"), { dep_ap: P.dep_ap, arr_ap: P.arr_ap, flight: { track: f.track || [], waypoints: [], times: {} }, phase: "arrived", inbound: null, chain: [], live: null, display: f.display },
-      { key: `hist-${f.id}` });
+    showMap(`hist-${f.id}`, paintLeg, { dep_ap: P.dep_ap, arr_ap: P.arr_ap, flight: { track: f.track || [], waypoints: [], times: {} }, phase: "arrived", inbound: null, chain: [], live: null, display: f.display },
+      { kind: "leg" });
     const hb = document.getElementById("h-bf");
     if (hb) hb.onclick = async () => { hb.textContent = (await copyText(bfToken(f))) ? "Copied" : "Couldn't copy"; };
     document.getElementById("h-del").onclick = async () => {
@@ -1721,51 +1126,7 @@
   const ESRI_LBL = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
   const mapStyle = () => pref("ft-mapstyle", "satellite");
   const radarOn = () => pref("ft-radar", "0") === "1";
-  function pane(map, name, z) {
-    if (!map.getPane(name)) { const p = map.createPane(name); p.style.zIndex = z; p.style.pointerEvents = "none"; }
-    return name;
-  }
   let RADAR = null;
-  async function setRadar(map, on) {
-    if (map._ftRadar) { map.removeLayer(map._ftRadar); map._ftRadar = null; }
-    if (!on) return;
-    try {
-      if (!RADAR || Date.now() - RADAR.at > 300000) {
-        const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
-        const fr = d.radar.past[d.radar.past.length - 1];
-        RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
-      }
-      if (map._ftRadar) map.removeLayer(map._ftRadar);
-      map._ftRadar = L.tileLayer(RADAR.url, { opacity: 0.6, maxNativeZoom: 7, maxZoom: 20, pane: pane(map, "radar", 380), attribution: "Radar &copy; RainViewer" }).addTo(map);
-    } catch {}
-  }
-  const allLeaflet = () => Object.values(MAPS).filter((m) => !m.gl).map((m) => m.map).filter(Boolean);
-  const TOWER = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 3h8l1.5 4.5H6.5zm-2.2 5.5h12.4l-1.4 4H7.2zM9 13.5h6l.6 7.5H8.4zM11 1h2v2h-2z"/></svg>';
-  function addStack(map, home) {
-    const Stack = L.Control.extend({
-      options: { position: "topright" },
-      onAdd() {
-        const d = L.DomUtil.create("div", "map-stack");
-        d.innerHTML = `<button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button>`
-          + (home ? `<button type="button" data-a="apts" aria-label="Airport status">${TOWER}</button>` : "");
-        if (home) d.querySelector('[data-a="apts"]').onclick = () => go("#/airports");
-        L.DomEvent.disableClickPropagation(d);
-        d.querySelector('[data-a="style"]').onclick = () => {
-          setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite");
-          restyleAll();
-        };
-        d.querySelector('[data-a="radar"]').onclick = () => {
-          const on = !radarOn();
-          setPref("ft-radar", on ? "1" : "0");
-          document.querySelectorAll('.map-stack [data-a="radar"]').forEach((b) => b.classList.toggle("on", on));
-          for (const m of Object.values(MAPS)) m.gl ? glRadar(m, on) : setRadar(m.map, on);
-        };
-        return d;
-      },
-    });
-    map.addControl(new Stack());
-    if (radarOn()) setRadar(map, true);
-  }
   // Where the sun is overhead (and the numbers the night-side outline needs).
   function subsolar(date) {
     const rad = Math.PI / 180, n = date.getTime() / 86400000 + 2440587.5 - 2451545.0;
@@ -1777,79 +1138,11 @@
     const lon = ((alpha - gmst * 15) % 360 + 540) % 360 - 180;
     return { lat: delta, lon, alpha, delta, gmst };
   }
-  function nightPoly(date) {
-    const s = subsolar(date), rad = Math.PI / 180, pts = [];
-    for (let lng = -540; lng <= 540; lng += 2) {
-      const ha = (s.gmst * 15 + lng - s.alpha) * rad;
-      pts.push([Math.atan(-Math.cos(ha) / Math.tan(s.delta * rad)) / rad, lng]);
-    }
-    const pole = s.delta < 0 ? 90 : -90;
-    return [[pole, -540], ...pts, [pole, 540]];
-  }
-  function addNight(entry) {
-    const map = entry.map;
-    if (entry.night) map.removeLayer(entry.night);
-    entry.night = L.polygon(nightPoly(new Date()), { stroke: false, fillColor: "#020615", fillOpacity: 0.42, interactive: false, pane: pane(map, "night", 360) }).addTo(map);
-  }
-  const planeBadge = (pos, hdg, title) => L.marker(pos, { title, zIndexOffset: 1000, icon: L.divIcon({ className: "pbadge-wrap", iconSize: [34, 34], iconAnchor: [17, 17],
-    html: `<div class="pbadge"><div style="transform:rotate(${hdg || 0}deg)">${PLANE}</div></div>` }) });
   // The sheet has three stops: peeking (pulled down, a big map), middle (where pages open) and
   // full (scrolled up over the map). midTop: where the sheet's top sits at the middle stop.
   const MID_F = (g) => g.classList.contains("pass") ? 0.58 : g.classList.contains("d") ? 0.52 : 0.42;
   const midTop = () => { const g = document.querySelector(".sheet-gap"); return g ? window.innerHeight * MID_F(g) : window.innerHeight * 0.45; };
   const midY = () => { const g = document.querySelector(".sheet-gap"); return g ? Math.max(0, Math.round(g.offsetHeight - midTop())) : 0; };
-  // Padding that keeps a full-screen map's routes in the part the sheet doesn't cover.
-  function fitOpts(el, maxZoom) {
-    if (el && el.classList && el.classList.contains("mapbg")) {
-      const H = window.innerHeight, gap = midTop();
-      return { paddingTopLeft: [40, 70], paddingBottomRight: [150, Math.max(40, Math.min(H - 160, H - gap + 30))], maxZoom };
-    }
-    return { padding: [28, 28], maxZoom };
-  }
-
-  // My Flights map: every upcoming route as an arc, airports as dots, airplanes in the air.
-  function paintHome(entry, data, fit) {
-    const { layer, map } = entry;
-    entry.home = data;
-    entry.leg = data.focus || null;
-    layer.clearLayers();
-    addNight(entry);
-    const add = (x) => x.addTo(layer);
-    const route = css("--route");
-    const bounds = [], seen = new Set(), aps = new Map();
-    for (const l of data.legs) {
-      const A = ll(l.dep_ap), B = ll(l.arr_ap);
-      if (!A || !B) continue;
-      const k = [l.dep, l.arr].sort().join("-");
-      if (!seen.has(k)) { seen.add(k); add(L.polyline(gcPoints(A, B), { color: route, weight: 2.6, opacity: 0.9, interactive: false })); }
-      aps.set(l.dep, A); aps.set(l.arr, B);
-      bounds.push(A, B);
-    }
-    for (const p of aps.values()) add(L.circleMarker(p, { radius: 5, color: "#fff", weight: 2, fillColor: route, fillOpacity: 1, interactive: false }));
-    entry.ownMarker = null;
-    const f = data.focus;
-    for (const l of data.legs) {
-      if (!["airborne", "taxi_out"].includes(l.phase)) continue;
-      if (f && f.id === l.id) continue;
-      const p = l.flight && l.flight.last_position, B = ll(l.arr_ap);
-      if (p && p[0] != null) add(planeBadge([p[0], p[1]], B ? bearing([p[0], p[1]], B) : 0, l.display));
-    }
-    if (f && ["airborne", "taxi_out", "landed"].includes(f.phase)) {
-      const track = ((f.flight || {}).track || []).filter((p) => p[0] != null);
-      if (track.length > 1) {
-        const pts = smooth(track.map((p) => [p[0], p[1]]));
-        add(L.polyline(pts, { color: "#04122e", weight: 7, opacity: 0.45, interactive: false }));
-        add(L.polyline(pts, { color: route, weight: 4, opacity: 1, interactive: false }));
-      }
-      let pos = null, hdg = 0;
-      if (f.live) { pos = newestPos(f.live, track); hdg = headingOf(f.live, track); }
-      else if (track.length) { pos = track[track.length - 1]; hdg = headingOf(null, track); }
-      if (pos) { entry.ownMarker = add(planeBadge([pos[0], pos[1]], hdg, f.display)); entry.ownHdg = hdg; }
-    }
-    entry.bounds = bounds;
-    if (fit) entry.center();
-  }
-
   // ---------- the flight page ----------
   function telem(lv) {
     if (!lv || lv.gs_kt == null) return "";
@@ -2184,9 +1477,15 @@
   }
 
 
-  // ---------- 3D globe maps (MapLibre): My Flights, Passport, Airports ----------
-  // A real globe you can spin and zoom from the whole earth down to an airport, with place names.
-  // Imagery loads smoothly: the coarser tiles stay up while sharper ones arrive.
+
+  // ================================================================================================
+  // The map: one globe (MapLibre) behind every page. It's made once and never reloads: each page
+  // swaps what's drawn on it and the camera glides to that page's routes. Zoomed in it flattens
+  // out into a normal map, with the airport diagram and live surface traffic.
+  // ================================================================================================
+  const MAP_EL = document.getElementById("map");
+  const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [], layMarks: [], surf: [],
+    bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, leg: null, ctl: null };
   const CARTO_DARK = ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png`);
   function glStyle() {
     const sat = mapStyle() === "satellite";
@@ -2226,23 +1525,57 @@
   const FC = (features) => ({ type: "FeatureCollection", features: features || [] });
   const lineF = (pts, props) => ({ type: "Feature", properties: props || {}, geometry: { type: "LineString", coordinates: pts.map((p) => [p[1], p[0]]) } });
   const ptF = (p, props) => ({ type: "Feature", properties: props || {}, geometry: { type: "Point", coordinates: [p[1], p[0]] } });
-  function glLayers(entry) {
-    const map = entry.map, route = css("--route");
+  const ring = (pts) => { const r = pts.map((p) => [p[1], p[0]]); if (r.length && (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1])) r.push(r[0]); return r; };
+  const DYN = ["artcc", "plan", "routes", "track", "aps", "pts", "fixes"];
+  const LAY = ["lay-term", "lay-twy", "lay-rwy"];
+  // runways are drawn about their real width (45 m) at every zoom, taxiways about 23 m
+  const widthM = (m) => ["interpolate", ["exponential", 2], ["zoom"], 10, m / 60, 20, m * 17];
+  function glLayers() {
+    const map = GL.map, route = css("--route");
     const before = map.getLayer("lbl") ? "lbl" : undefined;
     if (!map.getSource("night")) map.addSource("night", { type: "image", url: nightImage(), coordinates: MERC });
-    if (!map.getLayer("night")) map.addLayer({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
-    for (const id of ["routes", "track", "aps", "pts"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
-    const add = (l) => { if (!map.getLayer(l.id)) map.addLayer(l); };
+    for (const id of [...DYN, ...LAY]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
+    const add = (l, b) => { if (!map.getLayer(l.id)) map.addLayer(l, b); };
+    add({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
+    add({ id: "lay-term", type: "fill", source: "lay-term", paint: { "fill-color": "#c8cdd8", "fill-opacity": 0.14 } });
+    add({ id: "lay-term-line", type: "line", source: "lay-term", paint: { "line-color": "#c8cdd8", "line-opacity": 0.5, "line-width": 1 } });
+    add({ id: "lay-twy", type: "line", source: "lay-twy", layout: { "line-join": "round" }, paint: { "line-color": "#fff", "line-opacity": 0.12, "line-width": widthM(23) } });
+    add({ id: "lay-twycl", type: "line", source: "lay-twy", minzoom: 16, paint: { "line-color": "#f6c445", "line-opacity": 0.45, "line-width": 1 } });
+    add({ id: "lay-rwy", type: "line", source: "lay-rwy", layout: { "line-cap": "butt" }, paint: { "line-color": "#fff", "line-opacity": 0.22, "line-width": widthM(45) } });
+    add({ id: "lay-rwycl", type: "line", source: "lay-rwy", paint: { "line-color": "#fff", "line-opacity": 0.55, "line-width": 1, "line-dasharray": [8, 8] } });
+    add({ id: "artcc-fill", type: "fill", source: "artcc", paint: { "fill-color": ["get", "c"], "fill-opacity": ["get", "o"] } });
+    add({ id: "artcc-line", type: "line", source: "artcc", paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "lo"] } });
+    add({ id: "plan", type: "line", source: "plan", paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": 2, "line-opacity": ["coalesce", ["get", "o"], 0.6], "line-dasharray": [2.5, 2.5] } });
     add({ id: "routes", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": ["coalesce", ["get", "w"], 2.4], "line-opacity": 0.92 } });
-    add({ id: "track-edge", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#04122e", "line-width": 7, "line-opacity": 0.45 } });
-    add({ id: "track", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": route, "line-width": 4 } });
-    add({ id: "aps", type: "circle", source: "aps", paint: { "circle-radius": 4.5, "circle-color": route, "circle-stroke-color": "#fff", "circle-stroke-width": 2, "circle-pitch-alignment": "map" } });
-    add({ id: "pts", type: "circle", source: "pts", paint: { "circle-radius": 6.5, "circle-color": ["get", "c"], "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
-    if (radarOn()) glRadar(entry, true);
+    add({ id: "track-edge", type: "line", source: "track", filter: ["==", ["get", "own"], 1], layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": "#04122e", "line-width": 7.5, "line-opacity": 0.45 } });
+    add({ id: "track", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": ["coalesce", ["get", "w"], 4], "line-opacity": ["coalesce", ["get", "o"], 1] } });
+    add({ id: "fixes", type: "circle", source: "fixes", minzoom: 5, paint: { "circle-radius": 1.6, "circle-color": route } });
+    add({ id: "aps", type: "circle", source: "aps", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, ["coalesce", ["get", "r0"], 4.5], 4, 4.5],
+      "circle-color": ["coalesce", ["get", "c"], route], "circle-stroke-color": "#fff", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, ["coalesce", ["get", "s0"], 2], 4, 2] } });
+    add({ id: "pts", type: "circle", source: "pts", paint: { "circle-radius": ["coalesce", ["get", "r"], 6.5], "circle-color": ["get", "c"], "circle-stroke-color": "#fff", "circle-stroke-width": ["coalesce", ["get", "s"], 1.5] } });
+    GL.empty = {}; GL.src = {};
+    if (radarOn()) glRadar(true);
   }
-  async function glRadar(entry, on) {
-    const map = entry.map;
+  // Each paint says what it draws; everything else on the map is cleared.
+  function glSet(obj) {
+    for (const id of DYN) {
+      const v = obj[id], src = GL.map.getSource(id);
+      if (!src) continue;
+      if (!v || (Array.isArray(v) && !v.length)) {
+        if (!GL.empty[id]) { src.setData(FC()); GL.empty[id] = true; GL.src[id] = null; }
+        continue;
+      }
+      const fc = Array.isArray(v) ? FC(v) : v;
+      if (fc === GL.src[id]) continue;   // the same (big) collection as last time: leave it
+      src.setData(fc); GL.src[id] = fc; GL.empty[id] = false;
+    }
+  }
+  async function glRadar(on) {
+    const map = GL.map;
+    if (!map) return;
     if (map.getLayer("radar")) map.removeLayer("radar");
     if (map.getSource("radar")) map.removeSource("radar");
     if (!on) return;
@@ -2254,106 +1587,133 @@
       }
       if (map.getSource("radar")) return;
       map.addSource("radar", { type: "raster", tiles: [RADAR.url], tileSize: 256, maxzoom: 7, attribution: "Radar &copy; RainViewer" });
-      map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.6 } }, map.getLayer("routes") ? "routes" : undefined);
+      map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.6 } }, map.getLayer("artcc-fill") ? "artcc-fill" : undefined);
     } catch {}
   }
-  function glMarkers(entry, list) {
-    (entry.markers || []).forEach((m) => m.remove());
-    entry.markers = list.map(([pos, html, opts]) => {
+  // HTML markers (labels, airplanes): each in a wrapper, so the label's own CSS can place it
+  function mkMarkers(list) {
+    return list.map(([pos, html, opts]) => {
       const t = document.createElement("div");
+      t.className = "glm";
       t.innerHTML = html;
-      return new maplibregl.Marker({ element: t.firstElementChild, ...(opts || {}) }).setLngLat([pos[1], pos[0]]).addTo(entry.map);
+      return new maplibregl.Marker({ element: t, ...(opts || {}) }).setLngLat([pos[1], pos[0]]).addTo(GL.map);
     });
   }
-  const glPlane = (pos, hdg) => [pos, `<div class="pbadge gl"><div>${PLANE}</div></div>`, { rotation: hdg || 0, rotationAlignment: "map", pitchAlignment: "map" }];
-  // Fit to the routes in the part of the screen the sheet doesn't cover.
-  function glFit(entry) {
-    const map = entry.map, b = entry.bounds;
-    const H = map.getContainer().clientHeight || window.innerHeight;
-    const gap = midTop();
-    const padding = { top: 60, left: 36, right: 76, bottom: Math.max(30, Math.min(H - 170, H - gap + 30)) };
-    if (entry.globeView || !b.length) {
-      const c = entry.globeView || [35, -85];
-      map.jumpTo({ center: [c[1], c[0]], zoom: entry.globeZoom || 1.6, padding });
+  function glMarkers(list) {
+    GL.markers.forEach((m) => m.remove());
+    GL.markers = mkMarkers(list);
+    return GL.markers;
+  }
+  const planeMk = (pos, hdg, color, badge) => [pos, badge ? `<div class="pbadge gl"><div>${PLANE}</div></div>` : `<div class="gl-plane" style="color:${color}">${PLANE}</div>`,
+    { rotation: hdg || 0, rotationAlignment: "map", pitchAlignment: "map" }];
+  const mkHandle = (mk) => mk ? { setLatLng: (p) => mk.setLngLat([p[1], p[0]]), setOpacity: (o) => { mk.getElement().style.opacity = String(o); } } : null;
+  // Fit the page's routes into the part of the screen the sheet doesn't cover (at its middle stop).
+  function glFit(animate) {
+    const map = GL.map;
+    if (!map) return;
+    const b = GL.bounds;
+    const padding = mapPad(GL.opts.kind === "leg" || GL.opts.kind === "nas");
+    const dur = animate ? 900 : 0;
+    if (GL.globeView || !b.length) {
+      const c = GL.globeView || [35, -85];
+      map.easeTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding, duration: dur });
       return;
     }
     let w = 180, e = -180, s = 90, n = -90;
     for (const [la, lo] of b) { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
-    try { map.fitBounds([[w, s], [e, n]], { padding, maxZoom: entry.maxZoom || 6.5, duration: 0 }); }
+    try { map.fitBounds([[w, s], [e, n]], { padding, maxZoom: GL.maxZoom || 7, duration: dur }); }
     catch { map.jumpTo({ center: [(w + e) / 2, (s + n) / 2], zoom: 3 }); }
   }
-  function glStack(entry, home) {
+  // The part of the screen the map shows above the sheet (at its middle stop), less room for the
+  // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.
+  function mapPad(labels) {
+    const H = MAP_EL.clientHeight || window.innerHeight;
+    return { top: document.getElementById("telem") ? 96 : 64, left: 36, right: labels ? 140 : 80,
+      bottom: Math.max(30, Math.min(H - 170, H - midTop() + 50)) };
+  }
+  function restyleAll() {
+    if (!GL.map) return;
+    GL.ready = false;
+    GL.layoutFor = null;
+    GL.map.setStyle(glStyle(), { diff: false });
+  }
+  function glControls() {
     const ctl = {
       onAdd() {
         const d = document.createElement("div");
         d.className = "maplibregl-ctrl gl-ctrls";
-        d.innerHTML = `<div class="map-stack"><button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button>${home ? `<button type="button" data-a="apts" aria-label="Airport status">${TOWER}</button>` : ""}</div>
-          <button type="button" class="map-center" data-a="fit" aria-label="Center">${IC.locate}</button>`;
-        d.querySelector('[data-a="style"]').onclick = () => { setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite"); restyleAll(); };
-        d.querySelector('[data-a="radar"]').onclick = () => {
-          const on = !radarOn();
-          setPref("ft-radar", on ? "1" : "0");
-          document.querySelectorAll('.map-stack [data-a="radar"]').forEach((b) => b.classList.toggle("on", on));
-          for (const m of Object.values(MAPS)) m.gl ? glRadar(m, on) : setRadar(m.map, on);
-        };
-        if (home) d.querySelector('[data-a="apts"]').onclick = () => go("#/airports");
-        d.querySelector('[data-a="fit"]').onclick = () => glFit(entry);
+        d.innerHTML = `<div class="map-stack"><button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button><button type="button" data-a="apts" class="only-home" aria-label="Airport status">${TOWER}</button></div>
+          <button type="button" class="map-center" data-a="fit" aria-label="Center">${IC.locate}</button>
+          <button type="button" class="map-center only-leg" data-a="dep" aria-label="Zoom to the departure airport">${IC.takeoff}</button>
+          <button type="button" class="map-center only-leg" data-a="arr" aria-label="Zoom to the arrival airport">${IC.land}</button>
+          <button type="button" class="map-center xpdr only-surf" data-a="xpdr" aria-label="Transponder filter">XPDR</button>
+          <button type="button" class="map-center xpdr only-surf" data-a="ids" aria-label="Show callsigns">ID</button>`;
+        const on = (a, f) => { d.querySelector(`[data-a="${a}"]`).onclick = (e) => { e.preventDefault(); f(); }; };
+        on("style", () => { setPref("ft-mapstyle", mapStyle() === "satellite" ? "dark" : "satellite"); restyleAll(); });
+        on("radar", () => {
+          const v = !radarOn();
+          setPref("ft-radar", v ? "1" : "0");
+          d.querySelector('[data-a="radar"]').classList.toggle("on", v);
+          glRadar(v);
+        });
+        on("apts", () => go("#/airports"));
+        on("fit", () => glFit(true));
+        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, padding: mapPad(false) }); });
+        on("xpdr", () => { setPref("ft-surf-all", pref("ft-surf-all", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
+        on("ids", () => { setPref("ft-surf-ids", pref("ft-surf-ids", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
+        GL.ctl = d;
         return d;
       },
       onRemove() {},
     };
-    entry.map.addControl(ctl, "top-right");
+    GL.map.addControl(ctl, "top-right");
   }
-  function restyleAll() {
-    for (const m of Object.values(MAPS)) {
-      if (m.gl) { m.ready = false; m.map.setStyle(glStyle(), { diff: false }); }
-      else addTiles(m.map, true);
-    }
-  }
-  function drawGL(el, data, opts) {
-    if (!el) return null;
-    const key = opts.key, have = MAPS[key];
-    if (!window.maplibregl) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return null; }
-    if (have && have.gl) {
-      if (have.el !== el) el.replaceWith(have.el);
-      usedMaps.add(key);
-      have.paint(have, data, false);
-      setTimeout(() => have.map.resize(), 30);
-      return have;
-    }
-    if (have) { try { have.map.remove(); } catch {} delete MAPS[key]; }
-    const map = new maplibregl.Map({ container: el, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
-      dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 6 });
+  function glInit() {
+    if (GL.map) return true;
+    if (!window.maplibregl || !MAP_EL) return false;
+    const map = GL.map = new maplibregl.Map({ container: MAP_EL, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
+      dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 8 });
     map.touchZoomRotate.disableRotation();
     map.keyboard.disable();
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "top-left");
-    const entry = { gl: true, el, map, paint: opts.paint, bounds: [], interactive: true, full: true, ready: false, last: data, first: true };
-    entry.center = () => glFit(entry);
-    MAPS[key] = entry;
-    usedMaps.add(key);
-    glStack(entry, !!opts.home);
-    // every style load (the first, and after a Satellite/Dark switch): our layers, then the last picture
+    glControls();
+    // every style load (the first, and after a Satellite/Dark switch): our layers, then the page's picture
     map.on("style.load", () => {
-      glLayers(entry);
-      entry.ready = true;
-      const fit = entry.first;
-      entry.first = false;
-      entry.paint(entry, entry.last, fit);
+      glLayers();
+      GL.ready = true;
+      if (GL.paint) { const fit = GL.fitPending; GL.fitPending = false; GL.paint(GL.data, fit); }
+      layoutCheck();
     });
-    map.on("zoom", () => el.classList.toggle("z3", map.getZoom() >= 3));
-    // the night side moves: redraw it every 10 minutes while the map is up
-    entry.nightT = setInterval(() => {
-      if (!el.isConnected) { clearInterval(entry.nightT); return; }
-      const src = map.getSource("night");
-      if (src) src.updateImage({ url: nightImage(), coordinates: MERC });
-    }, 600000);
-    return entry;
+    // labels by zoom (airport codes, route fixes, taxiways, gates), in the old map's zoom numbers
+    const zc = () => { const z = map.getZoom() + 1; for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
+    map.on("zoom", zc); zc();
+    map.on("moveend", () => { layoutCheck(); surfaceNow(); });
+    map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
+    // the night side moves: redraw it every 10 minutes
+    setInterval(() => { const src = GL.ready && map.getSource("night"); if (src) src.updateImage({ url: nightImage(), coordinates: MERC }); }, 600000);
+    return true;
   }
-  // My Flights: every route in the next two weeks, airports, the airplane you're on.
-  function glPaintHome(entry, data, fit) {
-    entry.home = data; entry.leg = data.focus || null; entry.last = data;
-    if (!entry.ready) return;
-    const map = entry.map, routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [];
+  // A page puts its picture on the map. A new page glides the camera to its routes; the same page
+  // (a live update) only redraws, leaving the map where you put it.
+  function showMap(view, paint, data, opts) {
+    opts = opts || {};
+    if (!glInit()) return;
+    const changed = GL.view !== view;
+    if (changed) { clearLayout(); stopSurface(); GL.leg = null; GL.globeView = null; }
+    GL.view = view; GL.paint = paint; GL.data = data; GL.opts = opts;
+    if (GL.ctl) GL.ctl.dataset.kind = opts.kind || "";
+    const fit = changed || !!opts.refit;
+    if (!GL.ready) { GL.fitPending = GL.fitPending || fit; return; }
+    GL.map.resize();
+    paint(data, fit);
+  }
+  const fitNow = (fit) => { if (fit) { glFit(!!GL.everFit); GL.everFit = true; } };
+
+  // ---------- what each page draws ----------
+  // My Flights: every route in the next two weeks, airports, the airplanes in the air.
+  function paintHome(data, fit) {
+    GL.leg = null;
+    const routes = [], aps = new Map(), bounds = [], seen = new Set(), marks = [];
     for (const l of data.legs) {
       const A = ll(l.dep_ap), B = ll(l.arr_ap);
       if (!A || !B) continue;
@@ -2366,71 +1726,341 @@
     for (const l of data.legs) {
       if (!["airborne", "taxi_out"].includes(l.phase) || (f && f.id === l.id)) continue;
       const p = l.flight && l.flight.last_position, B = ll(l.arr_ap);
-      if (p && p[0] != null) marks.push(glPlane([p[0], p[1]], B ? bearing([p[0], p[1]], B) : 0));
+      if (p && p[0] != null) marks.push(planeMk([p[0], p[1]], B ? bearing([p[0], p[1]], B) : 0, null, true));
     }
-    let track = [];
-    entry.ownMarker = null;
+    const track = [];
+    let own = -1;
     if (f && ["airborne", "taxi_out", "landed"].includes(f.phase)) {
       const tr = ((f.flight || {}).track || []).filter((p) => p[0] != null);
-      if (tr.length > 1) track = [lineF(smooth(tr.map((p) => [p[0], p[1]])))];
+      if (tr.length > 1) track.push(lineF(smooth(tr.map((p) => [p[0], p[1]])), { own: 1 }));
       let pos = null, hdg = 0;
       if (f.live) { pos = newestPos(f.live, tr); hdg = headingOf(f.live, tr); }
       else if (tr.length) { pos = tr[tr.length - 1]; hdg = headingOf(null, tr); }
-      if (pos) { marks.push(glPlane([pos[0], pos[1]], hdg)); entry.ownHdg = hdg; entry.ownIdx = marks.length - 1; }
+      if (pos) { own = marks.length; marks.push(planeMk([pos[0], pos[1]], hdg, null, true)); GL.ownHdg = hdg; }
     }
-    map.getSource("routes").setData(FC(routes));
-    map.getSource("track").setData(FC(track));
-    map.getSource("aps").setData(FC([...aps.values()].map((p) => ptF(p))));
-    map.getSource("pts").setData(FC());
-    glMarkers(entry, marks);
-    if (entry.ownIdx != null && marks.length) {
-      const mk = entry.markers[entry.ownIdx];
-      entry.ownMarker = { setLatLng: (p) => mk.setLngLat([p[1], p[0]]) };
-      entry.ownIdx = null;
-    }
-    entry.bounds = bounds;
-    if (fit) glFit(entry);
+    glSet({ routes, track, aps: [...aps.values()].map((p) => ptF(p)) });
+    const mk = glMarkers(marks);
+    GL.ownMarker = own >= 0 ? mkHandle(mk[own]) : null; GL.inbMarker = null;
+    GL.bounds = bounds; GL.maxZoom = 6.5;
+    fitNow(fit);
   }
-  // Passport: everything you've flown, on a globe; airport codes once you zoom in.
-  function glPaintPass(entry, data, fit) {
-    entry.last = data;
-    if (!entry.ready) return;
-    const map = entry.map;
-    map.getSource("routes").setData(FC(data.routes.map(([a, b]) => lineF(gcPoints([a.lat, a.lon], [b.lat, b.lon], 48), { c: "#e8eeff", w: 1.4 }))));
-    map.getSource("aps").setData(FC(data.airports.map((a) => ptF([a.lat, a.lon]))));
-    map.setPaintProperty("aps", "circle-radius", ["interpolate", ["linear"], ["zoom"], 1, 2.6, 4, 4.5]);
-    map.setPaintProperty("aps", "circle-stroke-width", ["interpolate", ["linear"], ["zoom"], 1, 1.2, 4, 2]);
-    map.getSource("track").setData(FC());
-    map.getSource("pts").setData(FC());
-    glMarkers(entry, data.airports.map((a) => [[a.lat, a.lon], `<span class="gl-code">${esc(a.code)}</span>`, { anchor: "left", offset: [7, 0] }]));
+  // Passport: everything you've flown; airport codes once you zoom in.
+  function paintPass(data, fit) {
+    GL.leg = null;
+    GL.passFC = GL.passFC && GL.passFC.d === data ? GL.passFC : { d: data,
+      routes: FC(data.routes.map(([a, b]) => lineF(gcPoints([a.lat, a.lon], [b.lat, b.lon], 48), { c: "#e8eeff", w: 1.4 }))),
+      aps: FC(data.airports.map((a) => ptF([a.lat, a.lon], { r0: 2.6, s0: 1.2 }))) };
+    glSet({ routes: GL.passFC.routes, aps: GL.passFC.aps });
+    glMarkers(data.airports.map((a) => [[a.lat, a.lon], `<span class="gl-code">${esc(a.code)}</span>`, { anchor: "left", offset: [7, 0] }]));
+    GL.ownMarker = GL.inbMarker = null;
+    GL.bounds = data.airports.map((a) => [a.lat, a.lon]); GL.maxZoom = 4;
     if (fit) {
       let x = 0, y = 0, z = 0;
       for (const a of data.airports) {
         const la = a.lat * Math.PI / 180, lo = a.lon * Math.PI / 180;
         x += Math.cos(la) * Math.cos(lo); y += Math.cos(la) * Math.sin(lo); z += Math.sin(la);
       }
-      entry.globeView = data.airports.length ? [Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI, Math.atan2(y, x) * 180 / Math.PI] : [30, -80];
-      entry.globeZoom = 1.35;
-      glFit(entry);
-      entry.globeView = null;   // the locate button fits the routes afterwards
-      entry.bounds = data.airports.map((a) => [a.lat, a.lon]);
-      entry.maxZoom = 4;
+      GL.globeView = data.airports.length ? [Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI, Math.atan2(y, x) * 180 / Math.PI] : [30, -80];
+      GL.globeZoom = 1.35;
+      fitNow(true);
+      GL.globeView = null;   // the locate button fits the routes afterwards
     }
   }
   // Airports: every airport the FAA lists now, red for programs and stops, amber for delays.
-  function glPaintAirports(entry, data, fit) {
-    entry.last = data;
-    if (!entry.ready) return;
-    const map = entry.map, red = css("--red"), amber = "#ffc53d";
-    const list = data.airports.filter((a) => a.lat != null);
-    map.getSource("pts").setData(FC(list.map((a) => ptF([a.lat, a.lon], { c: issueRank(a) < 2 ? red : amber }))));
-    for (const id of ["routes", "track", "aps"]) map.getSource(id).setData(FC());
-    glMarkers(entry, list.map((a) => [[a.lat, a.lon], `<span class="gl-code on">${esc(a.code)}</span>`, { anchor: "left", offset: [9, 0] }]));
-    entry.bounds = list.length ? list.map((a) => [a.lat, a.lon]) : [];
-    entry.maxZoom = 5;
-    if (!list.length) { entry.globeView = [38, -97]; entry.globeZoom = 2.6; }
-    if (fit) glFit(entry);
-    entry.globeView = null;
+  function paintAirports(data, fit) {
+    GL.leg = null;
+    const red = css("--red"), amber = "#ffc53d", list = data.airports.filter((a) => a.lat != null);
+    glSet({ pts: list.map((a) => ptF([a.lat, a.lon], { c: issueRank(a) < 2 ? red : amber })) });
+    glMarkers(list.map((a) => [[a.lat, a.lon], `<span class="gl-code on">${esc(a.code)}</span>`, { anchor: "left", offset: [9, 0] }]));
+    GL.ownMarker = GL.inbMarker = null;
+    GL.bounds = list.map((a) => [a.lat, a.lon]); GL.maxZoom = 5;
+    if (!list.length) { GL.globeView = [38, -97]; GL.globeZoom = 2.6; }
+    fitNow(fit);
+    GL.globeView = null;
+  }
+  // A flight: the route ahead (ATC's when the FAA has it, else the filed one), the flown track, the
+  // airplane, its inbound, and the airports. Zoomed in on an airport: its diagram and surface traffic.
+  function paintLeg(leg, fit) {
+    GL.leg = leg;
+    const route = css("--route"), violet = css("--violet"), muted = "#9aa3b3";
+    const plan = [], track = [], aps = [], fixes = [], marks = [], bounds = [];
+    const A = ll(leg.dep_ap), B = ll(leg.arr_ap);
+    const f = leg.flight || {};
+    const atc = f.swim_route && (f.swim_route.pts || []).length > 1 ? f.swim_route.pts : null;
+    const wps = atc || (f.waypoints || []).filter((p) => p[0] != null);
+    let here = null;
+    if (leg.live && ["airborne", "taxi_out"].includes(leg.phase)) here = [leg.live.lat, leg.live.lon];
+    else if (leg.phase === "airborne") { const tr = (f.track || []).filter((p) => p[0] != null); if (tr.length) here = [tr[tr.length - 1][0], tr[tr.length - 1][1]]; }
+    if (wps.length > 1) {
+      let ahead = wps;
+      if (here && leg.phase === "airborne") {
+        let bi = 0, bd = Infinity;
+        wps.forEach((p, i) => { const d = kmBetween(here, p); if (d < bd) { bd = d; bi = i; } });
+        ahead = [here, ...wps.slice(bi + 1)];
+      }
+      plan.push(lineF(ahead, { c: route, o: atc ? 0.8 : 0.6 }));
+      wps.forEach((p) => bounds.push(p));
+      if (atc) for (const [la, lo, name] of (f.swim_route.fixes || []).slice(1, -1)) {
+        fixes.push(ptF([la, lo]));
+        marks.push([[la, lo], `<span class="fix-lbl">${esc(name)}</span>`]);
+      }
+    } else if (A && B) {
+      const g = gcPoints(A, B);
+      plan.push(lineF(g, { c: muted, o: 0.8 }));
+      g.forEach((p) => bounds.push(p));
+    }
+    const tr = (f.track || []).filter((p) => p[0] != null);
+    if (tr.length > 1) {
+      const sm = smooth(tr.map((p) => [p[0], p[1]]));
+      // the live position is fresher than the drawn track: join them so it sits on its line
+      if (leg.live && ["airborne", "taxi_out", "landed"].includes(leg.phase)) sm.push([leg.live.lat, leg.live.lon]);
+      track.push(lineF(sm, { own: 1 }));
+    }
+    // The inbound only frames the map while it still matters (not yet arrived, your flight not yet off the gate).
+    const inb = leg.inbound;
+    const inbOpen = !!inb && !["arrived", "cancelled", "diverted"].includes(inb.phase) && leg.phase === "scheduled";
+    let inbIdx = -1;
+    if (inb) {
+      const ia = ll(inb.origin), itr = (inb.track || []).filter((p) => p[0] != null);
+      if (itr.length > 1) {
+        const pts = smooth(itr.map((p) => [p[0], p[1]]));
+        if (leg.inbound_live) pts.push([leg.inbound_live.lat, leg.inbound_live.lon]);
+        track.push(lineF(pts, { c: violet, w: 2.5, o: inbOpen ? 0.9 : 0.35 }));
+      }
+      const iw = (inb.waypoints || []).filter((p) => p[0] != null), iPlan = !["landed", "arrived", "cancelled", "diverted"].includes(inb.phase);
+      if (iPlan && iw.length > 1) plan.push(lineF(iw, { c: violet, o: 0.45 }));
+      else if (iPlan && ia && A) plan.push(lineF(gcPoints(ia, A), { c: violet, o: 0.45 }));
+      let ip = null, ih = 0;
+      if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
+      else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
+      if (ip) { inbIdx = marks.length; marks.push(planeMk([ip[0], ip[1]], ih, violet)); GL.inbHdg = ih; if (inbOpen) bounds.push([ip[0], ip[1]]); }
+      if (ia && inbOpen) { bounds.push(ia); marks.push([ia, `<span class="apt-label inb"><b>${esc((inb.origin || {}).iata || "")}</b></span>`, { anchor: "left", offset: [8, 0] }]); }
+    }
+    for (const [ap, pos] of [[leg.dep_ap, A], [leg.arr_ap, B]]) {
+      if (!pos) continue;
+      bounds.push(pos);
+      aps.push(ptF(pos));
+      marks.push([pos, `<span class="apt-label city">${cityOf(ap) ? `<span>${esc(cityOf(ap))}</span>` : ""}<b>${esc(ap.iata || "")}</b></span>`, { anchor: "left", offset: [10, 0] }]);
+    }
+    let pos = null, hdg = 0, own = -1;
+    if (leg.live) { pos = newestPos(leg.live, tr); hdg = headingOf(leg.live, tr); }
+    else if (["airborne", "taxi_out", "landed"].includes(leg.phase) && tr.length) { pos = tr[tr.length - 1]; hdg = headingOf(null, tr); }
+    else if (f.last_position && ["airborne", "taxi_out"].includes(leg.phase)) pos = f.last_position;
+    // on the airport's surface radar, that (more exact) target is your airplane: don't draw it twice
+    if (pos && !(GL.surfaceMine && Date.now() - GL.surfaceMine < 10000)) { own = marks.length; marks.push(planeMk([pos[0], pos[1]], hdg, "#fff")); }
+    GL.ownHdg = hdg;
+    glSet({ plan, track, aps, fixes });
+    const mk = glMarkers(marks);
+    GL.ownMarker = own >= 0 ? mkHandle(mk[own]) : null;
+    GL.inbMarker = inbIdx >= 0 ? mkHandle(mk[inbIdx]) : null;
+    GL.bounds = bounds; GL.maxZoom = 8;
+    fitNow(fit);
+  }
+  // A ground stop or delay program: the centers whose departures it holds, filled; the program's
+  // airport; and where your flight (or its inbound) departs, red if held, green if not.
+  function paintNas(d, fit) {
+    GL.leg = null;
+    glSet({ pts: d.pts, artcc: d.artcc || null });
+    glMarkers(d.marks.concat(d.ctr || []));
+    GL.ownMarker = GL.inbMarker = null;
+    GL.bounds = d.bounds; GL.maxZoom = 6;
+    fitNow(fit);
+  }
+
+  // ---------- airport diagrams (zoomed in on one of the flight's airports) ----------
+  // OpenStreetMap data, fetched once per airport by the add-on. Runways and terminals from zoom 13,
+  // taxiways 14, gates 15.
+  const LAYOUTS = {};
+  const LOG_ALL = new Set();   // flights whose whole lookup log you asked to see
+  const TOWER = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 3h8l1.5 4.5H6.5zm-2.2 5.5h12.4l-1.4 4H7.2zM9 13.5h6l.6 7.5H8.4zM11 1h2v2h-2z"/></svg>';
+  function clearLayout() {
+    if (!GL.map) return;
+    if (GL.ready) for (const id of LAY) { const s = GL.map.getSource(id); if (s) s.setData(FC()); }
+    GL.layMarks.forEach((m) => m.remove());
+    GL.layMarks = [];
+    GL.layoutFor = null; GL.layoutShown = false;
+  }
+  async function layoutCheck() {
+    const map = GL.map, leg = GL.leg;
+    if (!map || !GL.ready || !leg) return;
+    if (map.getZoom() < 13) { if (GL.layoutShown) { const keep = GL.layoutFor; clearLayout(); GL.layoutFor = keep; } return; }
+    const c = map.getCenter(), here = [c.lat, c.lng];
+    const ap = [leg.dep_ap, leg.arr_ap].map((a) => a && ll(a) ? { code: a.iata || a.icao, pos: ll(a) } : null)
+      .filter((a) => a && a.code && kmBetween(here, a.pos) < 8)[0];
+    if (!ap) return;
+    if (GL.layoutFor === ap.code && GL.layoutShown) return;
+    if (!LAYOUTS[ap.code]) {
+      LAYOUTS[ap.code] = api(`api/airport/${encodeURIComponent(ap.code)}/layout`).then(buildLayout).catch(() => { delete LAYOUTS[ap.code]; return null; });
+    }
+    const L_ = await LAYOUTS[ap.code];
+    if (!L_ || GL.leg !== leg || map.getZoom() < 13) return;
+    clearLayout();
+    for (const id of LAY) GL.map.getSource(id).setData(L_[id]);
+    GL.layMarks = mkMarkers(L_.labels);
+    GL.layoutFor = ap.code; GL.layoutShown = true;
+  }
+  function buildLayout(d) {
+    if (!d || !d.features) return null;
+    const term = [], rwy = [], twy = [], labels = [], placed = {};
+    const mid = (pts) => {
+      let tot = 0; const seg = [];
+      for (let i = 1; i < pts.length; i++) { const k = kmBetween(pts[i - 1], pts[i]); seg.push(k); tot += k; }
+      let half = tot / 2;
+      for (let i = 0; i < seg.length; i++) {
+        if (half <= seg[i]) { const t = seg[i] ? half / seg[i] : 0; return [[pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t], tot]; }
+        half -= seg[i];
+      }
+      return [pts[0], tot];
+    };
+    const centroid = (pts) => [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length];
+    const near = (ref, p, km) => (placed[ref] || []).some((q) => kmBetween(p, q) < km);
+    const lbl = (pos, text, cls) => labels.push([pos, `<span class="ap-lbl ${cls}">${esc(text)}</span>`]);
+    for (const f of d.features) {
+      if (f.k === "terminal" && Array.isArray(f.g[0])) {
+        term.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring(f.g)] } });
+        if (f.name || f.ref) lbl(centroid(f.g), f.name || f.ref, "ap-term");
+      } else if (f.k === "runway" && Array.isArray(f.g[0])) {
+        rwy.push(lineF(f.g));
+        if (f.ref) lbl(mid(f.g)[0], f.ref.replace(/^0/, "").replace(/\/0/, "/"), "ap-rwy");
+      } else if (f.k === "taxiway" && Array.isArray(f.g[0])) {
+        twy.push(lineF(f.g));
+        if (!f.ref) continue;
+        const [p, len] = mid(f.g);
+        if (len < 0.08 || near(f.ref, p, 0.35)) continue;
+        (placed[f.ref] = placed[f.ref] || []).push(p);
+        lbl(p, f.ref, "ap-twy");
+      } else if ((f.k === "gate" || f.k === "stand") && f.ref && !Array.isArray(f.g[0])) {
+        if (near("gate:" + f.ref, f.g, 0.05)) continue;
+        (placed["gate:" + f.ref] = placed["gate:" + f.ref] || []).push(f.g);
+        lbl(f.g, f.ref, "ap-gate");
+      }
+    }
+    return { "lay-term": FC(term), "lay-rwy": FC(rwy), "lay-twy": FC(twy), labels };
+  }
+
+  // ---------- live position (every 5 s while the flight or its inbound is moving) ----------
+  // Only the new position and track points are fetched; the map repaints in place. Between fixes
+  // the airplane is carried forward along its heading. A request that hangs is dropped after 8 s.
+  const LIVEW = { id: null, key: null, timer: null };
+  function liveWatch(leg, key) {
+    key = key || `leg-${leg.id}`;
+    const moving = ["taxi_out", "airborne", "landed"].includes(leg.phase) ||
+      (leg.inbound && ["taxi_out", "airborne"].includes(leg.inbound.phase));
+    if (!moving) { if (LIVEW.key === key) { clearTimeout(LIVEW.timer); LIVEW.id = LIVEW.key = LIVEW.timer = null; } return; }
+    if (LIVEW.key === key && LIVEW.timer) return;
+    if (LIVEW.timer) clearTimeout(LIVEW.timer);
+    LIVEW.id = leg.id; LIVEW.key = key;
+    const id = leg.id;
+    const tick = async () => {
+      LIVEW.timer = null;
+      if (LIVEW.key !== key || GL.view !== key) { if (LIVEW.key === key) LIVEW.id = LIVEW.key = null; return; }
+      const cur = LEGS[id];
+      if (cur && !document.hidden) {
+        const tr = (cur.flight && cur.flight.track) || [], itr = (cur.inbound && cur.inbound.track) || [];
+        const since = Math.min(tr.length ? tr[tr.length - 1][4] || 0 : 0, itr.length ? itr[itr.length - 1][4] || 0 : Infinity);
+        const ctl = window.AbortController ? new AbortController() : null;
+        const stop = ctl && setTimeout(() => ctl.abort(), 8000);
+        try {
+          const d = await api(`api/live/${encodeURIComponent(id)}?since=${Math.floor(since || 0)}`, ctl ? { signal: ctl.signal } : undefined);
+          let moved = false;
+          if (d.live && (!cur.live || d.live.at > cur.live.at)) { cur.live = d.live; moved = true; }
+          if (d.inbound_live && (!cur.inbound_live || d.inbound_live.at > cur.inbound_live.at)) { cur.inbound_live = d.inbound_live; moved = true; }
+          const add = (arr, pts) => { const last = arr.length ? arr[arr.length - 1][4] || 0 : 0; for (const p of pts || []) if ((p[4] || 0) > last) { arr.push(p); moved = true; } };
+          if (cur.flight) { cur.flight.track = cur.flight.track || []; add(cur.flight.track, d.track); }
+          if (cur.inbound) { cur.inbound.track = cur.inbound.track || []; add(cur.inbound.track, d.inbound_track); }
+          if (moved && GL.view === key) GL.paint(key === "home" ? { ...GL.data, focus: withChain(cur) } : withChain(cur), false);
+          const te = document.getElementById("telem");
+          if (te && cur.live && key === `leg-${id}`) te.innerHTML = telem(cur.live);
+          const fresh = (lv, trk) => { const l = (trk || []).filter((p) => p && p[0] != null).pop(); return !(l && (l[4] || 0) > (lv.at || 0) + 5); };
+          if (GL.ownMarker && cur.live && cur.phase === "airborne" && fresh(cur.live, cur.flight && cur.flight.track)) { const a = aheadOf(cur.live, GL.ownHdg || 0, Date.now()); if (a) GL.ownMarker.setLatLng(a); }
+          if (GL.inbMarker && cur.inbound_live && cur.inbound && cur.inbound.phase === "airborne" && fresh(cur.inbound_live, cur.inbound.track)) { const a = aheadOf(cur.inbound_live, GL.inbHdg || 0, Date.now()); if (a) GL.inbMarker.setLatLng(a); }
+        } catch {} finally { if (stop) clearTimeout(stop); }
+      }
+      LIVEW.timer = setTimeout(tick, 5000);
+    };
+    LIVEW.timer = setTimeout(tick, 5000);
+  }
+
+  // ---------- live surface traffic (FAA STDDS) ----------
+  // While the flight's page is open and it's on the ground at an airport with surface radar:
+  // everything on the field, your flight highlighted. Every 3 s while there's traffic, else 20 s.
+  const SURF = { id: null, timer: null, zoomed: false };
+  function stopSurface() {
+    if (SURF.timer) clearTimeout(SURF.timer);
+    SURF.timer = null; SURF.id = null;
+    GL.surf.forEach((m) => m.remove()); GL.surf = [];
+    GL.lastSurface = null; GL.surfaceMine = 0;
+    if (GL.ctl) GL.ctl.classList.remove("has-surf");
+  }
+  function surfaceWatch(leg) {
+    if (!STATE || !STATE.stdds || STATE.stdds.status !== "connected") { stopSurface(); return; }
+    if (SURF.id !== leg.id) { stopSurface(); SURF.id = leg.id; SURF.zoomed = false; }
+    if (SURF.timer) return;
+    const id = leg.id;
+    const tick = async () => {
+      SURF.timer = null;
+      if (SURF.id !== id || !ROUTE.startsWith(`#/leg/${id}`)) { if (SURF.id === id) stopSurface(); return; }
+      let d = null;
+      const ap = zoomedAirport(12);
+      try { d = await api(`api/surface/${encodeURIComponent(id)}${ap ? `?ap=${encodeURIComponent(ap)}` : ""}`); } catch {}
+      if (SURF.id !== id) return;
+      if (GL.view === `leg-${id}`) paintSurface(d || {});
+      SURF.timer = setTimeout(tick, d && d.targets && d.targets.length ? 3000 : 20000);
+    };
+    SURF.timer = setTimeout(tick, 0);
+  }
+  // The flight airport the map is zoomed in on (center within 8 km, at least zoom z), or null.
+  function zoomedAirport(z) {
+    const leg = GL.leg;
+    if (!GL.map || !leg || GL.map.getZoom() < z) return null;
+    const c = GL.map.getCenter(), here = [c.lat, c.lng];
+    const a = [leg.dep_ap, leg.arr_ap].find((a) => a && ll(a) && kmBetween(here, ll(a)) < 8);
+    return a ? a.iata || a.icao : null;
+  }
+  // zoomed in on an airport: look for surface traffic now rather than at the next 20 s poll
+  function surfaceNow() {
+    const ap = zoomedAirport(12);
+    if (!SURF.id || !GL.leg || GL.leg.id !== SURF.id || !ap || GL.surfAp === ap) return;
+    GL.surfAp = ap;
+    if (SURF.timer) clearTimeout(SURF.timer);
+    SURF.timer = null;
+    const l = GL.leg;
+    SURF.id = null;
+    surfaceWatch(l);
+  }
+  function paintSurface(d) {
+    GL.surf.forEach((m) => m.remove()); GL.surf = [];
+    const only = pref("ft-surf-all", "0") !== "1", ids = pref("ft-surf-ids", "0") === "1";
+    const all = (d.targets || []).filter((t) => t.lat != null && t.lon != null);
+    const tg = only ? all.filter((t) => t.mine || (t.xpdr && t.kind !== "vehicle")) : all;
+    if (GL.ctl) {
+      GL.ctl.classList.toggle("has-surf", all.length > 0);
+      const xb = GL.ctl.querySelector('[data-a="xpdr"]'), ib = GL.ctl.querySelector('[data-a="ids"]');
+      xb.classList.toggle("on", only);
+      xb.title = only ? "Showing aircraft with transponders on (tap for everything)" : "Showing everything on the surface (tap for transponders only)";
+      ib.classList.toggle("on", ids);
+    }
+    GL.lastSurface = d;
+    const center = all.length && d.center ? d.center : null;
+    if (!SURF.zoomed && center && ["taxi_out", "landed"].includes(d.phase)) {
+      const me = all.find((t) => t.mine);
+      GL.map.easeTo({ center: me ? [me.lon, me.lat] : [center[1], center[0]], zoom: 14, duration: 900, padding: mapPad(false) });
+      SURF.zoomed = true;
+    }
+    // zoomed out past the airport, surface traffic is clutter over the route
+    if (GL.map.getZoom() < 11) { GL.surfaceMine = 0; if (GL.ownMarker) GL.ownMarker.setOpacity(1); return; }
+    const mine = tg.some((t) => t.mine);
+    GL.surfaceMine = mine ? Date.now() : 0;
+    if (GL.ownMarker) GL.ownMarker.setOpacity(mine ? 0 : 1);
+    const route = css("--route"), list = [];
+    for (const t of tg) {
+      const label = [t.cs, t.type].filter(Boolean).join(" · ") || (t.kind === "vehicle" ? "Vehicle" : "Unidentified");
+      if (!t.mine && (t.kind === "vehicle" || (!t.cs && !t.type))) { list.push([[t.lat, t.lon], `<i class="surf-dot" title="${esc(label)}"></i>`]); continue; }
+      const sz = t.mine ? 22 : 15;
+      const tag = t.mine ? `<span class="surf-tag mine">${esc(label)}</span>` : ids && (t.cs || t.squawk) ? `<span class="surf-tag">${esc(t.cs || t.squawk)}</span>` : "";
+      list.push([[t.lat, t.lon], `<div class="surf-ac" title="${esc(label)}"><div style="width:${sz}px;height:${sz}px;color:${t.mine ? route : "#fff"};opacity:${t.mine ? 1 : 0.85};transform:rotate(${t.hdg || 0}deg)">${PLANE}</div>${tag}</div>`]);
+    }
+    GL.surf = mkMarkers(list);
   }
 
   // ---------- views ----------
@@ -2446,7 +2076,7 @@
     const nowS = Date.now() / 1000;
     let list = "";
     live.slice(0, 40).forEach((l, i) => { if (i) list += layover(live[i - 1], l); list += row(l); });
-    let h = `<div class="mapbg" id="home-map"></div><div class="sheet-gap"></div><section class="sheet">
+    let h = `<div class="sheet-gap"></div><section class="sheet">
       <div class="sheet-head"><h1>My Flights<a class="hstat" href="#/tools" aria-label="Live updates and Drive backup"><i class="ld"></i>${IC.cloud}</a></h1>
         <div class="sh-btns"><a class="round" href="#/add" aria-label="Add a flight">${IC.plus}</a>${avatar()}</div></div>`;
     h += nasTop(watching);
@@ -2469,36 +2099,18 @@
     $app.innerHTML = h;
     // the map: every route in the next two weeks, and the airplane you're on (or about to be)
     const onMap = live.filter((l) => sortKey(l) - nowS < 14 * 86400).slice(0, 16);
-    const opt = { key: "home", paint: glPaintHome, home: true };
     const data = (full) => ({ legs: onMap.length ? onMap : live.slice(0, 1), focus: full ? withChain(full) : null });
-    drawGL(document.getElementById("home-map"), data(focus && LEGS[focus.id]), opt);
+    showMap("home", paintHome, data(focus && LEGS[focus.id]), { kind: "home" });
     if (focus && moving(focus)) {
       api(`api/leg/${focus.id}`).then((full) => {
         LEGS[focus.id] = full;
-        const el = document.getElementById("home-map");
-        if (el) { drawGL(el, data(full), opt); liveWatch(full, "home"); }
+        if (GL.view === "home") { showMap("home", paintHome, data(full), { kind: "home" }); liveWatch(full, "home"); }
       }).catch(() => {});
     }
   }
 
   let APTS = null;   // last airport-status answer, for the program map
   const issueRank = (a) => a.items.some((n) => ["gs", "closure"].includes(n.kind)) ? 0 : a.items.some((n) => n.kind === "gdp") ? 1 : 2;
-  function paintAirports(entry, data, fit) {
-    const { layer } = entry;
-    layer.clearLayers();
-    addNight(entry);
-    const bounds = [];
-    for (const a of data.airports) {
-      if (a.lat == null) continue;
-      const c = issueRank(a) < 2 ? css("--red") : css("--amber");
-      L.circleMarker([a.lat, a.lon], { radius: 6.5, color: "#fff", weight: 1.5, fillColor: c, fillOpacity: 1, interactive: false }).addTo(layer);
-      if (data.labels) L.marker([a.lat, a.lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: null, iconAnchor: [-8, 7],
-        html: `<span class="apt-dot-lbl">${esc(a.code)}</span>` }) }).addTo(layer);
-      bounds.push([a.lat, a.lon]);
-    }
-    entry.bounds = bounds.length ? bounds : [[49, -125], [25, -67]];
-    if (fit) entry.center();
-  }
   async function airportsView() {
     destroyMaps();
     let d;
@@ -2515,7 +2127,7 @@
     const row = (a) => `<div class="ap-row">
       <div class="ap-dot ${issueRank(a) < 2 ? "red" : "amber"}"><i></i><span>${esc(a.code)}</span></div>
       <div class="ap-main"><div class="ap-name">${esc(apShort(a, a.code))}${a.mine ? ' <span class="tag">YOUR FLIGHT</span>' : ""}</div>${a.items.map((n) => item(a, n)).join("")}</div></div>`;
-    $app.innerHTML = `<div class="mapbg" id="apt-map"></div><div class="sheet-gap"></div><section class="sheet">
+    $app.innerHTML = `<div class="sheet-gap"></div><section class="sheet">
       <div class="sheet-head"><h1>Airports</h1><div class="sh-btns"><a class="round back xbtn" href="#/" aria-label="Close">${IC.x}</a></div></div>
       <p class="small muted" style="margin:-4px 0 6px">FAA status for every US airport with a ground stop, delay program, closure or delay trend${d.at ? ` · updated ${ago(d.at)}` : ""}.</p>
       ${d.error ? `<div class="err">${esc(d.error)}</div>` : ""}
@@ -2523,12 +2135,13 @@
       ${minor.length ? `<h2 class="ap-h">Minor Issues</h2>${minor.map(row).join("")}` : ""}
       ${!list.length ? `<div class="card empty"><b>All clear</b>No FAA ground stops, delay programs, closures or delay trends right now.</div>` : ""}
     </section>`;
-    drawGL(document.getElementById("apt-map"), { airports: list }, { key: "apts", paint: glPaintAirports });
+    showMap("apts", paintAirports, { airports: list });
   }
 
   // A ground stop or delay program on a map: the centers whose departures it holds, filled; the
   // program airport; and where your flight (or its inbound) departs, red if it's held, green if not.
   let ARTCC = null;
+  const NAS_FC = {};   // each program's center shapes, built once
   const CTR_LABEL_AT = { ZNY: [41.05, -76.45] };
   async function nasView(key) {
     const legs = (STATE.legs || []).filter((l) => (l.nas || []).some((n) => n.key === key));
@@ -2539,83 +2152,59 @@
       if (n0) g = { n: n0, tz: ap0 ? ap0.tz : undefined, uses: [] };
     }
     destroyMaps();
-    if (!g) { $app.innerHTML = `<div class="mapbg" id="nas-map"></div><div class="sheet-gap"></div><section class="sheet">${sheetHead("Program ended", "FAA", "#/")}<div class="card empty"><b>Program ended</b>It's no longer in the FAA's list.</div></section>`; return; }
+    if (!g) { $app.innerHTML = `<div class="sheet-gap"></div><section class="sheet">${sheetHead("Program ended", "FAA", "#/")}<div class="card empty"><b>Program ended</b>It's no longer in the FAA's list.</div></section>`; return; }
     const n = g.n;
-    $app.innerHTML = `<div class="mapbg" id="nas-map"></div><div class="sheet-gap d"></div>
+    $app.innerHTML = `<div class="sheet-gap d"></div>
       <section class="sheet">${sheetHead(esc(`${n.airport} ${n.label}`), "FAA", "#/")}
       <p class="small faint" id="nas-map-note" style="margin:6px 4px 10px" hidden></p>
       ${nasAlert(g).replace("tappable", "")}
       <div class="card small muted">Shaded: the en-route centers whose departures this ${n.kind === "gs" ? "ground stop" : "program"} holds. ${(n.scope || []).filter((c) => !/^Z[A-Z]{2}$/.test(c)).length ? `Also: ${esc(n.scope.filter((c) => !/^Z[A-Z]{2}$/.test(c)).join(" "))}.` : ""}</div></section>`;
-    let el = document.getElementById("nas-map");
-    if (!window.L) { el.innerHTML = '<div class="empty small">Map library didn\'t load.</div>'; return; }
-    // a live update re-draws this page: keep the map you're looking at instead of starting over
-    const have = MAPS.nas;
-    if (have && have.key === key) {
-      if (have.el !== el) el.replaceWith(have.el);
-      usedMaps.add("nas");
-      setTimeout(() => have.map.invalidateSize(), 30);
-      return;
-    }
-    if (have) { try { have.map.remove(); } catch {} delete MAPS.nas; }
-    if (el.classList.contains("leaflet-container") || el._leaflet_id) {
-      const f = document.createElement("div"); f.id = el.id; f.className = "mapbg"; el.replaceWith(f); el = f;
-    }
-    const dark = true;
-    // canvas: thousands of boundary points draw without stalling the page
-    const map = L.map(el, { renderer: L.canvas({ padding: 0.2 }), zoomControl: false, attributionControl: false, worldCopyJump: true });
-    map.addControl(L.control.attribution({ position: "topleft", prefix: "" }));
-    addTiles(map, dark);
-    addStack(map);
-    MAPS.nas = { el, map, key, layer: L.layerGroup().addTo(map), bounds: [], interactive: true };
-    usedMaps.add("nas");
-    oneFingerZoom(map, el);
     const hot = n.kind === "gs" ? css("--red") : css("--amber");
-    const ok = css("--green"), muted = css("--faint");
-    const bounds = [];
+    const ok = css("--green"), muted = "#8e8e93";
+    const bounds = [], pts = [], marks = [];
     const apPos = {};
     for (const l of legs) for (const a of [l.dep_ap, l.arr_ap]) if (a && ll(a)) apPos[a.iata] = ll(a);
     for (const a of (APTS && APTS.airports) || []) if (a.lat != null && !apPos[a.code]) apPos[a.code] = [a.lat, a.lon];
-    // where the program is
     const prog = apPos[n.airport];
     if (prog) {
-      L.circleMarker(prog, { radius: 6, color: hot, fillColor: hot, fillOpacity: 1, weight: 2 }).addTo(map);
-      L.marker(prog, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${hot}">${esc(n.airport)} ${n.kind === "gs" ? "ground stop" : "delay program"}</span>`, iconSize: null, iconAnchor: [-8, 30] }) }).addTo(map);
+      pts.push(ptF(prog, { c: hot, r: 6.5, s: 2 }));
+      marks.push([prog, `<span class="apt-label" style="background:${hot}"><b>${esc(n.airport)}</b>&nbsp;${n.kind === "gs" ? "ground stop" : "delay program"}</span>`, { anchor: "left", offset: [10, 0] }]);
       bounds.push(prog);
     }
-    // your departures / inbound departures it touches
     for (const u of g.uses) for (const i of u.impact) {
       const p = apPos[i.from] || (u.leg.inbound && u.leg.inbound.origin && ll(u.leg.inbound.origin));
       if (!p) continue;
       const c = i.airborne ? muted : i.hit === true ? hot : i.hit === false ? ok : muted;
-      L.circleMarker(p, { radius: 5, color: c, fillColor: c, fillOpacity: 1, weight: 0 }).addTo(map);
-      L.marker(p, { icon: L.divIcon({ className: "", html: `<span class="apt-label" style="border-color:${c}">${esc(i.from)} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}</span>`, iconSize: null, iconAnchor: [-8, 8] }) }).addTo(map);
+      pts.push(ptF(p, { c, r: 5, s: 0 }));
+      marks.push([p, `<span class="apt-label" style="background:${c}">${esc(i.from)} · ${i.who === "you" ? "you" : "inbound"}${i.airborne ? " · airborne" : i.hit === true ? " · held" : i.hit === false ? " · not held" : ""}</span>`, { anchor: "left", offset: [9, 0] }]);
       bounds.push(p);
     }
-    const fit = () => bounds.length ? map.fitBounds(bounds, fitOpts(el, 6)) : map.setView([39.5, -98.35], 3);
-    fit();
+    const view = `nas-${key}`, base = { pts, marks, bounds };
+    showMap(view, paintNas, NAS_FC[key] ? { ...base, ...NAS_FC[key], bounds: bounds.concat(NAS_FC[key].bounds) } : base, { kind: "nas" });
+    if (NAS_FC[key]) return;
     try { ARTCC = ARTCC || await api("api/artcc"); } catch { ARTCC = null; }
-    if (!ARTCC || !MAPS.nas || MAPS.nas.map !== map) {
+    if (!ARTCC) {
       const note = document.getElementById("nas-map-note");
-      if (note && !ARTCC) { note.hidden = false; note.textContent = "Center boundaries aren't available right now; the scope is listed below."; }
+      if (note) { note.hidden = false; note.textContent = "Center boundaries aren't available right now; the scope is listed below."; }
       return;
     }
-    const scope = new Set(n.scope || []);
+    const scope = new Set(n.scope || []), feats = [], ctr = [], sb = [];
     for (const [id, c] of Object.entries(ARTCC)) {
       const inS = scope.has(id);
-      // all of a center's shapes (low and high altitude) as one area, filled once where they overlap
-      L.polygon(c.rings.map((r) => [r]), { color: inS ? hot : muted, weight: inS ? 1.5 : 0.8, opacity: inS ? 0.9 : 0.5,
-        fillColor: hot, fillOpacity: inS ? 0.22 : 0, fillRule: "nonzero", interactive: false }).addTo(map);
-      if (inS) c.rings.forEach((ring) => ring.forEach((p) => bounds.push(p)));
+      // all of a center's shapes (low and high altitude) as one area
+      feats.push({ type: "Feature", properties: { c: inS ? hot : muted, o: inS ? 0.22 : 0, w: inS ? 1.5 : 0.8, lo: inS ? 0.9 : 0.5 },
+        geometry: { type: "MultiPolygon", coordinates: c.rings.map((r) => [ring(r)]) } });
+      if (inS) c.rings.forEach((r) => r.forEach((p) => sb.push(p)));
       const big = c.rings.slice().sort((a, b) => b.length - a.length)[0];
       if (big && big.length) {
         // centers with a lot of ocean get their label over land, where it reads as theirs
         let lat = big.reduce((a, p) => a + p[0], 0) / big.length, lon = big.reduce((a, p) => a + p[1], 0) / big.length;
         if (CTR_LABEL_AT[id]) [lat, lon] = CTR_LABEL_AT[id];
-        L.marker([lat, lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: null,
-          html: `<span class="ctr-lbl ${inS ? "on" : ""}" style="${inS ? `color:${hot}` : ""}">${esc(id)}</span>` }) }).addTo(map);
+        ctr.push([[lat, lon], `<span class="ctr-lbl ${inS ? "on" : ""}" style="${inS ? `color:${hot}` : ""}">${esc(id)}</span>`]);
       }
     }
-    fit();
+    NAS_FC[key] = { artcc: FC(feats), ctr, bounds: sb };
+    if (GL.view === view) showMap(view, paintNas, { ...base, ...NAS_FC[key], bounds: bounds.concat(sb) }, { kind: "nas", refit: true });
   }
 
   async function legView(id) {
@@ -2695,7 +2284,6 @@
     const T0 = tms(leg);
     const fa_ = leg.fa_id ? `https://www.flightaware.com/live/flight/id/${encodeURIComponent(leg.fa_id)}` : leg.ident ? `https://www.flightaware.com/live/flight/${encodeURIComponent(leg.ident)}` : "";
     $app.innerHTML = `
-      <div class="mapbg" id="detail-map"></div>
       ${leg.live && leg.phase === "airborne" ? `<div class="telem" id="telem">${telem(leg.live)}</div>` : ""}
       <div class="sheet-gap d"></div>
       <section class="sheet detail">
@@ -2735,7 +2323,7 @@
         </div>`).join("")}${leg.history_more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${leg.history_more} older</button>` : ""}</div>`, false) : ""}
         ${leg.shot ? fold("leg-shot", "Latest Screenshot", `<div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('details').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>`, false) : ""}
       </section>`;
-    drawMap(document.getElementById("detail-map"), withChain(leg), { key: `leg-${leg.id}` });
+    showMap(`leg-${leg.id}`, paintLeg, withChain(leg), { kind: "leg" });
     surfaceWatch(leg);
     liveWatch(leg);
     const lm = document.getElementById("log-more");
@@ -3140,7 +2728,6 @@
       else if (route.startsWith("#/notify")) await notifyView();
       else homeView();
       // hero map is drawn after its own fetch; give it a moment before clearing unused maps
-      setTimeout(sweepMaps, 1500);
       const tab = /^#\/history\/alerts/.test(route) ? "alerts" : /^#\/history\/find/.test(route) ? "search"
         : /^#\/(history|hist\/)/.test(route) ? "passport" : /^#\/(tools|notify|add)/.test(route) ? "" : "flights";
       document.querySelectorAll("#tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
