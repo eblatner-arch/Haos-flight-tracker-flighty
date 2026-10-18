@@ -1604,10 +1604,12 @@
     if (!MAP_EL || !/^(#\/?)?$/.test(location.hash)) return;
     try {
       const d = JSON.parse(localStorage.getItem(SHOT_KEY) || "null");
-      if (!d || d.w !== window.innerWidth || d.h !== window.innerHeight || Date.now() - d.at > 7 * 86400e3) return;
+      // (a Home Screen app can report a slightly different height while it starts)
+      if (!d || Math.abs(d.w - window.innerWidth) > 4 || Math.abs(d.h - window.innerHeight) > 60 || Date.now() - d.at > 7 * 86400e3) return;
       const el = document.createElement("div");
       el.id = "mapshot"; el.style.backgroundImage = `url(${d.img})`;
       MAP_EL.appendChild(el);
+      document.body.classList.add("sheetmode");   // the map layer is hidden outside sheet pages
     } catch {}
   })();
   function dropShot() {
@@ -1620,9 +1622,11 @@
     const map = GL.map;
     if (!map || GL.view !== "home" || map.isMoving() || Date.now() - shotAt < 60000 || window.scrollY > midY() + 60) return;
     shotAt = Date.now();
-    // read the picture right after a frame is drawn (the canvas keeps it only until then)
-    map.once("render", () => {
+    // draw a frame now and read it straight away: the canvas keeps its picture only until the
+    // browser shows it (reading it later gives a blank image, as on iPhone)
+    {
       try {
+        map.redraw();
         const c = map.getCanvas(), w = window.innerWidth, h = window.innerHeight, k = Math.min(1, 900 / Math.max(c.width, c.height));
         const t = document.createElement("canvas"); t.width = Math.round(c.width * k); t.height = Math.round(c.height * k);
         t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
@@ -1633,8 +1637,7 @@
         const img = t.toDataURL("image/jpeg", 0.7);
         localStorage.setItem(SHOT_KEY, JSON.stringify({ img, w, h, at: Date.now() }));
       } catch {}
-    });
-    map.triggerRepaint();
+    }
   }
   // index.html loads the map library without holding up the app; this runs when it arrives
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
@@ -3331,7 +3334,10 @@
   async function render(force) {
     const route = ROUTE;
     try {
-      if (force || !STATE) await load();
+      if (force || !STATE) {
+        // no signal or the add-on is unreachable: carry on with the phone's copy (Live dot gray)
+        try { await load(); } catch (e) { if (!STATE) throw e; try { setLive(false); } catch {} }
+      }
       document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
       morphing = route === lastRoute && $root.childElementCount > 0;
       document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
@@ -3370,7 +3376,10 @@
       else if (route !== lastRoute && !placed) window.scrollTo(0, document.body.classList.contains("sheetmode") ? midY() : 0);
       lastRoute = route;
     } catch (e) {
-      $app.innerHTML = `<div class="card empty"><b>Can't reach the add-on</b>${esc(e.message)}</div>`;
+      // no signal / add-on unreachable: keep the page drawn from the phone's copy (the Live dot goes
+      // gray); only an empty screen gets the error
+      if (STATE && $app.childElementCount && !$app.querySelector(".card.empty b")) { try { setLive(false); } catch {} }
+      else $app.innerHTML = `<div class="card empty"><b>Can't reach the add-on</b>${esc(e.message)}</div>`;
     } finally {
       morphing = false;
     }
@@ -3487,6 +3496,12 @@
   window.addEventListener("pageshow", (e) => { if (e.persisted) wake(); });
   window.addEventListener("focus", wake);
   window.addEventListener("online", () => connect(true));
+  // The app itself stays on the phone (sw.js): it opens instantly, then refreshes in the background.
+  // Only on the add-on's own https address; through Home Assistant the page's address changes every
+  // session, so there's nothing stable to keep.
+  if ("serviceWorker" in navigator && window.isSecureContext && !/hassio_ingress|api\/ingress/.test(location.pathname)) {
+    navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {});
+  }
   // Draw the last known state right away, then fetch the current one.
   const snap = loadSnapshot();
   if (snap) {

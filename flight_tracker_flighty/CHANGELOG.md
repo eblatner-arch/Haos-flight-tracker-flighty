@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.16.0
+- The app opens instantly: on the add-on's https address (the Home Screen app), the page and its files are kept on the phone by a small service worker and open with no wait for the add-on (before, each launch waited for a round trip over Tailscale: about a second of black). A fresh copy is fetched in the background each time, so an add-on update shows up on the next launch after it. Through Home Assistant the page's address changes every session, so this applies only to the direct address.
+- The saved map picture now works on iPhone (it was reading the map after Safari had already cleared it, so nothing was saved), and it shows from the first moment.
+- No signal, or the add-on unreachable: the app opens and shows your flights from the phone's copy with the Live dot gray, instead of "Can't reach the add-on".
+
 ## 4.15.5
 - No black map when the app opens: the last My Flights map is kept as a picture on the phone and shown instantly, then fades into the live map once its tiles are drawn (usually under a second). It's refreshed whenever the map settles on My Flights, and only used at the same screen size.
 - First Passport visit after opening: the list now moves to Passport's resting spot as soon as the page appears (from the phone's copy), instead of after the fresh data arrives from the add-on. The map frames once, for the right room, instead of moving a moment later. That delay is why it only happened the first time.
