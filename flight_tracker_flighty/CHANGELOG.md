@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.15.4
+- My Flights frames your routes in the open part of the map: clear of the blurred strip under the status bar (with the credit line) and of the button column on the right, so they're no longer tucked under either. A flight's page also stays clear of the top strip. Passport is unchanged.
+
 ## 4.15.3
 - Routes framed by eye: after the first estimate, the map measures where your routes' northern, southern, eastern and western ends actually land on screen and adjusts until they're the same distance from the edges of the map above the list. That takes out the globe's curve, which left them sitting high. Long routes count their arc (EWR–SAN bows north), not just their airports.
 - The framing uses the whole map above the list (less of a band under the status bar and above the list).

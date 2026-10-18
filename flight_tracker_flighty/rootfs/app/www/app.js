@@ -2023,7 +2023,11 @@
     if (GL.opts.kind === "nas") { padding.left = 18; padding.right = 58; }
     // My Flights: the routes centered on the screen, as wide as it allows (the buttons may overlap a
     // corner; shifting everything left to dodge them made the globe look lopsided)
-    if (GL.opts.kind === "home" || !GL.opts.kind) { padding.left = 26; padding.right = 26; }   // My Flights, Passport
+    if (!GL.opts.kind) { padding.left = 26; padding.right = 26; }   // Passport: the whole globe, centered
+    // My Flights: keep clear of the blurred strip under the status bar (and the credit line in it)
+    // and of the button column on the right, so the routes sit in the open part of the map
+    if (GL.opts.kind === "home") { padding.left = 22; padding.right = 66; padding.top = Math.max(padding.top, 92); }
+    if (GL.opts.kind === "leg") padding.top = Math.max(padding.top, 92);
     GL.fitBottom = padding.bottom;
     const dur = animate ? 900 : 0;
     // Face-on, like Flighty: the camera looks straight at the middle of the routes, and the map's
@@ -2044,9 +2048,9 @@
     const W = MAP_EL.clientWidth || window.innerWidth, H = MAP_EL.clientHeight || window.innerHeight;
     const aw = Math.max(80, W - padding.left - padding.right), ah = Math.max(80, H - padding.top - padding.bottom);
     const dx = Math.max(1e-6, (e - w) / 360), dy = Math.max(1e-6, (my(n) - my(s)) / (2 * Math.PI));
-    // with room around them, like Flighty: My Flights' routes take about 80% of the space (some
+    // with room around them, like Flighty: My Flights' routes take about 90% of the open space (some
     // context and the globe's curve around them), a flight 85%, Passport 90%, an FAA program all of it
-    const fill = { home: 0.8, leg: 0.85, nas: 1 }[GL.opts.kind] || 0.9;
+    const fill = { home: 0.9, leg: 0.85, nas: 1 }[GL.opts.kind] || 0.9;
     const maxZ = GL.maxZoom || 7;
     let c = center, z = Math.max(0.5, Math.min(Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)) * fill), maxZ));
     // Then measure on screen, the way you'd eyeball it: try the camera (no frame is drawn in
