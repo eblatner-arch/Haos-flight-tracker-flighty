@@ -2039,7 +2039,7 @@
     // tilts the view, so the routes sat foreshortened near the top edge of the earth.)
     if (GL.globeView || !b.length) {
       const c = GL.globeView || [35, -85];
-      map.easeTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding, duration: dur });
+      camTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding }, dur);
       return;
     }
     let w = 180, e = -180, s = 90, n = -90;
@@ -2077,7 +2077,15 @@
       }
       map.jumpTo(orig);
     } catch {}
-    map.easeTo({ center: c, zoom: z, padding, duration: dur });
+    camTo({ center: c, zoom: z, padding }, dur);
+  }
+  // Short moves glide; big zoom changes (from an airport out to your routes) fly: the camera rises
+  // in an arc and comes back down, instead of sliding the center while the zoom drops, which on
+  // the globe looked like falling through the earth.
+  function camTo(o, dur) {
+    const map = GL.map;
+    if (dur && Math.abs((o.zoom ?? map.getZoom()) - map.getZoom()) > 2.5) map.flyTo({ ...o, duration: Math.min(2200, Math.max(1300, dur * 1.6)), curve: 1.42, essential: true });
+    else map.easeTo({ ...o, duration: dur });
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
   // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.

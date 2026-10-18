@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.17.3
+- Zooming out from an airport with the center button (or any big jump in zoom) now flies: the camera rises in an arc and settles over your routes, instead of sliding sideways while zooming out, which on the globe looked like passing through the earth. Short moves still glide as before.
+
 ## 4.17.2
 - The page declares itself dark from its very first byte (color scheme and background on the page itself), so the web view starts dark instead of flashing its default gray for a frame between the launch image and the app.
 
