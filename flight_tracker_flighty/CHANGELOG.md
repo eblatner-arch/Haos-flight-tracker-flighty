@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.18.4
+- Inbound arriving after you're due out: the turn bar now reads "lands 56m after you're due out" (full red bar) instead of "56m turn", and the warning says "Inbound lands 56 min after your departure" instead of "Short turn: -56 min".
+- An inbound that has pushed back but not taken off shows as Taxiing, with how long ("Taxiing · 34m"), when it pushed back, and that it hasn't taken off yet, instead of "Departing". The inbound timeline says "Taxiing since 7:12 PM · arrives 9:14 PM" instead of its old departure time.
+
 ## 4.18.3
 - Smoother first zoom into an airport: a moment after a flight's map opens, while nothing is moving, the app prepares each of its airports (and its inbound legs' airports) in small slices. It builds the airport diagram, draws all the runway/taxiway/gate labels into the map, and saves the close-up satellite imagery (zoom 12–15) on the phone. Before, all of that happened in the middle of your first pinch, which caused the stutter.
 

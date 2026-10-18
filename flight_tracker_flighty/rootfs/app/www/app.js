@@ -1423,8 +1423,14 @@
     let pill, ptn, line;
     if (ph === "arrived") { pill = `Arrived ${lateLower(am)}`; ptn = tone(am); line = `The inbound aircraft arrived ${lateLower(am)}.`; }
     else if (["airborne", "landed", "taxi_out"].includes(ph)) {
-      pill = ph === "taxi_out" ? "Departing" : ph === "landed" ? "Landed" : `En route · ${lateLower(am)}`; ptn = tone(am);
-      line = `Your aircraft is ${ph === "taxi_out" ? "leaving" : "flying in from"} ${esc(from)}${inE ? `, at the gate ~${hm(inE, tz)}` : ""}.`;
+      pill = ph === "taxi_out" ? "Taxiing" : ph === "landed" ? "Landed" : `En route · ${lateLower(am)}`; ptn = tone(am);
+      line = `Your aircraft is ${ph === "landed" ? "on the ground here" : "flying in from " + esc(from)}${inE ? `, at the gate ~${hm(inE, tz)}` : ""}.`;
+      if (ph === "taxi_out") {
+        // pushed back but not off the ground yet: say since when (a long taxi is a delay in itself)
+        const outA = (it.out || {}).actual, oz = (i0.origin || {}).tz, since = outA ? Math.round((Date.now() / 1000 - outA) / 60) : null;
+        if (since != null && since >= 1) pill = `Taxiing · ${fdur(since * 60)}`;
+        line = `Your aircraft ${outA ? `pushed back at ${esc((i0.origin || {}).iata || from)} at ${hm(outA, oz)}` : `is taxiing at ${esc(from)}`} and hasn't taken off yet${inE ? `. At the gate here ~${hm(inE, tz)}` : ""}.`;
+      }
     } else if (ph === "cancelled" || ph === "diverted") { pill = ph === "cancelled" ? "Cancelled" : "Diverted"; ptn = "red"; line = `The inbound flight was ${ph}.`; }
     else { pill = "Not departed"; ptn = tone(minsLate(best(it, "out"), (it.out || {}).scheduled), !!((it.out || {}).estimated || (it.out || {}).actual)); line = `Your aircraft is due from ${esc(from)}${inE ? ` at ${hm(inE, tz)}` : ""}.`;
       if (i0.edct && i0.edct.at) { const oz = (i0.origin || {}).tz; pill = `EDCT ${hm(i0.edct.at, oz)}`; ptn = "amber"; line += ` It has an EDCT out of ${esc((i0.origin || {}).iata || from)}: ${hm(i0.edct.at, oz)} ${esc(tzAbbr(i0.edct.at, oz))}${i0.edct.for ? ` (${esc(i0.edct.for)} program)` : ""}.`; } }
@@ -1433,12 +1439,13 @@
     const turn = leg.turn, minTurn = (STATE.settings || {}).min_turn_minutes || 30;
     const tcls = turn == null ? "" : turn < 0 ? "bad" : turn < minTurn ? "tight" : "";
     const landed = !!((it.in || {}).actual);
-    const tpct = landed ? 100 : turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
+    const tpct = landed || (turn != null && turn < 0) ? 100 : turn == null ? 0 : Math.max(4, Math.min(100, (turn / Math.max(minTurn * 2, 60)) * 100));
     let tl = `<a class="tl-row me" href="#/leg/${leg.id}"><span class="tl-up">${IC.dep}</span><b>This Flight</b><span class="${lateTone(tone(dm, T.outKnown))}">${esc(me)}</span></a>`;
     rot.slice(0, 3).forEach((r, i) => {
       const o = r.origin || {}, d = r.destination || {}, rt = r.times || {};
       const rin = best(rt, "in"), rm = minsLate(rin, (rt.in || {}).scheduled), rk = !!((rt.in || {}).actual || (rt.in || {}).estimated);
       const sub = r.phase === "arrived" ? `Arrived ${hm(rin, d.tz)}` : ["airborne", "landed"].includes(r.phase) ? `Arrives ${hm(rin, d.tz)}`
+        : r.phase === "taxi_out" ? `Taxiing${(rt.out || {}).actual ? ` since ${hm(rt.out.actual, o.tz)}` : ""} · arrives ${hm(rin, d.tz)}`
         : r.phase === "cancelled" ? "Cancelled" : `Departs ${hm(best(rt, "out"), o.tz)}${r.edct && r.edct.at ? ` · EDCT ${hm(r.edct.at, o.tz)}` : ""}`;
       tl += `<div class="tl-node"><i></i>${esc(d.iata || "")}</div>
         <a class="tl-row" href="#/aircraft/${leg.id}/${i}"><div><b>${esc(cityOf(o, o.iata))} to ${esc(cityOf(d, d.iata))}</b><span>${esc(r.display_ident || "")} · ${esc(sub)}</span></div>
@@ -1451,7 +1458,7 @@
       <div class="ib-head"><b>Inbound Aircraft</b><span>${esc([i0.tail, i0.aircraft_type].filter(Boolean).join(" · "))}</span></div>
       <span class="ib-pill ${ptn}">${esc(pill)}</span>
       <p class="ib-line">${line}</p>
-      ${turn != null && leg.phase === "scheduled" ? `<div class="turnbar ${tcls}"><div class="bar"><span style="width:${tpct}%"></span></div><div class="num">${fdur(turn * 60)} turn</div></div>` : ""}
+      ${turn != null && leg.phase === "scheduled" ? `<div class="turnbar ${tcls}"><div class="bar"><span style="width:${tpct}%"></span></div><div class="num">${turn < 0 ? `lands ${fdur(-turn * 60)} after you're due out` : `${fdur(turn * 60)} turn`}</div></div>` : ""}
       <div class="tl">${tl}</div></div>`;
   }
   // Each of the four times, what kind it is (actual, estimate, schedule) and who it's from:

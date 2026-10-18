@@ -106,7 +106,7 @@ def problems(leg, cfg, nas_items, rules=None):
             t = turn_minutes(leg)
             if t is not None and t < min_turn and iph != "arrived":
                 out.append({"level": "warn" if t >= 0 else "critical",
-                            "text": f"Short turn: {mins(t)}"})
+                            "text": f"Short turn: {mins(t)}" if t >= 0 else f"Inbound lands {mins(-t)} after your departure"})
     if ph not in ("arrived", "cancelled"):
         for n in nas_for(leg, nas_items):
             if n["kind"] == "delay":
