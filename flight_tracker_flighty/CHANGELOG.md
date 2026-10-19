@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.28.6
+- /leaflet/: ground delay programs and ground stops shade their centers again. Each center's low and high altitude boundaries are one shape, and Leaflet filled it "even-odd", so wherever the two overlap (almost everywhere) the shading cancelled out and only the outlines showed. They're now filled as one combined area, like the main app.
+
 ## 4.28.5
 - /leaflet/: routes no longer jump around during a camera move. Redrawing them mid-move (4.28.2) landed a frame behind the camera. Now, once an airport/route camera move has zoomed more than a level, the routes and dots fade out for the rest of the move and come back drawn sharp where it stops, so there's no stretched giant dot either. Pinches and drags never hide them.
 - /leaflet/: faster camera moves: about a second at most, even zooming from the whole coast down to an airport (was up to 2 s).

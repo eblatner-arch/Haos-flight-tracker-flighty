@@ -1933,6 +1933,8 @@
   // Lines and dots go on canvases (one per pane, redrawn once a move ends, scaled by the browser
   // while it moves). Longitudes are unwrapped along each line, so a route over the Pacific doesn't
   // shoot back across the whole map.
+  // outer rings all turned the same way (by their signed area), for a "nonzero" fill to be their union
+  const sameTurn = (r, on) => { if (!on) return r; let a = 0; for (let i = 0, n = r.length; i < n; i++) { const p = r[i], q = r[(i + 1) % n]; a += p[1] * q[0] - q[1] * p[0]; } return a < 0 ? r.slice().reverse() : r; };
   const unwrap = (coords) => { const out = []; let prev = null; for (const c of coords) { let x = c[0]; if (prev != null) { while (x - prev > 180) x -= 360; while (x - prev < -180) x += 360; } out.push([c[1], x]); prev = x; } return out; };
   const REND = {};
   const rend = (pane) => REND[pane] || (REND[pane] = L.canvas({ pane, padding: 0.4 }));
@@ -1942,7 +1944,9 @@
   // How each source looks (MapLibre's paint, by hand). A function of the feature's properties; the
   // array form draws more than one line per feature (an outline under a line).
   const VSTY = {
-    artcc: { pane: "artcc", s: (p) => [{ color: p.c, weight: p.w ?? 1, opacity: p.lo ?? 0.8, fillColor: p.c, fillOpacity: p.o ?? 0.2, fill: true }] },
+    // a center's low and high altitude shapes are one feature: filled as a union ("nonzero", every ring
+    // turned the same way), so where they overlap the shading stays instead of cancelling out
+    artcc: { pane: "artcc", s: (p) => [{ color: p.c, weight: p.w ?? 1, opacity: p.lo ?? 0.8, fillColor: p.c, fillOpacity: p.o ?? 0.2, fill: true, fillRule: "nonzero" }] },
     plan: { pane: "overlayPane", s: (p) => [{ color: p.c || css("--route"), weight: 2, opacity: p.o ?? 0.6, dashArray: "5 5", lineCap: "butt" }] },
     routes: { pane: "overlayPane", s: (p) => [{ color: p.c || css("--route"), weight: p.w || 2.4, opacity: 0.92 }] },
     track: { pane: "overlayPane", s: (p) => [...(p.own === 1 ? [{ color: "#04122e", weight: 7.5, opacity: 0.45 }] : []), { color: p.c || css("--route"), weight: p.w || 4, opacity: p.o ?? 1 }] },
@@ -1964,7 +1968,7 @@
       else if (g.type === "LineString") out.push(L.polyline(unwrap(g.coordinates), { ...opt, fill: false }));
       else if (g.type === "MultiLineString") out.push(L.polyline(g.coordinates.map(unwrap), { ...opt, fill: false }));
       else if (g.type === "Polygon") out.push(L.polygon(g.coordinates.map(unwrap), opt));
-      else if (g.type === "MultiPolygon") out.push(L.polygon(g.coordinates.map((p) => p.map(unwrap)), opt));
+      else if (g.type === "MultiPolygon") out.push(L.polygon(g.coordinates.map((p) => p.map((r, i) => sameTurn(unwrap(r), opt.fillRule === "nonzero" && i === 0))), opt));
     }
     return out;
   }
