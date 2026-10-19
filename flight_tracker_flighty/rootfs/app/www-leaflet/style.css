@@ -1082,3 +1082,8 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 /* long camera flights: routes and dots fade out mid-zoom (they'd be stretched) and come back sharp */
 #map canvas:not(.ft-live) { transition: opacity .18s ease; }
 #map.ft-flyfar canvas:not(.ft-live) { opacity: 0; transition: opacity .1s ease; }
+
+/* opening the app: the map and sheet appear together, once your routes are framed and the first
+   imagery is in (at most 1.5 s), instead of a blank map, then routes, then imagery, then a nudge */
+body.booting #map, body.booting #app, body.booting #top { opacity: 0; }
+body.boot-fade #map, body.boot-fade #app, body.boot-fade #top { transition: opacity .35s ease; }

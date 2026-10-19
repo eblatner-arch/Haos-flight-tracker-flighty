@@ -1759,6 +1759,20 @@
   // everywhere stay in MapLibre's (512 px world at zoom 0), which is Leaflet's minus one.
   // ================================================================================================
   const MAP_EL = document.getElementById("map");
+  // ---------- opening the app ----------
+  // body starts "booting" (map and sheet hidden). They fade in together once the routes have been
+  // framed and the first satellite tiles have loaded, or after 1.5 s whatever happens, or at once on a
+  // page with no map.
+  const BOOT = { done: false, tiles: false };
+  function bootDone() {
+    if (BOOT.done) return;
+    BOOT.done = true;
+    document.body.classList.add("boot-fade");
+    document.body.classList.remove("booting");
+    setTimeout(() => document.body.classList.remove("boot-fade"), 600);
+  }
+  const bootCheck = () => { if (!BOOT.done && GL.everFit && BOOT.tiles) requestAnimationFrame(bootDone); };
+  setTimeout(bootDone, 1500);
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
   const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [],
     bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, sig: {}, leg: null, ctl: null, pad: { top: 0, bottom: 0, left: 0, right: 0 } };
@@ -1899,6 +1913,8 @@
     const under = seams(new T(url, { ...common, tileSize: 512, zoomOffset: -1, minNativeZoom: 1, maxNativeZoom: 18, keepBuffer: 1, zIndex: 0, className: "ft-under" }));
     const top = seams(new T(url, { ...common, ...size, keepBuffer: 2, zIndex: 1, className: "ft-base",
       attribution: sat ? "&copy; Esri, Maxar &middot; Natural Earth" : "&copy; OpenStreetMap &copy; CARTO" }));
+    top.on("loading", () => { BOOT.tiles = false; });
+    top.on("load", () => { BOOT.tiles = true; bootCheck(); });
     if (LM) { LM.getPane("tilePane").style.opacity = ""; MAP_EL.classList.toggle("ft-sat", sat); }
     return L.layerGroup([under, top]);
   }
@@ -2534,7 +2550,7 @@
       if (GL.view !== view) return;
       const g = document.querySelector(".sheet-gap"), y = g ? Math.round(g.getBoundingClientRect().bottom) : 0;
       still = y === last ? still + 1 : 0; last = y;
-      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = GL.everFit || GL.bounds.length > 0; return; }
+      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = GL.everFit || GL.bounds.length > 0; bootCheck(); return; }
       GL.fitRaf = requestAnimationFrame(tick);
     };
     GL.fitRaf = requestAnimationFrame(tick);
@@ -3715,6 +3731,7 @@
       document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
       morphing = route === lastRoute && $root.childElementCount > 0;
       document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
+      if (!document.body.classList.contains("sheetmode")) requestAnimationFrame(bootDone);   // no map on this page
       const m = route.match(/^#\/leg\/([\w-]+)/);
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
       const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);

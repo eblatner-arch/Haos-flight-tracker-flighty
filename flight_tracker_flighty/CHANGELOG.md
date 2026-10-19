@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.29.1
+- /leaflet/: a calmer start. Opening the app used to show a blank dark map, then the routes on their own, then the satellite popping in, then the sheet nudging into place. Now the map and the sheet stay hidden for that moment and fade in together once your routes are framed and the first imagery has loaded (never more than 1.5 s; pages without a map show at once).
+
 ## 4.29.0
 - /leaflet/: routes, your track, the filed route, fixes and airport dots are now drawn live, like the MapLibre map: redrawn in the same frame as every drag, pinch and camera move, at their real size the whole time. No more stretching mid-zoom, giant dots, fading out during long zooms, or catching up a moment after the map stops. (Borders, center boundaries and airport diagrams still draw the old way.)
 
