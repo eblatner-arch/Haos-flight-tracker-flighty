@@ -42,6 +42,9 @@ DATA_DIR = os.environ.get("FT_DATA", "/data")
 LIVERY_DIR = os.path.join(DATA_DIR, "livery")
 SHOT_DIR = os.environ.get("FT_SHOTS", "/share/flight_tracker_flighty")
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
+# A second copy of the app at /leaflet/ (the same add-on, same data), drawing its map with Leaflet
+# instead of MapLibre, to compare the two. Files not in www-leaflet come from www.
+WWW_L = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www-leaflet")
 PORT = int(os.environ.get("FT_PORT", "8099"))
 VERSION = os.environ.get("FT_VERSION", "dev")
 SUPERVISOR = os.environ.get("FT_SUPERVISOR_URL", "http://supervisor")
@@ -3783,7 +3786,7 @@ STATIC = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=
 # phone keeps those for a year and only re-checks index.html (a 304 when nothing changed).
 _FILES = {}
 _COMPRESSIBLE = ("text/", "application/json", "application/manifest+json", "image/svg+xml")
-_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|maplibre-gl\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
+_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|maplibre-gl\.(?:js|css)|leaflet\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
 
 
 def static_file(full):
@@ -3800,14 +3803,23 @@ def static_file(full):
     return hit
 
 
-def versioned_index():
-    page = static_file(os.path.join(WWW, "index.html"))
-    if page.get("versioned") and all(static_file(os.path.join(WWW, n))["etag"] == t for n, t in page["deps"].items()):
+def web_file(name, www=WWW):
+    """A web file's path: from www-leaflet first when serving the Leaflet copy, else www."""
+    if www != WWW:
+        p = os.path.join(www, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(WWW, name)
+
+
+def versioned_index(www=WWW):
+    page = static_file(web_file("index.html", www))
+    if page.get("versioned") and all(static_file(web_file(n, www))["etag"] == t for n, t in page["deps"].items()):
         return page["versioned"]
     deps = {}
 
     def add(m):
-        full = os.path.join(WWW, m.group(1))
+        full = web_file(m.group(1), www)
         if not os.path.isfile(full):
             return m.group(1)
         f = static_file(full)
@@ -3865,7 +3877,25 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj).encode()
         self._send(200, body, "application/json", "no-cache", '"' + hashlib.sha1(body).hexdigest()[:16] + '"')
 
+    def _leaflet(self):
+        """/leaflet/... is the Leaflet copy of the app: same API underneath."""
+        p = self.path.split("?", 1)[0]
+        if p == "/leaflet" or p.startswith("/leaflet/"):
+            self.path = self.path[len("/leaflet"):] or "/"
+            if not self.path.startswith("/"):
+                self.path = "/" + self.path
+            self.www = WWW_L
+        else:
+            self.www = WWW
+
     def do_GET(self):
+        if self.path.split("?", 1)[0] == "/leaflet":   # the page needs the trailing slash for its relative links
+            self.send_response(301)
+            self.send_header("Location", "leaflet/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._leaflet()
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             path = "/index.html"
@@ -3997,9 +4027,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "no screenshot"})
         name = os.path.basename(path)
         if name == "index.html":
-            pg = versioned_index()
+            pg = versioned_index(self.www)
             return self._send(200, pg["body"], pg["ctype"], "no-cache", pg["etag"], pg)
-        p = os.path.join(WWW, name)
+        p = web_file(name, self.www)
         ext = os.path.splitext(name)[1]
         if ext in STATIC and os.path.isfile(p):
             f = static_file(p)
@@ -4051,6 +4081,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(n) if n else b""
 
     def do_POST(self):
+        self._leaflet()
         path = self.path.split("?", 1)[0]
         if path == "/api/history/import":
             try:

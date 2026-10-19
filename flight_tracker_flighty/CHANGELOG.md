@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.27.0
+- Test: the whole app again at **/leaflet/** (e.g. https://ericsflights.duckdns.org:8090/leaflet/), drawing its map with Leaflet instead of MapLibre, to compare side by side. Same add-on, same data and alerts; nothing about the normal app changes. Add it to the Home Screen as its own icon ("Flighty L").
+  - A flat map (no globe). The satellite tiles are plain pictures the browser moves and scales itself: while the camera moves, the ones already there are stretched, and sharp ones load where it stops.
+  - Everything else carried over: routes, filed route and fixes, the flown track, airplanes (yours, the inbound, everyone else's), place names and borders, the night side, NOAA/RainViewer radar, airport diagrams with runway/taxiway/gate labels, surface traffic, FAA program maps, Passport, the trip-map download and saved tiles (kept by the service worker now).
+  - Map sharpness there: Full = sharp on a Retina screen (four times the tiles), Balanced = standard, Fast = a quarter of the tiles. No Map shape setting (it's always flat).
+
 ## 4.26.0
 - Smoother long zooms (the airport buttons, the locate button, zooming out to your routes): while the camera moves the map keeps showing the imagery it already has, stretched, and refreshes it only every 3 zoom levels, instead of loading and drawing every zoom level it passes for a split second. The sharp imagery loads where it stops (usually already on the phone). Touching the map ends it at once.
 - Airport diagrams are ready before you zoom in: both of the flight's airports are put on the map as soon as its page opens (drawn from zoom 12.5), instead of being fetched and built after the camera stops.

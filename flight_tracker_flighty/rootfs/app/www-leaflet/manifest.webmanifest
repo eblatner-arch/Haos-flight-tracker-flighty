@@ -1,0 +1,39 @@
+{
+  "name": "Flight Tracker Flighty (Leaflet)",
+  "short_name": "Flighty L",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "id": "./?leaflet",
+  "scope": "./",
+  "description": "Flighty-style tracking for your crew schedule",
+  "orientation": "portrait",
+  "categories": [
+    "travel"
+  ]
+}
