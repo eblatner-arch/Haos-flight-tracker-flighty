@@ -476,23 +476,20 @@
           ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
         </div>`).join("")}${more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${more} older</button>` : ""}</div>`, false);
   }
-  // your inbound's lookups live in your flight's log: pick out the ones about it (its FlightAware
-  // page, its transponder) and what they changed on your flight (Inbound, Inbound due, Tail)
-  function inboundHist(ac) {
-    if (ac.n !== 0) return [];
+  // an inbound leg's Lookup Log, in exactly your flight's format: what the FAA, towers and the
+  // airline said about it (one entry each, as on your flight), plus, for your inbound, its lookups
+  // from your flight's log (its FlightAware page, its transponder) and what they changed
+  function inboundHist(ac, f) {
+    const swimH = (f.log || []).map((x) => ({ at: x.at, sources: [x.src || "FAA SWIM"], changes: [], seen: [{ src: x.src || "FAA SWIM", tail: null, note: x.text }] }));
+    if (ac.n !== 0) return swimH;
     const inb = (x) => /\(inbound\)/.test(x), field = (c) => /^Inbound|^Tail$/.test(c.field);
-    return (ac.parent.history || []).map((h) => {
+    const look = (ac.parent.history || []).map((h) => {
       const seen = (h.seen || []).filter((x) => / · inbound /.test(x.src || ""));
       const changes = (h.changes || []).filter(field);
       if (!seen.length && !changes.length && !h.sources.some(inb)) return null;
-      return { ...h, sources: h.sources.filter((x) => inb(x) || seen.some((y) => y.src.startsWith(x))), seen, changes, error: null, note: null };
+      return { ...h, sources: h.sources.filter((x) => inb(x) || (seen.length && /adsb|ADS-B|radar|Transponder/i.test(x))), seen, changes, error: null, note: null };
     }).filter(Boolean);
-  }
-  // what the FAA, towers, surface radar and the airline said about a flight (yours or an inbound leg)
-  function acLog(h, inbound) {
-    return fold("ac-log", "Data Log", `<div class="card">${(h.log || []).length ? h.log.map((x) => `<div class="hl"><div class="hl-t">${hm(x.at)}<span class="faint"> · ${esc(x.src || "")}</span></div><div class="small">${esc(x.text)}</div></div>`).join("")
-      : `<div class="small muted">Nothing from the FAA's feeds for this ${inbound ? "leg" : "flight"} yet${STATE && STATE.swim && STATE.swim.status === "connected" ? "" : " (SWIM isn't connected)"}. Times come from FlightAware until they report it.</div>`}
-      <div class="small faint" style="margin-top:8px">The Times card says who reported each time.${inbound ? " The log is cleared 15 minutes after this leg is at the gate." : ""}</div></div>`, false);
+    return swimH.concat(look).sort((a, b) => b.at - a.at);
   }
   function problemBanners(leg) {
     const nf = notFound(leg) && leg.note && /^Not found/.test(leg.note) ? `<div class="banner warn"><span class="dot warn"></span><div>${esc(leg.note)}</div></div>` : "";
@@ -2959,8 +2956,7 @@
         ${wx ? fold("leg-wx", "METARs", `<div class="card">${wx}</div>`, false) : ""}
         ${nasMinor([leg]).length ? fold("leg-nas", "Other NAS items", nasCard(nasMinor([leg])), false) : ""}
         ${(leg.alerts || []).length ? fold("leg-alerts", "Alerts for This Flight", alertsCard(leg.alerts), false) : ""}
-        ${ac ? acLog(leg.flight, true) : acLog(leg, false)}
-        ${lookupLog(ac ? inboundHist(ac) : leg.history || [], ac ? 0 : leg.history_more)}
+        ${lookupLog(ac ? inboundHist(ac, leg.flight) : leg.history || [], ac ? 0 : leg.history_more)}
         ${leg.shot ? fold("leg-shot", "Latest Screenshot", `<div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('details').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>`, false) : ""}
       </section>`;
     if (ac) {

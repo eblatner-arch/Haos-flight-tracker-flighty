@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.20.2
+- An inbound leg's page has a Lookup Log, laid out exactly like your flight's: dated entries, source pills, the lines each source reported and the changes (or "No changes"). It replaces the inbound's Data Log. Each FAA, tower, surface-radar or airline message is an "FAA SWIM" entry, and your inbound's page also lists its own lookups (its FlightAware page, its transponder).
+- Your flight's page is back to just the Lookup Log (no separate Data Log), with every FAA SWIM line now kept. The dedupe that dropped "landing est. 19:49" after "19:48" no longer applies to SWIM lines.
+
 ## 4.20.1
 - Your flight's page now has the same Data Log as an inbound leg's: what the FAA, the towers, surface radar and the airline said, line by line, as it comes in. Before, these lines went into the Lookup Log, whose transponder dedupe turned digits into "#", so "landing est. 19:48" and then "19:49" read as the same line and every update after the first was dropped.
 - Your inbound's page now has a Lookup Log too: its FlightAware page and transponder checks, and what they changed (Inbound, Inbound due, Tail). Both pages show Data Log then Lookup Log.
