@@ -3662,9 +3662,17 @@ def api_leg(lid, rotation_tracks=False, log_all=False):
         if same:
             st = history.stats(same)
             out["route_stats"] = {k: st[k] for k in ("flights", "on_time_pct", "avg_arr_delay")}
+        counts = {}
+        for x in history.flights():
+            t_ = (x.get("tail") or "").upper()
+            if t_:
+                counts[t_] = counts.get(t_, 0) + 1
         tail = ((L.get("flight") or {}).get("tail") or "").upper()
         if tail:
-            out["tail_count"] = sum(1 for x in history.flights() if (x.get("tail") or "").upper() == tail)
+            out["tail_count"] = counts.get(tail, 0)
+        for r in out.get("rotation") or []:   # the inbound legs' airplanes too
+            if (r.get("tail") or "").strip():
+                r["tail_count"] = counts.get(r["tail"].upper(), 0)
     return out
 
 

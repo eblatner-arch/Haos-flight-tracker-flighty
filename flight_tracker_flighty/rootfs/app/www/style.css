@@ -1051,3 +1051,8 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .hl { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .hl:last-of-type { border-bottom: 0; }
 .hl-t { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+
+/* the airplane's real side view on the Aircraft card */
+.ac-photo { display: block; width: 100%; height: auto; margin: 14px 0 6px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
+.ac-count { margin-top: 6px; }
+.ac-count b { color: var(--text); }

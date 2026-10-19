@@ -4,7 +4,7 @@
 // always goes to the add-on. Files are named by their content (?v=...), so an old page always finds
 // the files it was built with; older copies are dropped as new ones arrive.
 const SHELL = "ft-shell-v1";
-const ASSET = /^(app\.js|style\.css|maplibre-gl\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest)$/;
+const ASSET = /^(app\.js|style\.css|maplibre-gl\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|ac-[\w-]+\.png|manifest\.webmanifest)$/;
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();

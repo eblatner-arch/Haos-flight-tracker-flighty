@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.21.0
+- The Aircraft card shows the real airplane for United's 737s: cut-out side views of the 737-800 (also used for the -700 for now), 737 MAX 8, 737-900 and 737 MAX 9 (also the MAX 10). Other types keep the drawing.
+- How many times you've flown that tail: "You've flown N38459 3 times before" or "First time on N38459", on your flight and on each inbound leg's page.
+- Inbound legs show the aircraft's name (Boeing 737-900) instead of just the type code.
+
 ## 4.20.2
 - An inbound leg's page has a Lookup Log, laid out exactly like your flight's: dated entries, source pills, the lines each source reported and the changes (or "No changes"). It replaces the inbound's Data Log. Each FAA, tower, surface-radar or airline message is an "FAA SWIM" entry, and your inbound's page also lists its own lookups (its FlightAware page, its transponder).
 - Your flight's page is back to just the Lookup Log (no separate Data Log), with every FAA SWIM line now kept. The dedupe that dropped "landing est. 19:49" after "19:48" no longer applies to SWIM lines.

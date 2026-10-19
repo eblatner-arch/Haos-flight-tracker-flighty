@@ -451,7 +451,7 @@
       nas: (leg.nas || []).filter((x) => x.airport === d.iata || (x.airport === o.iata && (x.kind === "closure" || x.dir === "dep"))).map((x) => ({ ...x, impact: [] })),
       wx: leg.wx || {}, fa_id: h.fa_id, source: "FlightAware", updated: h.fetched, watching: true,
       finished: ["arrived", "cancelled", "diverted"].includes(h.phase), history: [], alerts: [], chain: [],
-      live: n === 0 ? leg.inbound_live : null,
+      live: n === 0 ? leg.inbound_live : null, tail_count: h.tail_count,
       _ac: { parent: leg, id, n, rot },
     };
     drawLeg(vl.id, vl);
@@ -1520,13 +1520,28 @@
     <path d="M30 55 44 51l2 5-18 2z" fill="#2a3242"/>
     <g fill="#3a4354">${Array.from({ length: 26 }, (_, i) => `<rect x="${70 + i * 9.4}" y="51" width="4.2" height="5" rx="1.6"/>`).join("")}</g>
     <path d="M24 66c40 3 230 1 340-6" stroke="#cdd3dd" stroke-width="1"/></svg>`;
+  // United's real side views, cut out: 737-800 (also for the -700 until there's a -700 picture),
+  // MAX 8, -900 and MAX 9 (also MAX 10). Other types and airlines keep the drawing.
+  function acArt(leg) {
+    const f = leg.flight || {}, t = (f.aircraft_type || "").toUpperCase(), nm = (f.aircraft_name || "").toUpperCase();
+    if (airlineCode(leg) !== "UA") return "";
+    const k = /^B3[9X]M$/.test(t) || /MAX ?(9|10)/.test(nm) ? "b39m" : t === "B38M" || /MAX ?8/.test(nm) ? "b38m"
+      : t === "B739" || /737-9\d\d/.test(nm) ? "b739" : /^B73[78]$/.test(t) || /737-[78]\d\d/.test(nm) ? "b738" : "";
+    return k ? `<img class="ac-photo" src="ac-${k}.png" alt="" loading="lazy" decoding="async">` : "";
+  }
+  const TYPE_NAME = { B737: "Boeing 737-700", B738: "Boeing 737-800", B739: "Boeing 737-900", B38M: "Boeing 737 MAX 8", B39M: "Boeing 737 MAX 9",
+    B3XM: "Boeing 737 MAX 10", B752: "Boeing 757-200", B753: "Boeing 757-300", B763: "Boeing 767-300", B764: "Boeing 767-400",
+    B772: "Boeing 777-200", B77W: "Boeing 777-300ER", B788: "Boeing 787-8", B789: "Boeing 787-9", B78X: "Boeing 787-10",
+    A319: "Airbus A319", A320: "Airbus A320", A20N: "Airbus A320neo", A21N: "Airbus A321neo", A321: "Airbus A321",
+    E75L: "Embraer 175", E175: "Embraer 175", CRJ2: "CRJ-200", CRJ7: "CRJ-700", CRJ9: "CRJ-900" };
   function aircraftF(leg) {
-    const f = leg.flight || {}, name = f.aircraft_name || f.aircraft_type;
+    const f = leg.flight || {}, name = f.aircraft_name || TYPE_NAME[(f.aircraft_type || "").toUpperCase()] || f.aircraft_type;
     if (!name && !f.tail) return "";
+    const n = leg.tail_count;
     return `<div class="gk-card acard"><div class="ac-k">Aircraft</div><div class="ac-name">${esc(name || "Aircraft")}</div>
-      <div class="ac-sub">${esc([f.tail, f.aircraft_name && f.aircraft_type ? f.aircraft_type : "", f.tail_source ? `tail from ${f.tail_source}` : ""].filter(Boolean).join(" · "))}</div>
-      ${planeSide(alColor(airlineCode(leg)))}
-      ${leg.tail_count ? `<div class="ac-sub">You've flown ${esc(f.tail || "")} ${leg.tail_count} time${leg.tail_count === 1 ? "" : "s"} before.</div>` : ""}</div>`;
+      <div class="ac-sub">${esc([f.tail, name !== f.aircraft_type && f.aircraft_type ? f.aircraft_type : "", f.tail_source ? `tail from ${f.tail_source}` : ""].filter(Boolean).join(" · "))}</div>
+      ${acArt(leg) || planeSide(alColor(airlineCode(leg)))}
+      ${f.tail && n != null ? `<div class="ac-sub ac-count">${n ? `You've flown <b>${esc(f.tail)}</b> ${n} time${n === 1 ? "" : "s"} before.` : `First time on <b>${esc(f.tail)}</b>.`}</div>` : ""}</div>`;
   }
 
   // ---------- Passport ----------
