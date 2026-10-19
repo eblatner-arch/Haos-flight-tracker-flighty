@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.24.2
+- Map for your trips resumes by itself when the app comes back on screen (after swiping home, locking the phone or switching apps), skipping what's already saved, instead of waiting for the next fresh start.
+
 ## 4.24.1
 - Map for your trips downloads much faster on your home network: 8 tiles at a time with no pauses (the add-on tells the phone when it's on a home address; Tailscale counts as away). Away it stays at 2 at a time, gently, so the map you're looking at comes first.
 - Map sharpness Balanced and Fast now also load half as many map tiles (256 px instead of 181), so the map fills in faster; Full is unchanged. Switching re-loads the map.

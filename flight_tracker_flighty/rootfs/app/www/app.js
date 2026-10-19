@@ -2400,6 +2400,11 @@
     map.on("moveend", () => { if (!camAnim) placeZoomFix(); });
     setTimeout(warmWorld, 8000);
     setTimeout(warmTrips, 20000);
+    // back on screen (after swiping home, locking, another app): pick up where it stopped, a few
+    // seconds in so the screen you return to loads first. Finished runs still wait their 6 hours.
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) setTimeout(() => { if (!document.hidden) warmTrips(); }, 4000);
+    });
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
