@@ -1791,16 +1791,24 @@
       for (const t of Object.keys((LIV && LIV.tails) || {})) { try { await fetch(`api/livery/${t}.png`); } catch {} }
       const c = await caches.open(TC_NAME), list = [...want];
       WARMT.total = list.length; WARMT.done = 0;
-      let got = 0;
-      for (const k of list) {
-        if (document.hidden || lowData()) break;   // only while the app is open and data saver is off
-        const [z, y, x] = k.split("/");
-        const u = ESRI_IMG.replace("{z}", z).replace("{y}", y).replace("{x}", x);
-        WARMT.done++;
-        if (await c.match(u)) continue;
-        try { const r = await fetch(u); if (r.ok) { await c.put(u, r); got++; } } catch {}
-        await new Promise((ok) => setTimeout(ok, 40));   // gently, behind everything else
-      }
+      // On your home network (the add-on sees the phone's address): 8 at a time, flat out. Away: 2 at a
+      // time with a breath between, so the map you're looking at always comes first.
+      let home = false;
+      try { home = !!(await api("api/net")).home; } catch {}
+      WARMT.home = home;
+      let got = 0, i = 0;
+      const one = async () => {
+        while (i < list.length) {
+          if (document.hidden || lowData()) return;   // only while the app is open and data saver is off
+          const [z, y, x] = list[i++].split("/");
+          const u = ESRI_IMG.replace("{z}", z).replace("{y}", y).replace("{x}", x);
+          WARMT.done++;
+          if (await c.match(u)) continue;
+          try { const r = await fetch(u); if (r.ok) { await c.put(u, r); got++; } } catch {}
+          if (!home) await new Promise((ok) => setTimeout(ok, 40));
+        }
+      };
+      await Promise.all(Array.from({ length: home ? 8 : 2 }, one));
       if (WARMT.done >= WARMT.total) localStorage.setItem("ft-warm-trips", JSON.stringify({ at: Date.now(), tiles: list.length, fetched: got }));
     } catch {} finally { WARMT.running = false; }
   }
@@ -1903,7 +1911,8 @@
     // worst case is 2x and the usual ~1.4x, for twice the tiles; 128 px was sharp but 4x the tiles
     // (stutter, black holes). Data saver: 512, a quarter of the downloads. Google's tiles are 512 px
     // pictures already: 256 is sharp.
-    const ts = goo ? 256 : low ? 512 : 181;
+    // Map sharpness Balanced or Fast: 256, half the tiles (they're drawn at fewer pixels anyway).
+    const ts = goo ? 256 : low ? 512 : pref("ft-mapq", "full") === "full" ? 181 : 256;
     // A coarse copy of the imagery underneath (2 zoom levels lower, at most z8: a handful of tiles,
     // cached): while you drag, anything not loaded yet shows a softer earth instead of black.
     // At most zoom 3 (85 tiles for the whole world, kept on the phone, see warmWorld): something is
@@ -3422,7 +3431,7 @@
         <div class="gl-row"><span>Map shape<small class="gl-sub">Flat is lighter to draw: smoother dragging and zooming</small></span><div class="seg mini">${[["globe", "Globe"], ["flat", "Flat"]].map(([k, l]) => `<button type="button" data-proj="${k}" class="${(flatMap() ? "flat" : "globe") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
-        <div class="gl-row"><span>Map for your trips<small class="gl-sub" id="wt-info">${(() => { const w = warmStatus(); return WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}` : w ? `Saved: your routes, every zoom over their airports and the inbound airports, their diagrams, and your Passport airports (${w.tiles.toLocaleString()} tiles) · checked ${ago(w.at / 1000)}` : "Downloads in the background while the app is open"; })()}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="wt-now">Update</button>' : ""}</div>
+        <div class="gl-row"><span>Map for your trips<small class="gl-sub" id="wt-info">${(() => { const w = warmStatus(); return WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}${WARMT.home ? " · home network, full speed" : ""}` : w ? `Saved: your routes, every zoom over their airports and the inbound airports, their diagrams, and your Passport airports (${w.tiles.toLocaleString()} tiles) · checked ${ago(w.at / 1000)}` : "Downloads in the background while the app is open"; })()}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="wt-now">Update</button>' : ""}</div>
         <div class="gl-row"><span>Saved map tiles<small class="gl-sub" id="tc-info">${TC_ON ? "…" : "Needs the https address (the Home Assistant app)"}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="tc-clear">Clear</button>' : ""}</div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Radar source<small class="gl-sub">NOAA: filtered, US and nearby · RainViewer: worldwide, unfiltered</small></span><div class="seg mini">${[["noaa", "NOAA"], ["rv", "RainViewer"]].map(([k, l]) => `<button type="button" data-rs="${k}" class="${radarSrc() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
@@ -3498,7 +3507,7 @@
     $app.querySelectorAll("[data-mapq]").forEach((b) => b.onclick = () => {
       setPref("ft-mapq", b.dataset.mapq);
       $app.querySelectorAll("[data-mapq]").forEach((x) => x.classList.toggle("on", x === b));
-      if (GL.map) { try { GL.map.setPixelRatio(mapPR()); } catch {} }   // takes effect at once
+      if (GL.map) { try { GL.map.setPixelRatio(mapPR()); } catch {} restyleAll(); }   // takes effect at once
     });
     $app.querySelectorAll("[data-proj]").forEach((b) => b.onclick = () => {
       setPref("ft-proj", b.dataset.proj);
@@ -3518,7 +3527,7 @@
     if (wtb) wtb.onclick = () => {
       warmTrips(true);
       const t = setInterval(() => { if (!document.body.contains(wti)) return clearInterval(t);
-        wti.textContent = WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}` : "Done"; if (!WARMT.running) { clearInterval(t); tcShow(); } }, 700);
+        wti.textContent = WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}${WARMT.home ? " · home network, full speed" : ""}` : "Done"; if (!WARMT.running) { clearInterval(t); tcShow(); } }, 700);
     };
     const tcb = document.getElementById("tc-clear");
     if (tcb) tcb.onclick = async () => { tcb.disabled = true; await tileCacheClear(); tcb.disabled = false; tcShow(); };

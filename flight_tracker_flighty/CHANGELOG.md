@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.24.1
+- Map for your trips downloads much faster on your home network: 8 tiles at a time with no pauses (the add-on tells the phone when it's on a home address; Tailscale counts as away). Away it stays at 2 at a time, gently, so the map you're looking at comes first.
+- Map sharpness Balanced and Fast now also load half as many map tiles (256 px instead of 181), so the map fills in faster; Full is unchanged. Switching re-loads the map.
+
 ## 4.24.0
 - United 737 pictures in today's livery from Kyle's AI Works (kyles-ai-works.com): 737-700, -800, -900/-900ER, MAX 8 and MAX 9. The add-on downloads them on first start into /data/livery, cuts them out, and checks each one's paint: only the current livery (blue engines, no gold) is used, older-livery pictures are skipped. Not stored in the repository.
 - The flight page and inbound page show the picture of the exact tail when there is one, else one of the same type. The 737-700 now has its own picture, and the -900 no longer shows the old gold-globe livery.

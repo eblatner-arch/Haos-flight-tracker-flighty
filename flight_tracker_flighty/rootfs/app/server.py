@@ -3961,6 +3961,17 @@ class Handler(BaseHTTPRequestHandler):
                 d.pop("now", None)
                 return self._send_json_tagged(d)
             return self._send(404, {"error": "not found"})
+        if path == "/api/net":   # is the phone on the home network? (a private address, not Tailscale's 100.64/10)
+            ip = self.client_address[0]
+            try:
+                import ipaddress
+                a = ipaddress.ip_address(ip)
+                a = getattr(a, "ipv4_mapped", None) or a
+                home = a.is_private and not a.is_loopback and not any(a in ipaddress.ip_network(n) for n in ("100.64.0.0/10", "fd7a:115c:a1e0::/48")) \
+                    and not self.headers.get("X-Ingress-Path")
+            except ValueError:
+                home = False
+            return self._send(200, {"home": bool(home)})
         if path == "/api/liveries":
             return self._send(200, livery.index(), cache="no-cache")
         m = re.match(r"^/api/livery/(N[0-9A-Z]{1,5})\.png$", path)
