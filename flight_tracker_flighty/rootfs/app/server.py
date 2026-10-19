@@ -3592,6 +3592,10 @@ def leg_summary(L, now, nas, full=False, rotation_tracks=False, log_all=False):
         else:
             tr = f.get("track") or []
             fl["last_position"] = tr[-1] if tr else None
+            # the EDCT is on the list too, so a flight's page opens with it (not after its details load)
+            e = (f.get("swim") or {}).get("edct")
+            if e:
+                fl["swim"] = {"edct": e}
         out["flight"] = fl
     else:
         out["flight"] = None

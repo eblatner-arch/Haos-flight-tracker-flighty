@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.30.2
+- The flight list now carries each flight's EDCT, so the iPhone app's flight page opens with it in the banner instead of switching to it a moment later.
+
 ## 4.30.1
 - An EDCT now shows at the top of the flight, in the status banner, in amber: whether the gate time is still on time, the takeoff slot and how late it is, and which ground delay program or ground stop is holding departures (and why, e.g. volume). It no longer sits as a small line under the departure time.
 - Airplanes on the map have a crisp black outline like Flighty's, and white ones are shaded to silver, so they stand out on concrete and runways.
