@@ -1350,6 +1350,19 @@
       sub = !T.outKnown ? "Scheduled." : dm >= 5 ? `Departs ${fdur(dm * 60)} late${am >= 5 ? `, arrives ${lateLower(am)}` : ""}.` : `On time${am >= 5 ? `, arrives ${lateLower(am)}` : ""}.`;
       cls = T.outKnown ? tone(Math.max(dm, am)) : "";
     }
+    // An EDCT (the FAA's takeoff slot) goes up here, where it changes the plan: the gate time can be on
+    // time while the takeoff isn't. Amber, not red: it's a hold, not a failure.
+    const fl = leg.flight || {}, e = (fl.swim || {}).edct;
+    if (e && e.at && !T.offA && (ph === "scheduled" || ph === "taxi_out" || !ph)) {
+      const offS = ((fl.times || {}).off || {}).scheduled, late = offS ? Math.round((e.at - offS) / 60) : null;
+      const prog = (leg.nas || []).find((n) => (n.kind === "gdp" || n.kind === "gs") && n.airport === (e.for || leg.arr)) ||
+        (leg.nas || []).find((n) => n.kind === "gdp" || n.kind === "gs");
+      const why = prog && prog.reason ? ` for ${prog.reason.toLowerCase()}` : "";
+      const gateLine = ph === "taxi_out" ? "" : !T.outKnown ? "" : dm >= 5 ? `Gate ${fdur(dm * 60)} late. ` : "Gate on time. ";
+      sub = `${gateLine}Takeoff slot (EDCT) ${hm(e.at, leg.dep_ap.tz)}${late != null && late >= 1 ? `, ${fdur(late * 60)} late` : ""}. ` +
+        `Departures to ${e.for || leg.arr} are held${prog && prog.kind === "gs" ? " by a ground stop" : " by a ground delay program"}${why}.`;
+      if (cls !== "red") cls = "amber";
+    }
     // the FAA's delay trend at an airport you're headed into
     const trend = (leg.nas || []).find((n) => n.kind === "delay" && (n.airport === leg.arr || (ph === "scheduled" && n.airport === leg.dep)));
     if (trend) sub += ` ${trend.airport}: ${trend.label}${trend.detail ? ` (${trend.detail})` : ""}.`;
@@ -1378,7 +1391,6 @@
         <div class="ep-time">
           <div class="ep-tl"><span class="ep-big ${lateTone(tn)}">${nf ? "—" : hm(shown, ap.tz)}</span>${!nf && sched && Math.abs(m) >= 1 ? `<s>${hm(sched, ap.tz)}</s>` : ""}</div>
           <div class="ep-sub">${nf ? "Not found" : `<span class="${tn}">${lateWord(m, known)}</span>${rel ? ` • ${esc(rel)}` : ""}${tzs ? ` <span class="ep-tz">${esc(tzs)}</span>` : ""}`}</div>
-          ${dep && !opts.past ? edctLine(leg) : ""}
         </div>
         <div class="ep-gates">
           <div class="ep-badges">${!dep && fa_.baggage ? `<span class="gb">${IC.bag}${esc(fa_.baggage)}</span>` : ""}<span class="gb ${gate ? "" : "none"}">${dep ? IC.dep : IC.arr}${esc(gate || "—")}</span></div>
@@ -2135,9 +2147,18 @@
       }
       const ps = k === "badge" ? s_ * 0.62 : s_, path = new Path2D(PLANE_PATH);
       ctx.save(); ctx.translate(cx - ps / 2, cx - ps / 2); ctx.scale(ps / 24, ps / 24);
-      if (k !== "badge") { ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1; }
-      ctx.fillStyle = k === "badge" ? "#fff" : a || "#fff"; ctx.fill(path);
-      if (k !== "badge") { ctx.shadowColor = "transparent"; ctx.lineWidth = 0.6; ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.stroke(path); }
+      if (k === "badge") { ctx.fillStyle = "#fff"; ctx.fill(path); }
+      else {
+        // Like Flighty: a crisp black outline (about 1.4 px, all outside the shape, so the airplane keeps
+        // its size), a soft shadow under it, and white airplanes shaded to silver so they read on concrete.
+        const u = 24 / ps, col = a || "#fff", white = /^#f{3}(f{3})?$/i.test(col);
+        ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
+        ctx.lineJoin = "round"; ctx.lineWidth = 2.8 * u; ctx.strokeStyle = "rgba(0,0,0,.9)"; ctx.stroke(path);
+        ctx.shadowColor = "transparent";
+        if (white) { const g = ctx.createLinearGradient(4, 2, 20, 22); g.addColorStop(0, "#ffffff"); g.addColorStop(0.55, "#f1f2f4"); g.addColorStop(1, "#b9bec6"); ctx.fillStyle = g; }
+        else ctx.fillStyle = col;
+        ctx.fill(path);
+      }
       ctx.restore();
     } else if (k === "city") {
       const f1 = font(600, 12.5), f2 = font(700, 12.5), w1 = a ? tw(f1, a) + 15 : 0, w2 = tw(f2, b) + 15, h = 22;

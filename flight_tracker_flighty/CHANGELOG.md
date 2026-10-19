@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.30.1
+- An EDCT now shows at the top of the flight, in the status banner, in amber: whether the gate time is still on time, the takeoff slot and how late it is, and which ground delay program or ground stop is holding departures (and why, e.g. volume). It no longer sits as a small line under the departure time.
+- Airplanes on the map have a crisp black outline like Flighty's, and white ones are shaded to silver, so they stand out on concrete and runways.
+
 ## 4.30.0
 - The map is now Leaflet everywhere: the app at the normal address is what you've been testing at /leaflet/ (flat satellite map, routes and dots drawn live, the softer layer under loading tiles, the calm start). MapLibre is gone, along with the 3D globe and the Map shape setting, and the add-on no longer downloads it when it builds.
 - /leaflet/ still opens the same app, so a "Flighty L" Home Screen icon keeps working; you can delete it and use the normal one. Notifications, saved tiles and settings carry over.
