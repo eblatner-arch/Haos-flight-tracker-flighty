@@ -2255,6 +2255,9 @@
     if (GL.opts.kind === "leg") padding.top = Math.max(padding.top, 92);
     GL.fitBottom = padding.bottom;
     const dur = animate ? 900 : 0;
+    // nothing to frame yet (the flights are still loading): stay where the map opened, which is where you
+    // left it last time, rather than flying to a default and then on to your routes a moment later
+    if (!GL.globeView && !b.length && !GL.everFit) return;
     if (GL.globeView || !b.length) {
       const c = GL.globeView || [35, -85];
       camTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding }, dur);
@@ -2340,12 +2343,18 @@
       triggerRepaint: () => {},
     };
   }
+  // The map opens on the last My Flights framing (saved whenever My Flights' map stops moving), so
+  // nothing visibly moves while your flights load.
+  const LAST_CAM = (() => {
+    try { const v = JSON.parse(localStorage.getItem("ft-lcam") || "null"); if (v && Array.isArray(v.c) && isFinite(v.z)) return v; } catch {}
+    return { c: [35, -85], z: 2.6 };
+  })();
   function glInit() {
     if (GL.map) return true;
     if (!window.L || !MAP_EL) return false;
     tcInit();
     LM = L.map(MAP_EL, { zoomControl: false, attributionControl: false, worldCopyJump: true, zoomSnap: 0, zoomDelta: 1,
-      wheelPxPerZoomLevel: 90, minZoom: 1.5, maxZoom: 20, center: [35, -85], zoom: 2.6, inertia: true, bounceAtZoomLimits: false,
+      wheelPxPerZoomLevel: 90, minZoom: 1.5, maxZoom: 20, center: LAST_CAM.c, zoom: LAST_CAM.z, inertia: true, bounceAtZoomLimits: false,
       zoomAnimationThreshold: 6, fadeAnimation: true, markerZoomAnimation: true, tapHold: false });
     for (const [n, zi] of [["night", 250], ["radar", 260], ["lay", 350], ["artcc", 380], ["brd", 390], ["dots", 450], ["planes", 650]]) {
       const p = LM.createPane(n); p.style.zIndex = zi; p.style.pointerEvents = "none";
@@ -2378,6 +2387,7 @@
     LM.on("zoom", () => { if (FLYING && flyZ0 != null && Math.abs(LM.getZoom() - flyZ0) > 1) MAP_EL.classList.add("ft-flyfar"); });
     // a camera flight ends where it stops, or the moment you touch the map
     LM.on("moveend", flyEnd);
+    LM.on("moveend", () => { if (GL.opts.kind !== "home" || !GL.bounds.length) return; try { const c = LM.getCenter(); localStorage.setItem("ft-lcam", JSON.stringify({ c: [+c.lat.toFixed(4), +c.wrap().lng.toFixed(4)], z: +LM.getZoom().toFixed(2) })); } catch {} });
     MAP_EL.addEventListener("touchstart", flyEnd, { passive: true });
     loadPlaces();
     if (radarOn()) glRadar(true);
@@ -2416,7 +2426,7 @@
       if (GL.view !== view) return;
       const g = document.querySelector(".sheet-gap"), y = g ? Math.round(g.getBoundingClientRect().bottom) : 0;
       still = y === last ? still + 1 : 0; last = y;
-      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = true; return; }
+      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = GL.everFit || GL.bounds.length > 0; return; }
       GL.fitRaf = requestAnimationFrame(tick);
     };
     GL.fitRaf = requestAnimationFrame(tick);

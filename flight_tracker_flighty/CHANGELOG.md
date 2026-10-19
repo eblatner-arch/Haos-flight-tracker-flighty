@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.28.7
+- /leaflet/: opening the app no longer starts over Canada and swoops down. The first framing ran before your flights had loaded, so it settled on a default view and then flew to your routes a moment later. Now the map waits for the flights and frames them in one go, and it opens on the last My Flights framing, so usually nothing moves at all.
+
 ## 4.28.6
 - /leaflet/: ground delay programs and ground stops shade their centers again. Each center's low and high altitude boundaries are one shape, and Leaflet filled it "even-odd", so wherever the two overlap (almost everywhere) the shading cancelled out and only the outlines showed. They're now filled as one combined area, like the main app.
 
