@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.23.1
+- Map for your trips now also saves: each trip airport's diagram (runways, taxiways, gates, names) so it draws with no signal; every zoom over those airports from the region (zoom 9) down to the gates (zoom 16), wider at close zooms; and the airports and routes of the aircraft's inbound legs.
+
 ## 4.23.0
 - Settings: rows with a choice (Map sharpness, Map shape, Map, Radar source) now put the label on top and the choice full width underneath, so nothing is cut off on the phone.
 - Map: Mapbox and Google are gone as choices; Satellite (Esri) or Dark. Anyone who had them picked is moved to Satellite.

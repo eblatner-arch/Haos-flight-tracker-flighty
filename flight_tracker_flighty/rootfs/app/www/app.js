@@ -1727,8 +1727,9 @@
   const tc = (u) => TC_ON ? u.replace(/^https:\/\//, "tc://") : u;
   // ---------- the map for your trips, downloaded ahead ----------
   // In the background, a little at a time: the satellite imagery along your upcoming flights' routes
-  // (zoom 3-8, the views My Flights and a flight page open on), close-ups of their airports (to zoom
-  // 15, the airport diagram view), and every airport in your Passport (to zoom 12). Kept on the
+  // (zoom 3-8, the views My Flights and a flight page open on), every zoom above their airports and the
+  // inbound aircraft's airports (9 to 16, region down to the gates), those airports' diagrams, and
+  // every airport in your Passport (to zoom 12). Kept on the
   // phone with the tiles you've seen, so the map opens complete with no signal. Skips what's already
   // saved, so after the first run it only fetches new trips; runs at most every 6 hours.
   const tileXY = (la, lo, z) => {
@@ -1752,8 +1753,18 @@
         if (!A || !B) continue;
         for (const p of gcPoints(A, B, 48)) for (let z = 3; z <= 8; z++) box(p[0], p[1], z, z <= 5 ? 1 : 0);
         close.set(l.dep, A); close.set(l.arr, B);
+        // the inbound aircraft's earlier legs too (their airports and routes)
+        for (const r of [l.inbound, ...(l.chain || [])].filter(Boolean)) {
+          const a = r.origin, b = r.destination, P = ll(a), Q = ll(b);
+          if (P && (a.iata || a.icao)) close.set(a.iata || a.icao, P);
+          if (Q && (b.iata || b.icao)) close.set(b.iata || b.icao, Q);
+          if (P && Q) for (const p of gcPoints(P, Q, 32)) for (let z = 3; z <= 7; z++) box(p[0], p[1], z, 0);
+        }
       }
-      for (const [, p] of close) for (let z = 9; z <= 15; z++) box(p[0], p[1], z, z <= 12 ? 1 : 2);
+      // above each airport: every zoom from the region (9) down to the gates (16)
+      for (const [, p] of close) for (let z = 9; z <= 16; z++) box(p[0], p[1], z, z <= 11 ? 1 : z <= 14 ? 2 : 3);
+      // the airport diagrams themselves (runways, taxiways, gates, names), kept with the app's data
+      for (const code of close.keys()) { if (code) { try { await api(`api/airport/${encodeURIComponent(code)}/layout`); } catch {} } }
       // Passport airports
       let pass = null;
       try { pass = JSON.parse(localStorage.getItem("ft-c:api/history") || "null"); } catch {}
@@ -3391,7 +3402,7 @@
         <div class="gl-row"><span>Map shape<small class="gl-sub">Flat is lighter to draw: smoother dragging and zooming</small></span><div class="seg mini">${[["globe", "Globe"], ["flat", "Flat"]].map(([k, l]) => `<button type="button" data-proj="${k}" class="${(flatMap() ? "flat" : "globe") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
-        <div class="gl-row"><span>Map for your trips<small class="gl-sub" id="wt-info">${(() => { const w = warmStatus(); return WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}` : w ? `Saved: your routes, their airports and your Passport airports (${w.tiles.toLocaleString()} tiles) · checked ${ago(w.at / 1000)}` : "Downloads in the background while the app is open"; })()}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="wt-now">Update</button>' : ""}</div>
+        <div class="gl-row"><span>Map for your trips<small class="gl-sub" id="wt-info">${(() => { const w = warmStatus(); return WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}` : w ? `Saved: your routes, every zoom over their airports and the inbound airports, their diagrams, and your Passport airports (${w.tiles.toLocaleString()} tiles) · checked ${ago(w.at / 1000)}` : "Downloads in the background while the app is open"; })()}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="wt-now">Update</button>' : ""}</div>
         <div class="gl-row"><span>Saved map tiles<small class="gl-sub" id="tc-info">${TC_ON ? "…" : "Needs the https address (the Home Assistant app)"}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="tc-clear">Clear</button>' : ""}</div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Radar source<small class="gl-sub">NOAA: filtered, US and nearby · RainViewer: worldwide, unfiltered</small></span><div class="seg mini">${[["noaa", "NOAA"], ["rv", "RainViewer"]].map(([k, l]) => `<button type="button" data-rs="${k}" class="${radarSrc() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
