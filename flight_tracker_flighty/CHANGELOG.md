@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.28.4
+- /leaflet/: fixes 4.28.3 turning the map white and Safari closing the page ("A problem repeatedly occurred") when zooming out. That version held far too much for iPhone Safari's memory: a whole-earth layer stretched up to 128 times its size, a wide ring of extra tiles at every zoom, and the satellite dimmed by fading the whole tile layer, which makes Safari draw every layer into one huge picture while zooming. All three are gone: the softer layer under the sharp one is now a single zoom softer with a quarter of the tiles, the ring around the screen is back to normal, and the satellite is dimmed per tile.
+- /leaflet/: the automatic switch to a new version happens at most once a minute, so a page that can't load can never keep reloading itself.
+
 ## 4.28.3
 - /leaflet/: no more black screen when zooming out from an airport. The whole earth at zoom 3 (saved on the phone the first day) now sits under everything up to a regional view, and the softer imagery layer refreshes every 3 zoom levels during a long camera move, so the map fills in as it pulls back instead of shrinking to a small square.
 - /leaflet/: sharp tiles no longer try to load on every frame of an airport/route camera move. Each new level cancelled the one before, so nothing finished; now they load where the camera stops (dragging still loads as you go).

@@ -1868,24 +1868,21 @@
   // Full lays 128 px tiles of the next zoom (sharp on a Retina screen, four times the tiles), Balanced
   // the usual 256 px, Fast and Data saver 512 px of the zoom before (a quarter of the downloads).
   //
-  // Three layers, bottom to top, so there is never black under the map:
-  //  - the world: the whole earth at zoom 3 (64 tiles, saved on the phone the first day), drawn up to
-  //    a regional view. Whatever else hasn't loaded, this has.
-  //  - coarse: the imagery two zooms softer (1024 px tiles, a sixteenth as many). During a long camera
-  //    flight it refreshes every 3 zoom levels, so zooming out fills in instead of shrinking to a square.
-  //  - sharp: the real thing. Loads while you drag (a wide ring kept in memory, so panning back is
-  //    instant) but waits during camera flights: loading every level on the way only cancelled the
-  //    one before it, and nothing ever finished. It loads where the camera stops, usually from the phone.
+  // Two layers: the sharp one, and under it the same imagery one zoom softer (512 px tiles, a quarter
+  // as many), which shows wherever a sharp tile is still loading. Kept light on purpose: iPhone Safari
+  // closes the page when a map holds too many tiles or one giant stretched picture (4.28.3 did both).
+  //  - dragging loads tiles as you go; a camera flight (airport and route buttons) loads where it stops,
+  //    since loading every level on the way only cancelled the one before
+  //  - the satellite is dimmed per tile (a filter), not by fading a whole layer, which made Safari draw
+  //    every layer into one huge picture during a zoom
   let FLYING = false;
-  const BASE = { under: null, flyZ: null };
   let TilesL = null;
   function tilesClass() {
-    // Leaflet's tile layer, except a camera flight doesn't load tiles on every frame of the move
     return TilesL || (TilesL = L.TileLayer.extend({
       _onMove() {
         if (FLYING) return;
         const t = Date.now();
-        if (t - (this.__mv || 0) < 120) return;
+        if (t - (this.__mv || 0) < 150) return;
         this.__mv = t;
         this._onMoveEnd();
       },
@@ -1895,18 +1892,15 @@
     const sat = mapStyle() !== "dark", q = lowData() ? "fast" : pref("ft-mapq", "full");
     const size = q === "full" ? { tileSize: 128, zoomOffset: 1, maxNativeZoom: 18 } : q === "fast" ? { tileSize: 512, zoomOffset: -1, maxNativeZoom: 20 } : { tileSize: 256, maxNativeZoom: 19 };
     const url = sat ? ESRI_IMG : darkTiles(), T = tilesClass();
-    const common = { subdomains: "abcd", crossOrigin: true, updateWhenZooming: true, updateWhenIdle: false };
+    const common = { maxZoom: 21, subdomains: "abcd", crossOrigin: true, updateWhenZooming: false, updateWhenIdle: false };
     // Safari can leave a hairline between tiles: each one overlaps the next by half a pixel, sized from
-    // its layer's own tiles (128, 256, 512 or 1024 px).
+    // its layer's own tiles (128, 256 or 512 px).
     const seams = (layer) => layer.on("tileloadstart", (e) => { const t = layer.getTileSize(); e.tile.style.width = t.x + 0.5 + "px"; e.tile.style.height = t.y + 0.5 + "px"; });
-    const world = seams(new T(url, { ...common, tileSize: 256, minNativeZoom: 3, maxNativeZoom: 3, maxZoom: 10, keepBuffer: 8, zIndex: 0, className: "ft-world" }));
-    const under = seams(new T(url, { ...common, tileSize: 1024, zoomOffset: -2, minNativeZoom: 2, maxNativeZoom: 17, maxZoom: 21, keepBuffer: 2, zIndex: 1, className: "ft-under" }));
-    const top = seams(new T(url, { ...common, ...size, maxZoom: 21, keepBuffer: 8, zIndex: 2, className: "ft-base",
+    const under = seams(new T(url, { ...common, tileSize: 512, zoomOffset: -1, minNativeZoom: 1, maxNativeZoom: 18, keepBuffer: 1, zIndex: 0, className: "ft-under" }));
+    const top = seams(new T(url, { ...common, ...size, keepBuffer: 2, zIndex: 1, className: "ft-base",
       attribution: sat ? "&copy; Esri, Maxar &middot; Natural Earth" : "&copy; OpenStreetMap &copy; CARTO" }));
-    BASE.under = under;
-    // the dimming goes on the whole tile pane, so the layers underneath can't show through the sharp one
-    if (LM) LM.getPane("tilePane").style.opacity = sat ? 0.86 : 1;
-    return L.layerGroup([world, under, top]);
+    if (LM) { LM.getPane("tilePane").style.opacity = ""; MAP_EL.classList.toggle("ft-sat", sat); }
+    return L.layerGroup([under, top]);
   }
   // The night side as a picture laid over the earth: dark where the sun is down, a soft twilight edge.
   function nightImage() {
@@ -2241,7 +2235,7 @@
     if (!dur) { LM.setView(c, zl, { animate: false }); return; }
     const dz = Math.abs(zl - LM.getZoom());
     if (dz < 0.05) { LM.panTo(c, { animate: true, duration: Math.max(0.3, dur / 1000) }); return; }
-    FLYING = dz >= 1; BASE.flyZ = LM.getZoom();
+    FLYING = dz >= 1;
     LM.flyTo(c, zl, { duration: Math.min(2, Math.max(0.6, (dur / 1000) * (dz > 3 ? 1.5 : 1))), easeLinearity: 0.2 });
   }
   // Fit the page's routes into the part of the screen the sheet doesn't cover (at its middle stop).
@@ -2379,13 +2373,7 @@
       }
     });
     LM.on("zoomend moveend", () => { const z = LM.getZoom(); for (const r of Object.values(REND)) r.__z = z; });
-    // During a camera flight only the coarse layer updates, every 3 zoom levels; the sharp one loads
-    // where it stops. A touch ends the flight (Leaflet stops it) and tiles load normally again.
-    LM.on("zoom", () => {
-      if (!FLYING || !BASE.under || !BASE.under._map) return;
-      const z = LM.getZoom();
-      if (Math.abs(z - BASE.flyZ) >= 3) { BASE.flyZ = z; try { BASE.under._setView(LM.getCenter(), z); } catch {} }
-    });
+    // a camera flight ends where it stops, or the moment you touch the map
     LM.on("moveend", () => { FLYING = false; });
     MAP_EL.addEventListener("touchstart", () => { FLYING = false; }, { passive: true });
     loadPlaces();
@@ -3771,7 +3759,11 @@
       if (e.data && e.data.go) go(e.data.go);
       // The page opens from the phone's copy and the new one is fetched behind it. When that turns out
       // to be a new version: just opened, switch to it now; otherwise the next time the app is hidden.
+      // (once per version, so a page that can't load can never reload itself in a loop)
       if (e.data && e.data.updated) {
+        let seen = null;
+        try { seen = sessionStorage.getItem("ft-updated"); sessionStorage.setItem("ft-updated", String(Date.now())); } catch {}
+        if (seen && Date.now() - Number(seen) < 60000) return;
         if (performance.now() < 5000) location.reload();
         else document.addEventListener("visibilitychange", () => { if (document.hidden) location.reload(); }, { once: true });
       }

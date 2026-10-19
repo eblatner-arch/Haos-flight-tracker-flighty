@@ -1076,3 +1076,5 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .ft-sym img { display: block; max-width: none; }
 /* the satellite tiles: no seams between them while the browser scales them during a zoom */
 .ft-base img.leaflet-tile { outline: 1px solid transparent; }
+/* the satellite, dimmed a touch per tile (cheap for Safari, unlike fading the whole layer) */
+.ft-sat .leaflet-tile-pane img.leaflet-tile { filter: brightness(0.86); }
