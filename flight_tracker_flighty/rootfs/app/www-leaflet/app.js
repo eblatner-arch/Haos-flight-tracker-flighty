@@ -1867,18 +1867,26 @@
   // The base map: Esri satellite (dimmed a touch, like the old map) or CARTO dark. Map sharpness:
   // Full lays 128 px tiles of the next zoom (sharp on a Retina screen, four times the tiles), Balanced
   // the usual 256 px, Fast and Data saver 512 px of the zoom before (a quarter of the downloads).
+  //
+  // Two layers: the sharp one on top, and under it the same imagery two zooms coarser (1024 px tiles,
+  // a sixteenth as many, nearly always already on the phone). Wherever a sharp tile hasn't arrived
+  // yet, the coarse one shows through, so dragging and zooming show blurry earth, never black boxes.
+  // Both load while the camera moves (not only once it stops), and each keeps a wide ring of tiles
+  // around the screen in memory, so panning back is instant.
   function baseLayer() {
     const sat = mapStyle() !== "dark", q = lowData() ? "fast" : pref("ft-mapq", "full");
     const size = q === "full" ? { tileSize: 128, zoomOffset: 1, maxNativeZoom: 18 } : q === "fast" ? { tileSize: 512, zoomOffset: -1, maxNativeZoom: 20 } : { tileSize: 256, maxNativeZoom: 19 };
-    const layer = L.tileLayer(sat ? ESRI_IMG : darkTiles(), {
-      ...size, maxZoom: 21, subdomains: "abcd", crossOrigin: true, opacity: sat ? 0.86 : 1,
-      updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4, className: "ft-base",
-      attribution: sat ? "&copy; Esri, Maxar &middot; Natural Earth" : "&copy; OpenStreetMap &copy; CARTO",
-    });
+    const url = sat ? ESRI_IMG : darkTiles();
+    const common = { maxZoom: 21, subdomains: "abcd", crossOrigin: true, updateWhenZooming: true, updateWhenIdle: false, updateInterval: 120 };
     // Safari can leave a hairline between tiles: each one overlaps the next by half a pixel, sized from
-    // this layer's own tiles (a fixed 256 px drew the 128 px Full tiles at double size, out of place).
-    layer.on("tileloadstart", (e) => { const s = layer.getTileSize(); e.tile.style.width = s.x + 0.5 + "px"; e.tile.style.height = s.y + 0.5 + "px"; });
-    return layer;
+    // its layer's own tiles (128, 256, 512 or 1024 px).
+    const seams = (layer) => layer.on("tileloadstart", (e) => { const t = layer.getTileSize(); e.tile.style.width = t.x + 0.5 + "px"; e.tile.style.height = t.y + 0.5 + "px"; });
+    const under = seams(L.tileLayer(url, { ...common, tileSize: 1024, zoomOffset: -2, minNativeZoom: 2, maxNativeZoom: 17, keepBuffer: 2, zIndex: 0, className: "ft-under" }));
+    const top = seams(L.tileLayer(url, { ...common, ...size, keepBuffer: 8, zIndex: 1, className: "ft-base",
+      attribution: sat ? "&copy; Esri, Maxar &middot; Natural Earth" : "&copy; OpenStreetMap &copy; CARTO" }));
+    // the dimming goes on the whole tile pane, so the coarse layer can't show through the sharp one
+    if (LM) LM.getPane("tilePane").style.opacity = sat ? 0.86 : 1;
+    return L.layerGroup([under, top]);
   }
   // The night side as a picture laid over the earth: dark where the sun is down, a soft twilight edge.
   function nightImage() {
@@ -2338,6 +2346,18 @@
     LM.on("movestart zoomstart", () => { MOVING = true; });
     LM.on("moveend", () => { MOVING = false; placeSymbols(); layoutCheck(); surfaceNow(); });
     LM.on("zoomend", () => { for (const s of Object.values(SRC)) if (s.restyle) s.restyle(); if (GL.lastSurface) paintSurface(GL.lastSurface); });
+    // Lines and dots are drawn once and the browser scales the drawing while the camera moves. Over a
+    // long zoom (an airport button: zoom 3 to 15) that blew a 4 px airport dot up past the whole screen.
+    // Redraw them every half zoom level along the way, so they keep their size the whole trip.
+    LM.on("zoom", () => {
+      const z = LM.getZoom();
+      for (const r of Object.values(REND)) {
+        if (!r._map) continue;
+        if (r.__z == null) r.__z = z;
+        if (Math.abs(z - r.__z) >= 0.5) { r.__z = z; try { r._reset(); } catch {} }
+      }
+    });
+    LM.on("zoomend moveend", () => { const z = LM.getZoom(); for (const r of Object.values(REND)) r.__z = z; });
     loadPlaces();
     if (radarOn()) glRadar(true);
     setTimeout(warmWorld, 8000);

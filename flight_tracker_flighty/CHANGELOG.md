@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.28.2
+- /leaflet/: no more black squares while dragging. Under the sharp satellite imagery there's now a second copy two zooms coarser (a sixteenth of the tiles, nearly always already on the phone), so anywhere a sharp tile is still loading you see the earth, just softer, until it arrives.
+- /leaflet/: tiles load while you drag and zoom, not only once you let go, and a wider ring of them stays in memory around the screen, so panning back is instant.
+- /leaflet/: zooming sharpens on the way in instead of staying blurry until the camera stops.
+- /leaflet/: the airport dots (and route lines) keep their size during long zooms. They were drawn once and stretched with the map, so tapping an airport blew its dot up past the whole screen.
+
 ## 4.28.1
 - /leaflet/: the satellite map no longer looks scrambled. Every tile was drawn 256 px wide, but Full sharpness lays 128 px tiles (and Fast 512 px), so each square showed the wrong piece of the world under the borders and place names. Tiles are now drawn at their real size, still overlapping by half a pixel so no seams show.
 
