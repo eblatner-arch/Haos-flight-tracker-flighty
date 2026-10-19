@@ -1761,7 +1761,7 @@
   const MAP_EL = document.getElementById("map");
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
   const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [],
-    bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, leg: null, ctl: null, pad: { top: 0, bottom: 0, left: 0, right: 0 } };
+    bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, sig: {}, leg: null, ctl: null, pad: { top: 0, bottom: 0, left: 0, right: 0 } };
   let LM = null;   // the Leaflet map
   const mlz = () => LM.getZoom() - 1;   // the zoom in MapLibre's numbers
   const CARTO_DARK = ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png`);
@@ -2154,12 +2154,16 @@
       const v = obj[id], src = SRC[id];
       if (!src) continue;
       if (!v || (Array.isArray(v) && !v.length)) {
-        if (!GL.empty[id]) { src.setData(FC()); GL.empty[id] = true; GL.src[id] = null; }
+        if (!GL.empty[id]) { src.setData(FC()); GL.empty[id] = true; GL.src[id] = null; GL.sig[id] = null; }
         continue;
       }
       const fc = Array.isArray(v) ? FC(v) : v;
       if (fc === GL.src[id]) continue;   // the same (big) collection as last time: leave it
-      src.setData(fc); GL.src[id] = fc; GL.empty[id] = false;
+      // the same lines and dots as already drawn (most live updates change nothing here): leave them,
+      // rather than taking every route off the map and putting it back
+      const sig = Array.isArray(v) ? JSON.stringify(v) : null;
+      if (sig && sig === GL.sig[id] && !GL.empty[id]) { GL.src[id] = fc; continue; }
+      src.setData(fc); GL.src[id] = fc; GL.empty[id] = false; GL.sig[id] = sig;
     }
   }
   // ---------- place names and borders (Esri imagery) ----------
@@ -2240,7 +2244,9 @@
     const dz = Math.abs(zl - LM.getZoom());
     if (dz < 0.05) { LM.panTo(c, { animate: true, duration: Math.max(0.3, dur / 1000) }); return; }
     FLYING = dz >= 1;
-    if (FLYING && GL.flyStart) GL.flyStart();
+    // only the long zooms (an airport button, coast to gates) hide routes and dots mid-move; reframing a
+    // page or a small zoom just lets them scale with the map
+    if (FLYING && dz > 4 && GL.flyStart) GL.flyStart();
     // quick: under a second even for a coast-to-airport zoom (it was up to 2 s)
     LM.flyTo(c, zl, { duration: Math.min(1.1, Math.max(0.5, (dur / 1000) * (dz > 3 ? 1.1 : 0.8))), easeLinearity: 0.2 });
   }
@@ -2384,7 +2390,7 @@
     let flyZ0 = null;
     const flyEnd = () => { FLYING = false; flyZ0 = null; MAP_EL.classList.remove("ft-flyfar"); };
     GL.flyStart = () => { flyZ0 = LM.getZoom(); };
-    LM.on("zoom", () => { if (FLYING && flyZ0 != null && Math.abs(LM.getZoom() - flyZ0) > 1) MAP_EL.classList.add("ft-flyfar"); });
+    LM.on("zoom", () => { if (FLYING && flyZ0 != null && Math.abs(LM.getZoom() - flyZ0) > 2.5) MAP_EL.classList.add("ft-flyfar"); });
     // a camera flight ends where it stops, or the moment you touch the map
     LM.on("moveend", flyEnd);
     LM.on("moveend", () => { if (GL.opts.kind !== "home" || !GL.bounds.length) return; try { const c = LM.getCenter(); localStorage.setItem("ft-lcam", JSON.stringify({ c: [+c.lat.toFixed(4), +c.wrap().lng.toFixed(4)], z: +LM.getZoom().toFixed(2) })); } catch {} });

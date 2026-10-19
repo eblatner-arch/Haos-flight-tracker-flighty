@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.28.8
+- /leaflet/: routes stop flashing out and back in. Every live update (a few seconds apart while you're flying) took every route, track and airport dot off the map and redrew it, even when nothing had changed; now only what actually changed is redrawn.
+- /leaflet/: routes only fade out during the long zooms (an airport button, coast down to the gates), not when a page simply reframes them.
+
 ## 4.28.7
 - /leaflet/: opening the app no longer starts over Canada and swoops down. The first framing ran before your flights had loaded, so it settled on a default view and then flew to your routes a moment later. Now the map waits for the flights and frames them in one go, and it opens on the last My Flights framing, so usually nothing moves at all.
 
