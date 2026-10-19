@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.30.0
+- The map is now Leaflet everywhere: the app at the normal address is what you've been testing at /leaflet/ (flat satellite map, routes and dots drawn live, the softer layer under loading tiles, the calm start). MapLibre is gone, along with the 3D globe and the Map shape setting, and the add-on no longer downloads it when it builds.
+- /leaflet/ still opens the same app, so a "Flighty L" Home Screen icon keeps working; you can delete it and use the normal one. Notifications, saved tiles and settings carry over.
+
 ## 4.29.1
 - /leaflet/: a calmer start. Opening the app used to show a blank dark map, then the routes on their own, then the satellite popping in, then the sheet nudging into place. Now the map and the sheet stay hidden for that moment and fade in together once your routes are framed and the first imagery has loaded (never more than 1.5 s; pages without a map show at once).
 

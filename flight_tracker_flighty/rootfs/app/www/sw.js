@@ -4,6 +4,8 @@
 // always goes to the add-on. Files are named by their content (?v=...), so an old page always finds
 // the files it was built with; older copies are dropped as new ones arrive.
 const SHELL = "ft-shell-v1";
+const TILES = "ft-tiles-v1";
+const TILE = /(^|\.)arcgisonline\.com$|(^|\.)basemaps\.cartocdn\.com$/;
 // Data the app reads (flights, history, airports, alerts, map extras): fresh from the add-on when it
 // answers, else the last copy on the phone, so every page opens with no signal. Live streams and
 // one-off actions are left alone.
@@ -24,7 +26,7 @@ async function dataFirst(req) {
     throw err;
   }
 }
-const ASSET = /^(app\.js|style\.css|maplibre-gl\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|ac-[\w-]+\.png|manifest\.webmanifest)$/;
+const ASSET = /^(app\.js|style\.css|leaflet\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|ac-[\w-]+\.png|manifest\.webmanifest)$/;
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -37,6 +39,18 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url), scope = new URL(self.registration.scope);
+  // Map tiles (Esri satellite, CARTO dark): the phone's copy if it has one, else download and keep it.
+  // The trip-map download (app.js) fills the same store ahead of time.
+  if (TILE.test(url.hostname)) {
+    e.respondWith(caches.open(TILES).then(async (box) => {
+      const hit = await box.match(req.url);
+      if (hit) return hit;
+      const r = await fetch(req);
+      if (r && r.ok) box.put(req.url, r.clone()).catch(() => {});
+      return r;
+    }));
+    return;
+  }
   if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
   const rel = url.pathname.slice(scope.pathname.length);
   const page = rel === "" || rel === "index.html";
@@ -61,6 +75,11 @@ self.addEventListener("fetch", (e) => {
     const hit = await box.match(key);
     const fresh = fetch(req).then(async (r) => {
       if (r && r.ok) {
+        // a new version of the page: tell the open app, so it switches to it (see app.js)
+        if (page && hit && hit.headers.get("ETag") && r.headers.get("ETag") && hit.headers.get("ETag") !== r.headers.get("ETag")) {
+          const tell = () => self.clients.matchAll({ type: "window" }).then((all) => all.forEach((c) => c.postMessage({ updated: true })));
+          setTimeout(tell, 300);
+        }
         await box.put(key, r.clone());
         if (!page) {   // drop older versions of this file
           for (const k of await box.keys()) {

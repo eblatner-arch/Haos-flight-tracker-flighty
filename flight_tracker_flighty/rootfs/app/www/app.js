@@ -1749,56 +1749,53 @@
 
 
   // ================================================================================================
-  // The map: one globe (MapLibre) behind every page. It's made once and never reloads: each page
-  // swaps what's drawn on it and the camera glides to that page's routes. Zoomed in it flattens
-  // out into a normal map, with the airport diagram and live surface traffic.
+  // The map (Leaflet): one flat map behind every page, made once. Each
+  // page swaps what's drawn on it and the camera glides to that page's routes. Satellite tiles are
+  // plain pictures the browser moves and scales itself, so zooming and dragging stay smooth: while
+  // the camera moves, the pictures already there are stretched, and sharp ones load where it stops.
+  //
+  // The rest of the app talks to GL.map as it did to MapLibre (getSource(id).setData, getZoom,
+  // getCenter, easeTo/flyTo with padding...): GL.map is a small adapter over Leaflet. Zoom numbers
+  // everywhere stay in MapLibre's (512 px world at zoom 0), which is Leaflet's minus one.
   // ================================================================================================
   const MAP_EL = document.getElementById("map");
-
-  // index.html loads the map library without holding up the app; this runs when it arrives
+  // ---------- opening the app ----------
+  // body starts "booting" (map and sheet hidden). They fade in together once the routes have been
+  // framed and the first satellite tiles have loaded, or after 1.5 s whatever happens, or at once on a
+  // page with no map.
+  const BOOT = { done: false, tiles: false };
+  function bootDone() {
+    if (BOOT.done) return;
+    BOOT.done = true;
+    document.body.classList.add("boot-fade");
+    document.body.classList.remove("booting");
+    setTimeout(() => document.body.classList.remove("boot-fade"), 600);
+  }
+  const bootCheck = () => { if (!BOOT.done && GL.everFit && BOOT.tiles) requestAnimationFrame(bootDone); };
+  setTimeout(bootDone, 1500);
   window.__mapReady = () => { if (GL.queued && !GL.map) { const q = GL.queued; GL.queued = null; showMap(...q); } };
   const GL = { map: null, ready: false, view: null, paint: null, data: null, opts: {}, markers: [],
-    bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, leg: null, ctl: null };
+    bounds: [], maxZoom: 7, fitPending: false, empty: {}, src: {}, sig: {}, leg: null, ctl: null, pad: { top: 0, bottom: 0, left: 0, right: 0 } };
+  let LM = null;   // the Leaflet map
+  const mlz = () => LM.getZoom() - 1;   // the zoom in MapLibre's numbers
   const CARTO_DARK = ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png`);
-  // CARTO watermarks tiles fetched without its free key. With your key (add-on Configuration) tiles
-  // come from its keyed address; a tile address of your own wins ({style} becomes dark_all, {key}
-  // your key, {s} the a-d servers).
   // ---------- tiles you've seen stay on the phone ----------
-  // Esri and CARTO tiles go through tc://, which answers from the browser's Cache Storage first and
-  // only downloads what isn't there. Kept until there are more than TC_MAX (oldest go first).
-  // Needs a secure page (https: the Home Assistant app, Nabu Casa) for Cache Storage; on plain
-  // http the tiles load directly, as before. Google tiles are never kept (Google's terms).
+  // The service worker (sw.js) answers Esri and CARTO tiles from the phone's Cache Storage first and
+  // keeps every new one; kept until there are more than TC_MAX (oldest go first). Needs a secure page.
   const TC_NAME = "ft-tiles-v1", TC_MAX = 16000;
   let TC_ON = false;
   function tcInit() {
-    if (TC_ON || !window.maplibregl || !maplibregl.addProtocol || !window.caches || !window.isSecureContext) return;
+    if (TC_ON || !window.caches || !window.isSecureContext) return;
     TC_ON = true;
-    const box = caches.open(TC_NAME).catch(() => null);
-    maplibregl.addProtocol("tc", async (params, ac) => {
-      const url = "https://" + params.url.slice(5);
-      const c = await box;
-      if (c) {
-        try { const hit = await c.match(url); if (hit) return { data: await hit.arrayBuffer() }; } catch {}
-      }
-      const r = await fetch(url, { signal: ac.signal });
-      if (!r.ok) throw new Error(`tile ${r.status}`);
-      const buf = await r.arrayBuffer();
-      if (c && buf.byteLength > 0) c.put(url, new Response(buf.slice(0), { headers: { "content-type": r.headers.get("content-type") || "image/jpeg" } })).catch(() => {});
-      return { data: buf };
-    });
-    // once a session, after things settle: trim to the newest TC_MAX
     setTimeout(async () => {
-      try { const c = await box; if (!c) return; const keys = await c.keys(); for (const k of keys.slice(0, Math.max(0, keys.length - TC_MAX))) await c.delete(k); } catch {}
+      try { const c = await caches.open(TC_NAME); const keys = await c.keys(); for (const k of keys.slice(0, Math.max(0, keys.length - TC_MAX))) await c.delete(k); } catch {}
     }, 30000);
   }
-  const tc = (u) => TC_ON ? u.replace(/^https:\/\//, "tc://") : u;
   // ---------- the map for your trips, downloaded ahead ----------
   // In the background, a little at a time: the satellite imagery along your upcoming flights' routes
-  // (zoom 3-8, the views My Flights and a flight page open on), every zoom above their airports and the
-  // inbound aircraft's airports (9 to 16, region down to the gates), those airports' diagrams, and
-  // every airport in your Passport (to zoom 12). Kept on the
-  // phone with the tiles you've seen, so the map opens complete with no signal. Skips what's already
-  // saved, so after the first run it only fetches new trips; runs at most every 6 hours.
+  // (zoom 3-8), every zoom above their airports and the inbound aircraft's airports (9 to 16, region
+  // down to the gates), those airports' diagrams, and every airport in your Passport (to zoom 12).
+  // Skips what's already saved; runs at most every 6 hours.
   const tileXY = (la, lo, z) => {
     const n = 2 ** z, R = Math.max(-85, Math.min(85, la)) * Math.PI / 180;
     return [Math.floor((lo + 180) / 360 * n) & (n - 1), Math.max(0, Math.min(n - 1, Math.floor((1 - Math.log(Math.tan(R) + 1 / Math.cos(R)) / Math.PI) / 2 * n)))];
@@ -1820,7 +1817,6 @@
         if (!A || !B) continue;
         for (const p of gcPoints(A, B, 48)) for (let z = 3; z <= 8; z++) box(p[0], p[1], z, z <= 5 ? 1 : 0);
         close.set(l.dep, A); close.set(l.arr, B);
-        // the inbound aircraft's earlier legs too (their airports and routes)
         for (const r of [l.inbound, ...(l.chain || [])].filter(Boolean)) {
           const a = r.origin, b = r.destination, P = ll(a), Q = ll(b);
           if (P && (a.iata || a.icao)) close.set(a.iata || a.icao, P);
@@ -1828,26 +1824,21 @@
           if (P && Q) for (const p of gcPoints(P, Q, 32)) for (let z = 3; z <= 7; z++) box(p[0], p[1], z, 0);
         }
       }
-      // above each airport: every zoom from the region (9) down to the gates (16)
       for (const [, p] of close) for (let z = 9; z <= 16; z++) box(p[0], p[1], z, z <= 11 ? 1 : z <= 14 ? 2 : 3);
-      // the airport diagrams themselves (runways, taxiways, gates, names), kept with the app's data
       for (const code of close.keys()) { if (code) { try { await api(`api/airport/${encodeURIComponent(code)}/layout`); } catch {} } }
-      // Passport airports
       let pass = null;
       try { pass = JSON.parse(localStorage.getItem("ft-c:api/history") || "null"); } catch {}
       for (const a of Object.values((pass && pass.airports) || {})) if (a && a.lat != null) for (let z = 6; z <= 12; z++) box(a.lat, a.lon, z, z <= 9 ? 0 : 1);
       for (const t of Object.keys((LIV && LIV.tails) || {})) { try { await fetch(`api/livery/${t}.png`); } catch {} }
       const c = await caches.open(TC_NAME), list = [...want];
       WARMT.total = list.length; WARMT.done = 0;
-      // On your home network (the add-on sees the phone's address): 8 at a time, flat out. Away: 2 at a
-      // time with a breath between, so the map you're looking at always comes first.
       let home = false;
       try { home = !!(await api("api/net")).home; } catch {}
       WARMT.home = home;
       let got = 0, i = 0;
       const one = async () => {
         while (i < list.length) {
-          if (document.hidden || lowData()) return;   // only while the app is open and data saver is off
+          if (document.hidden || lowData()) return;
           const [z, y, x] = list[i++].split("/");
           const u = ESRI_IMG.replace("{z}", z).replace("{y}", y).replace("{x}", x);
           WARMT.done++;
@@ -1860,12 +1851,9 @@
       if (WARMT.done >= WARMT.total) localStorage.setItem("ft-warm-trips", JSON.stringify({ at: Date.now(), tiles: list.length, fetched: got }));
     } catch {} finally { WARMT.running = false; }
   }
-  // Once: the whole world's coarsest imagery (zoom 0-3, 85 tiles, about 2 MB) into the phone's tile
-  // store, so the backdrop under the map is never missing, wherever and however far you zoom.
   async function warmWorld() {
-    if (!TC_ON || lowData()) return;
+    if (!TC_ON || lowData() || localStorage.getItem("ft-world-warm")) return;
     try {
-      if (localStorage.getItem("ft-world-warm") === "1") return;
       const c = await caches.open(TC_NAME);
       for (let z = 0; z <= 3; z++) for (let x = 0; x < 2 ** z; x++) for (let y = 0; y < 2 ** z; y++) {
         const u = ESRI_IMG.replace("{z}", z).replace("{x}", x).replace("{y}", y);
@@ -1879,110 +1867,56 @@
     try { const c = await caches.open(TC_NAME); const n = (await c.keys()).length; const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null; return { n, bytes: est ? est.usage : null }; } catch { return null; }
   }
   async function tileCacheClear() { try { await caches.delete(TC_NAME); } catch {} }
-
-  // ---------- Google satellite (with your Maps API key) ----------
-  // Map Tiles API: one session (good for about two weeks), then 2D tiles. 512 px "high DPI" tiles
-  // laid out at 256: sharp on a Retina screen without drawing more tiles. Roads and place names
-  // come baked in (satellite + roadmap layer). Each tile is a billable request after Google's free
-  // monthly allowance.
-  const gKey = () => ((STATE && STATE.map_tiles) || {}).google || "";
-  const GSESS = { s: null, exp: 0, key: "", pending: null, err: "" };
-  try { Object.assign(GSESS, JSON.parse(localStorage.getItem("ft-gsess") || "{}"), { pending: null, err: "" }); } catch {}
-  function gReady() { return GSESS.s && GSESS.key === gKey() && GSESS.exp > Date.now() / 1000 + 3600; }
-  function gSession() {
-    const key = gKey();
-    if (!key || gReady() || GSESS.pending) return GSESS.pending;
-    GSESS.pending = fetch(`https://tile.googleapis.com/v1/createSession?key=${encodeURIComponent(key)}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mapType: "satellite", language: navigator.language || "en-US", region: "US", scale: "scaleFactor2x", highDpi: true, layerTypes: ["layerRoadmap"] }),
-    }).then(async (r) => {
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.session) throw new Error((j.error && j.error.message) || `Google said ${r.status}`);
-      Object.assign(GSESS, { s: j.session, exp: +j.expiry || Date.now() / 1000 + 86400, key, err: "" });
-      try { localStorage.setItem("ft-gsess", JSON.stringify({ s: GSESS.s, exp: GSESS.exp, key })); } catch {}
-      if (mapStyle() === "google") restyleAll();
-    }).catch((e) => { GSESS.err = e.message || String(e); console.warn("Google tiles:", GSESS.err); })
-      .finally(() => { GSESS.pending = null; });
-    return GSESS.pending;
-  }
-  const gTiles = () => `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${encodeURIComponent(GSESS.s)}&key=${encodeURIComponent(gKey())}`;
-  // Google's terms: its logo and the imagery copyright for what's on screen.
-  let gAttrT = 0;
-  // Credits live in one place: the map's own credit line, top left, always spelled out (not a
-  // collapsible "i"). Google's imagery copyright depends on what's on screen, so it's refreshed
-  // after the map stops moving.
-  const G_LOGO = '<b class="attr-mb">Google</b>';
-  function setAttr(html) {
-    const src = GL.map && GL.ready && GL.map.getSource("base");
-    if (!src || src.attribution === html) return;
-    src.attribution = html;
-    try { GL.attrib && GL.attrib._updateAttributions(); } catch {}
-  }
-  function gAttr() {
-    if (!(mapStyle() === "google" && gReady() && GL.map)) return;
-    clearTimeout(gAttrT);
-    gAttrT = setTimeout(async () => {
-      try {
-        const b = GL.map.getBounds(), z = Math.max(0, Math.round(GL.map.getZoom()));
-        const q = new URLSearchParams({ session: GSESS.s, key: gKey(), zoom: z, north: Math.min(85, b.getNorth()), south: Math.max(-85, b.getSouth()), east: b.getEast(), west: b.getWest() });
-        const j = await (await fetch(`https://tile.googleapis.com/tile/v1/viewport?${q}`)).json();
-        setAttr(`${G_LOGO} ${esc(j.copyright || "")}`);
-      } catch {}
-    }, 800);
-  }
-  // ---------- Mapbox satellite (with your Mapbox token) ----------
-  // Static Tiles API, satellite-streets style: imagery with roads and place names drawn in, 512 px
-  // (@2x) pictures laid out at 256, so sharp on a Retina screen. One request per tile; Mapbox's free
-  // allowance is 200,000 a month. Not kept on the phone (Mapbox's terms).
-  const mbTok = () => ((STATE && STATE.map_tiles) || {}).mapbox || "";
-  const mbTiles = () => `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${encodeURIComponent(mbTok())}`;
+  const gAttr = () => {};
   const STYLES = () => ["satellite", "dark"];
-
   function darkTiles() {
     const mt = (STATE && STATE.map_tiles) || {};
     if (mt.url) {
       const u = mt.url.replace("{style}", "dark_all").replace("{key}", encodeURIComponent(mt.key || "")).replace("{r}", "@2x");
-      return u.includes("{s}") ? ["a", "b", "c", "d"].map((x) => u.replace("{s}", x)) : [u];
+      return u.includes("{s}") ? u.replace("{s}", "{s}") : u;
     }
-    if (mt.key) return [`https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${encodeURIComponent(mt.key)}`];
-    return CARTO_DARK;
+    if (mt.key) return `https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${encodeURIComponent(mt.key)}`;
+    return "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png";
   }
-  function glStyle() {
-    let st = mapStyle();
-    if (st === "google" && !gReady()) { gSession(); st = "satellite"; }   // Esri until Google's session is ready
-    if (st === "google" && !gKey()) st = "satellite";
-    if (st === "mapbox" && !mbTok()) st = "satellite";
-    const mb = st === "mapbox", goo = st === "google" || mb, sat = st !== "dark", low = lowData();
-    // Image tiles are 256 px. The map picks its tile zoom by rounding, so a tile can be drawn up to
-    // 1.4x its size, and 2x more on a Retina screen: soft, worst when the globe sits halfway between
-    // two tile zooms (dragging north or south crosses one). Laid out at 181 px (256/sqrt 2) the
-    // worst case is 2x and the usual ~1.4x, for twice the tiles; 128 px was sharp but 4x the tiles
-    // (stutter, black holes). Data saver: 512, a quarter of the downloads. Google's tiles are 512 px
-    // pictures already: 256 is sharp.
-    // Map sharpness Balanced or Fast: 256, half the tiles (they're drawn at fewer pixels anyway).
-    const ts = goo ? 256 : low ? 512 : pref("ft-mapq", "full") === "full" ? 181 : 256;
-    // A coarse copy of the imagery underneath (2 zoom levels lower, at most z8: a handful of tiles,
-    // cached): while you drag, anything not loaded yet shows a softer earth instead of black.
-    // At most zoom 3 (85 tiles for the whole world, kept on the phone, see warmWorld): something is
-    // always underneath, anywhere at any zoom, even mid-flight from an airport out to the globe.
-    const under = (tiles) => ({ type: "raster", tiles, tileSize: 1024, maxzoom: 3 });
-    const img = tc(ESRI_IMG), dark = darkTiles().map(tc);
-    setTimeout(gAttr, 0);
-    return {
-      version: 8,
-      projection: { type: flatMap() ? "mercator" : "globe" },
-      sources: mb
-        ? { under: under([img]), base: { type: "raster", tiles: [mbTiles()], tileSize: ts, maxzoom: 22, attribution: '<b class="attr-mb">mapbox</b> &copy; Mapbox &copy; OpenStreetMap &copy; Maxar' } }
-        : goo
-        ? { under: under([img]), base: { type: "raster", tiles: [gTiles()], tileSize: ts, maxzoom: 22, attribution: G_LOGO } }
-        : sat
-        ? { under: under([img]), base: { type: "raster", tiles: [img], tileSize: ts, maxzoom: 19, attribution: "&copy; Esri, Maxar &middot; Natural Earth" } }
-        : { under: under(dark), base: { type: "raster", tiles: dark, tileSize: ts, maxzoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-      layers: [
-        { id: "under", type: "raster", source: "under", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 0 } : { "raster-fade-duration": 0 } },
-        { id: "base", type: "raster", source: "base", paint: sat ? { "raster-brightness-max": 0.84, "raster-saturation": -0.08, "raster-fade-duration": 120 } : { "raster-fade-duration": 120 } },
-      ],
-    };
+  // The base map: Esri satellite (dimmed a touch, like the old map) or CARTO dark. Map sharpness:
+  // Full lays 128 px tiles of the next zoom (sharp on a Retina screen, four times the tiles), Balanced
+  // the usual 256 px, Fast and Data saver 512 px of the zoom before (a quarter of the downloads).
+  //
+  // Two layers: the sharp one, and under it the same imagery one zoom softer (512 px tiles, a quarter
+  // as many), which shows wherever a sharp tile is still loading. Kept light on purpose: iPhone Safari
+  // closes the page when a map holds too many tiles or one giant stretched picture (4.28.3 did both).
+  //  - dragging loads tiles as you go; a camera flight (airport and route buttons) loads where it stops,
+  //    since loading every level on the way only cancelled the one before
+  //  - the satellite is dimmed per tile (a filter), not by fading a whole layer, which made Safari draw
+  //    every layer into one huge picture during a zoom
+  let FLYING = false;
+  let TilesL = null;
+  function tilesClass() {
+    return TilesL || (TilesL = L.TileLayer.extend({
+      _onMove() {
+        if (FLYING) return;
+        const t = Date.now();
+        if (t - (this.__mv || 0) < 150) return;
+        this.__mv = t;
+        this._onMoveEnd();
+      },
+    }));
+  }
+  function baseLayer() {
+    const sat = mapStyle() !== "dark", q = lowData() ? "fast" : pref("ft-mapq", "full");
+    const size = q === "full" ? { tileSize: 128, zoomOffset: 1, maxNativeZoom: 18 } : q === "fast" ? { tileSize: 512, zoomOffset: -1, maxNativeZoom: 20 } : { tileSize: 256, maxNativeZoom: 19 };
+    const url = sat ? ESRI_IMG : darkTiles(), T = tilesClass();
+    const common = { maxZoom: 21, subdomains: "abcd", crossOrigin: true, updateWhenZooming: false, updateWhenIdle: false };
+    // Safari can leave a hairline between tiles: each one overlaps the next by half a pixel, sized from
+    // its layer's own tiles (128, 256 or 512 px).
+    const seams = (layer) => layer.on("tileloadstart", (e) => { const t = layer.getTileSize(); e.tile.style.width = t.x + 0.5 + "px"; e.tile.style.height = t.y + 0.5 + "px"; });
+    const under = seams(new T(url, { ...common, tileSize: 512, zoomOffset: -1, minNativeZoom: 1, maxNativeZoom: 18, keepBuffer: 1, zIndex: 0, className: "ft-under" }));
+    const top = seams(new T(url, { ...common, ...size, keepBuffer: 2, zIndex: 1, className: "ft-base",
+      attribution: sat ? "&copy; Esri, Maxar &middot; Natural Earth" : "&copy; OpenStreetMap &copy; CARTO" }));
+    top.on("loading", () => { BOOT.tiles = false; });
+    top.on("load", () => { BOOT.tiles = true; bootCheck(); });
+    if (LM) { LM.getPane("tilePane").style.opacity = ""; MAP_EL.classList.toggle("ft-sat", sat); }
+    return L.layerGroup([under, top]);
   }
   // The night side as a picture laid over the earth: dark where the sun is down, a soft twilight edge.
   function nightImage() {
@@ -2003,99 +1937,180 @@
     ctx.putImageData(img, 0, 0);
     return c.toDataURL();
   }
-  const MERC = [[-180, 85.0511], [180, 85.0511], [180, -85.0511], [-180, -85.0511]];
+  const MERC_LL = [[-85.0511, -180], [85.0511, 180]];
   const FC = (features) => ({ type: "FeatureCollection", features: features || [] });
   const lineF = (pts, props) => ({ type: "Feature", properties: props || {}, geometry: { type: "LineString", coordinates: pts.map((p) => [p[1], p[0]]) } });
   const ptF = (p, props) => ({ type: "Feature", properties: props || {}, geometry: { type: "Point", coordinates: [p[1], p[0]] } });
   const ring = (pts) => { const r = pts.map((p) => [p[1], p[0]]); if (r.length && (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1])) r.push(r[0]); return r; };
   const DYN = ["artcc", "plan", "routes", "track", "aps", "pts", "fixes"];
   const LAY = ["lay-term", "lay-twy", "lay-rwy"];
+
+  // ---------- drawing GeoJSON with Leaflet ----------
+  // Lines and dots go on canvases (one per pane, redrawn once a move ends, scaled by the browser
+  // while it moves). Longitudes are unwrapped along each line, so a route over the Pacific doesn't
+  // shoot back across the whole map.
+  // outer rings all turned the same way (by their signed area), for a "nonzero" fill to be their union
+  const sameTurn = (r, on) => { if (!on) return r; let a = 0; for (let i = 0, n = r.length; i < n; i++) { const p = r[i], q = r[(i + 1) % n]; a += p[1] * q[0] - q[1] * p[0]; } return a < 0 ? r.slice().reverse() : r; };
+  const unwrap = (coords) => { const out = []; let prev = null; for (const c of coords) { let x = c[0]; if (prev != null) { while (x - prev > 180) x -= 360; while (x - prev < -180) x += 360; } out.push([c[1], x]); prev = x; } return out; };
+  const REND = {};
+  const rend = (pane) => REND[pane] || (REND[pane] = L.canvas({ pane, padding: 0.4 }));
   // runways are drawn about their real width (45 m) at every zoom, taxiways about 23 m
-  const widthM = (m) => ["interpolate", ["exponential", 2], ["zoom"], 10, m / 60, 20, m * 17];
-  function glLayers() {
-    const map = GL.map, route = css("--route");
-    const before = map.getLayer("lbl") ? "lbl" : undefined;
-    if (!map.getSource("night")) map.addSource("night", { type: "image", url: nightImage(), coordinates: MERC });
-    for (const id of [...DYN, ...LAY, "sym", "laysym", "surf"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
-    const add = (l, b) => { if (!map.getLayer(l.id)) map.addLayer(l, b); };
-    add({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
-    placeLayers(add);
-    add({ id: "lay-term", type: "fill", minzoom: 12.5, source: "lay-term", paint: { "fill-color": "#c8cdd8", "fill-opacity": 0.14 } });
-    add({ id: "lay-term-line", type: "line", minzoom: 12.5, source: "lay-term", paint: { "line-color": "#c8cdd8", "line-opacity": 0.5, "line-width": 1 } });
-    add({ id: "lay-twy", type: "line", minzoom: 12.5, source: "lay-twy", layout: { "line-join": "round" }, paint: { "line-color": "#fff", "line-opacity": 0.12, "line-width": widthM(23) } });
-    add({ id: "lay-twycl", type: "line", source: "lay-twy", minzoom: 16, paint: { "line-color": "#f6c445", "line-opacity": 0.45, "line-width": 1 } });
-    add({ id: "lay-rwy", type: "line", minzoom: 12.5, source: "lay-rwy", layout: { "line-cap": "butt" }, paint: { "line-color": "#fff", "line-opacity": 0.22, "line-width": widthM(45) } });
-    add({ id: "lay-rwycl", type: "line", minzoom: 12.5, source: "lay-rwy", paint: { "line-color": "#fff", "line-opacity": 0.55, "line-width": 1, "line-dasharray": [8, 8] } });
-    add({ id: "artcc-fill", type: "fill", source: "artcc", paint: { "fill-color": ["get", "c"], "fill-opacity": ["get", "o"] } });
-    add({ id: "artcc-line", type: "line", source: "artcc", paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "lo"] } });
-    add({ id: "plan", type: "line", source: "plan", paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": 2, "line-opacity": ["coalesce", ["get", "o"], 0.6], "line-dasharray": [2.5, 2.5] } });
-    add({ id: "routes", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": ["coalesce", ["get", "w"], 2.4], "line-opacity": 0.92 } });
-    add({ id: "track-edge", type: "line", source: "track", filter: ["==", ["get", "own"], 1], layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": "#04122e", "line-width": 7.5, "line-opacity": 0.45 } });
-    add({ id: "track", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": ["coalesce", ["get", "w"], 4], "line-opacity": ["coalesce", ["get", "o"], 1] } });
-    add({ id: "fixes", type: "circle", source: "fixes", minzoom: 5, paint: { "circle-radius": 1.6, "circle-color": route } });
-    add({ id: "aps", type: "circle", source: "aps", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, ["coalesce", ["get", "r0"], 4.5], 4, 4.5],
-      "circle-color": ["coalesce", ["get", "c"], route], "circle-stroke-color": "#fff", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 1, ["coalesce", ["get", "s0"], 2], 4, 2] } });
-    add({ id: "pts", type: "circle", source: "pts", paint: { "circle-radius": ["coalesce", ["get", "r"], 6.5], "circle-color": ["get", "c"], "circle-stroke-color": "#fff", "circle-stroke-width": ["coalesce", ["get", "s"], 1.5] } });
-    symLayers(add);
-    GL.empty = {}; GL.src = {};
-    if (radarOn()) glRadar(true);
-  }
-  // Each paint says what it draws; everything else on the map is cleared.
-  function glSet(obj) {
-    for (const id of DYN) {
-      const v = obj[id], src = GL.map.getSource(id);
-      if (!src) continue;
-      if (!v || (Array.isArray(v) && !v.length)) {
-        if (!GL.empty[id]) { src.setData(FC()); GL.empty[id] = true; GL.src[id] = null; }
-        continue;
-      }
-      const fc = Array.isArray(v) ? FC(v) : v;
-      if (fc === GL.src[id]) continue;   // the same (big) collection as last time: leave it
-      src.setData(fc); GL.src[id] = fc; GL.empty[id] = false;
+  const widthPx = (m) => Math.max(0.6, m / 60 * 2 ** (mlz() - 10));
+  const lerpZ = (z0, a, z1, b) => { const z = mlz(); return z <= z0 ? a : z >= z1 ? b : a + (b - a) * (z - z0) / (z1 - z0); };
+  // How each source looks (MapLibre's paint, by hand). A function of the feature's properties; the
+  // array form draws more than one line per feature (an outline under a line).
+  const VSTY = {
+    // a center's low and high altitude shapes are one feature: filled as a union ("nonzero", every ring
+    // turned the same way), so where they overlap the shading stays instead of cancelling out
+    artcc: { pane: "artcc", s: (p) => [{ color: p.c, weight: p.w ?? 1, opacity: p.lo ?? 0.8, fillColor: p.c, fillOpacity: p.o ?? 0.2, fill: true, fillRule: "nonzero" }] },
+    plan: { pane: "overlayPane", s: (p) => [{ color: p.c || css("--route"), weight: 2, opacity: p.o ?? 0.6, dashArray: "5 5", lineCap: "butt" }] },
+    routes: { pane: "overlayPane", s: (p) => [{ color: p.c || css("--route"), weight: p.w || 2.4, opacity: 0.92 }] },
+    track: { pane: "overlayPane", s: (p) => [...(p.own === 1 ? [{ color: "#04122e", weight: 7.5, opacity: 0.45 }] : []), { color: p.c || css("--route"), weight: p.w || 4, opacity: p.o ?? 1 }] },
+    fixes: { pane: "dots", minz: 5, s: () => [{ radius: 1.6, color: css("--route"), fillColor: css("--route"), fillOpacity: 1, stroke: false }] },
+    aps: { pane: "dots", s: (p) => [{ radius: lerpZ(1, p.r0 ?? 4.5, 4, 4.5), color: "#fff", weight: lerpZ(1, p.s0 ?? 2, 4, 2), fillColor: p.c || css("--route"), fillOpacity: 1 }], zoomy: true },
+    pts: { pane: "dots", s: (p) => [{ radius: p.r ?? 6.5, color: "#fff", weight: p.s ?? 1.5, fillColor: p.c, fillOpacity: 1 }] },
+    "lay-term": { pane: "lay", minz: 12.5, s: () => [{ color: "#c8cdd8", weight: 1, opacity: 0.5, fillColor: "#c8cdd8", fillOpacity: 0.14, fill: true }] },
+    "lay-twy": { pane: "lay", minz: 12.5, zoomy: true, s: () => [{ color: "#fff", opacity: 0.12, weight: widthPx(23), lineJoin: "round" }, ...(mlz() >= 16 ? [{ color: "#f6c445", opacity: 0.45, weight: 1 }] : [])] },
+    "lay-rwy": { pane: "lay", minz: 12.5, zoomy: true, s: () => [{ color: "#fff", opacity: 0.22, weight: widthPx(45), lineCap: "butt" }, { color: "#fff", opacity: 0.55, weight: 1, dashArray: "8 8" }] },
+    brd: { pane: "brd", s: (p) => [p.a === 1 ? { color: "#fff", opacity: mlz() >= 2.3 ? 0.28 : 0, weight: 0.7 } : { color: "#fff", opacity: 0.5, weight: 0.9 }], zoomy: true },
+  };
+  // geometry -> Leaflet paths, each style one path
+  function pathsFor(f, styles, pane) {
+    const g = f.geometry, out = [], o = { renderer: rend(pane), interactive: false, pane };
+    if (!g) return out;
+    for (const st of styles) {
+      const opt = { ...o, ...st };
+      if (g.type === "Point") out.push(L.circleMarker([g.coordinates[1], g.coordinates[0]], opt));
+      else if (g.type === "LineString") out.push(L.polyline(unwrap(g.coordinates), { ...opt, fill: false }));
+      else if (g.type === "MultiLineString") out.push(L.polyline(g.coordinates.map(unwrap), { ...opt, fill: false }));
+      else if (g.type === "Polygon") out.push(L.polygon(g.coordinates.map(unwrap), opt));
+      else if (g.type === "MultiPolygon") out.push(L.polygon(g.coordinates.map((p) => p.map((r, i) => sameTurn(unwrap(r), opt.fillRule === "nonzero" && i === 0))), opt));
     }
+    return out;
   }
-  // Radar. NOAA (default): the National Weather Service's MRMS mosaic, every NEXRAD radar merged and
-  // quality-controlled (ground clutter, birds and false echoes removed), as on radar.weather.gov;
-  // US, Canada, Caribbean, Alaska, Hawaii; new every 5 minutes. RainViewer: worldwide, but raw.
-  const radarSrc = () => pref("ft-radar-src", "noaa");
-  const NOAA_RADAR = "https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity/MapServer/export"
-    + "?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&layers=show:3&f=image";
-  let radarT = null;
-  async function glRadar(on) {
-    const map = GL.map;
-    if (!map) return;
-    if (map.getLayer("radar")) map.removeLayer("radar");
-    if (map.getSource("radar")) map.removeSource("radar");
-    clearInterval(radarT); radarT = null;
-    if (!on) return;
-    let src;
-    try {
-      if (radarSrc() === "noaa") {
-        // a new picture every 5 minutes: the address changes with it, so the phone doesn't reuse an old one
-        src = { type: "raster", tiles: [`${NOAA_RADAR}&_t=${Math.floor(Date.now() / 300000)}`], tileSize: 512, maxzoom: 10,
-          attribution: "Radar &copy; NOAA/NWS MRMS" };
-      } else {
-        if (!RADAR || Date.now() - RADAR.at > 300000) {
-          const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
-          const fr = d.radar.past[d.radar.past.length - 1];
-          RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
+  // ---------- routes, tracks and airport dots: redrawn every frame the map moves ----------
+  // Like MapLibre: one canvas fixed to the screen, cleared and redrawn in the same frame as every move
+  // (drag, pinch, camera flight), from points projected once per data change. Lines and dots keep their
+  // size and place the whole time: no stretching, no catching up afterwards. Cheap: a few hundred points.
+  const LIVE_IDS = ["plan", "routes", "track", "fixes", "aps", "pts"];   // drawn in this order
+  const LIVE = { cv: null, ctx: null, w: 0, h: 0, dpr: 1, src: {}, raf: 0 };
+  function liveInit() {
+    const pane = LM.createPane("live");
+    pane.style.zIndex = 440; pane.style.pointerEvents = "none";
+    const cv = LIVE.cv = L.DomUtil.create("canvas", "ft-live", pane);
+    cv.style.position = "absolute"; cv.style.left = "0"; cv.style.top = "0";
+    LIVE.ctx = cv.getContext("2d");
+    const size = () => {
+      const sz = LM.getSize(), dpr = Math.min(window.devicePixelRatio || 1, 3);
+      LIVE.w = sz.x; LIVE.h = sz.y; LIVE.dpr = dpr;
+      cv.width = Math.round(sz.x * dpr); cv.height = Math.round(sz.y * dpr);
+      cv.style.width = sz.x + "px"; cv.style.height = sz.y + "px";
+    };
+    size();
+    LM.on("move zoom viewreset", liveDraw);
+    LM.on("moveend zoomend", liveDraw);
+    LM.on("resize", () => { size(); liveDraw(true); });
+  }
+  const liveSoon = () => { if (!LIVE.raf) LIVE.raf = requestAnimationFrame(() => { LIVE.raf = 0; liveDraw(true); }); };
+  function liveDraw(force) {
+    const cv = LIVE.cv, ctx = LIVE.ctx;
+    if (!cv || !LM) return;
+    // a frame fires both "zoom" and "move": draw it once
+    const vk = `${LM.getZoom()}|${LM.getPixelOrigin()}|${LM._getMapPanePos()}`;
+    if (force !== true && vk === LIVE.key) return;
+    LIVE.key = vk;
+    // the canvas stays put on screen while the map's pane slides under it
+    L.DomUtil.setPosition(cv, LM.containerPointToLayerPoint([0, 0]));
+    ctx.setTransform(LIVE.dpr, 0, 0, LIVE.dpr, 0, 0);
+    ctx.clearRect(0, 0, LIVE.w, LIVE.h);
+    const z = LM.getZoom(), k = LM.getZoomScale(z, 0), o = LM.getPixelOrigin(), pp = LM._getMapPanePos();
+    const ox = -o.x + pp.x, oy = -o.y + pp.y, mz = z - 1;
+    const W = 256 * k;   // one world across, in pixels: a copy shifted by this when the map has wrapped
+    for (const id of LIVE_IDS) {
+      const src = LIVE.src[id];
+      if (!src || !src.items.length || (src.cfg.minz && mz < src.cfg.minz)) continue;
+      // looks that depend on the zoom are worked out again only when it has changed a little
+      if (src.cfg.zoomy && Math.abs((src.z ?? -99) - z) > 0.05) { src.z = z; for (const it of src.items) it.st = src.cfg.s(it.props); }
+      // the world copy nearest the screen (the map may have jumped by a world when you pan past 180°)
+      let shift = 0;
+      if (src.cx != null) { const cx = src.cx * k + ox, mid = LIVE.w / 2; shift = Math.round((mid - cx) / W) * W; }
+      for (const it of src.items) {
+        for (const st of it.st) {
+          if (it.pt) {
+            const x = it.pt[0] * k + ox + shift, y = it.pt[1] * k + oy;
+            if (x < -60 || y < -60 || x > LIVE.w + 60 || y > LIVE.h + 60) continue;
+            ctx.beginPath(); ctx.arc(x, y, st.radius ?? 5, 0, Math.PI * 2);
+            if (st.fill !== false) { ctx.globalAlpha = st.fillOpacity ?? 0.2; ctx.fillStyle = st.fillColor || st.color; ctx.fill(); }
+            if (st.stroke !== false && (st.weight ?? 3) > 0) { ctx.globalAlpha = st.opacity ?? 1; ctx.strokeStyle = st.color; ctx.lineWidth = st.weight ?? 3; ctx.stroke(); }
+          } else {
+            ctx.beginPath();
+            for (const line of it.lines) {
+              for (let i = 0; i < line.length; i++) {
+                const x = line[i][0] * k + ox + shift, y = line[i][1] * k + oy;
+                if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+              }
+            }
+            ctx.globalAlpha = st.opacity ?? 1; ctx.strokeStyle = st.color; ctx.lineWidth = st.weight ?? 3;
+            ctx.lineCap = st.lineCap || "round"; ctx.lineJoin = st.lineJoin || "round";
+            ctx.setLineDash(st.dashArray ? String(st.dashArray).split(/[ ,]+/).map(Number) : []);
+            ctx.stroke();
+          }
         }
-        src = { type: "raster", tiles: [RADAR.url], tileSize: 256, maxzoom: 7, attribution: "Radar &copy; RainViewer" };
       }
-      if (map.getSource("radar")) return;
-      map.addSource("radar", src);
-      map.addLayer({ id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": 0.65, "raster-fade-duration": 0 } },
-        map.getLayer("artcc-fill") ? "artcc-fill" : undefined);
-      radarT = setInterval(() => { if (radarOn() && !document.hidden) glRadar(true); }, 300000);
-    } catch {}
+    }
+    ctx.globalAlpha = 1; ctx.setLineDash([]);
   }
-  // ---------- labels and airplanes, drawn by the GPU ----------
-  // Each label or airplane is a small picture drawn once (on a canvas) and handed to the map, which
-  // places, rotates and hides colliding ones itself on the GPU: nothing on the page moves while you
-  // zoom or pan. A picture's name is its recipe, so the map asks for it again after a style switch.
+  // project to zoom-0 pixels once; each frame only scales and shifts
+  const p0 = (lat, lng) => { const p = LM.project([lat, lng], 0); return [p.x, p.y]; };
+  function liveSource(id) {
+    const cfg = VSTY[id];
+    const src = LIVE.src[id] = { cfg, items: [], z: null, cx: null };
+    return {
+      cfg,
+      setData(fc) {
+        const feats = (fc && fc.features) || [], items = [];
+        let sx = 0, n = 0;
+        for (const f of feats) {
+          const g = f.geometry, props = f.properties || {};
+          if (!g) continue;
+          const it = { props, st: cfg.s(props) };
+          if (g.type === "Point") { it.pt = p0(g.coordinates[1], g.coordinates[0]); sx += it.pt[0]; n++; }
+          else if (g.type === "LineString" || g.type === "MultiLineString") {
+            const parts = g.type === "LineString" ? [g.coordinates] : g.coordinates;
+            it.lines = parts.map((c) => unwrap(c).map(([la, lo]) => p0(la, lo)));
+            for (const l of it.lines) if (l.length) { sx += l[0][0]; n++; }
+          } else continue;
+          items.push(it);
+        }
+        src.items = items; src.z = LM.getZoom(); src.cx = n ? sx / n : null;
+        liveSoon();
+      },
+      restyle() { if (cfg.zoomy) liveSoon(); },
+      vis() { liveSoon(); },
+    };
+  }
+  // A vector source: setData redraws its group; zoom-dependent looks are re-applied after each zoom.
+  function vecSource(id) {
+    const cfg = VSTY[id], grp = L.layerGroup();
+    let feats = [];
+    const src = {
+      grp, cfg,
+      setData(fc) {
+        grp.clearLayers();
+        feats = (fc && fc.features) || [];
+        for (const f of feats) for (const p of pathsFor(f, cfg.s(f.properties || {}), cfg.pane)) grp.addLayer(p);
+        src.vis();
+      },
+      restyle() { if (cfg.zoomy && feats.length) src.setData(FC(feats)); else src.vis(); },
+      vis() { const on = !cfg.minz || mlz() >= cfg.minz; if (on && !LM.hasLayer(grp)) grp.addTo(LM); else if (!on && LM.hasLayer(grp)) LM.removeLayer(grp); },
+    };
+    return src;
+  }
+
+  // ---------- labels and airplanes ----------
+  // Each label or airplane is a small picture drawn once on a canvas and kept as an image; on the
+  // map it's a marker the browser moves with the map. After each move the labels that would
+  // collide are hidden, highest priority first (like MapLibre did).
   const IMG_R = 2;
   const LBL_FONT = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif";
   const PLANE_PATH = "M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z";
@@ -2168,35 +2183,111 @@
       c2.width = c.width + Math.round(pad * R); c2.height = c.height; x2.drawImage(c, Math.round(pad * R), 0);
       c = c2; ctx = x2;
     }
-    return { width: c.width, height: c.height, data: new Uint8Array(ctx.getImageData(0, 0, c.width, c.height).data.buffer) };
+    return c;
   }
-  // A label or airplane: L picks the layer (lbl always shown, code from zoom 3, fix from zoom 7,
-  // plane rotated with the map), anc the side of the picture on the point.
-  const symF = (p, spec, L, anc, rot, extra) => ({ type: "Feature", properties: { img: imgId(spec), L, anc: anc || "center", rot: rot || 0, ...(extra || {}) },
+  const IMGC = new Map();
+  function imgOf(id) {
+    let v = IMGC.get(id);
+    if (!v) {
+      try { const c = drawImg(JSON.parse(id.slice(2))); v = { url: c.toDataURL(), w: c.width / IMG_R, h: c.height / IMG_R }; }
+      catch { v = { url: "", w: 1, h: 1 }; }
+      IMGC.set(id, v);
+    }
+    return v;
+  }
+  // A label or airplane: L picks the group (lbl always shown, code from zoom 3, fix from zoom 7,
+  // plane rotated), anc the side of the picture on the point.
+  const symF = (p, spec, L_, anc, rot, extra) => ({ type: "Feature", properties: { img: imgId(spec), L: L_, anc: anc || "center", rot: rot || 0, ...(extra || {}) },
     geometry: { type: "Point", coordinates: [p[1], p[0]] } });
   const planeMk = (pos, hdg, color, badge, size) => symF(pos, badge ? ["badge"] : ["plane", color || "#fff", size || 0], "plane", "center", hdg);
-  let symT = 0;
-  const flushSym = () => {
-    if (symT) return;
-    symT = requestAnimationFrame(() => { symT = 0; const s_ = GL.ready && GL.map.getSource("sym"); if (s_) s_.setData(FC(GL.markers.filter((f) => !f.properties.hide))); });
-  };
+  const SYMS = { sym: [], laysym: [], surf: [], plc: [] };
+  const MK = new WeakMap(), SHOWN = new Set();
+  let SYMG = null;
+  const anchorOf = (p, im) => p.anc === "left" ? [p.L === "plc" ? 4 : 0, im.h / 2] : [im.w / 2, im.h / 2];
+  function markerOf(f) {
+    let m = MK.get(f);
+    if (m) return m;
+    const p = f.properties, im = imgOf(p.img), [lo, la] = f.geometry.coordinates;
+    const rot = p.L === "plane" && p.rot ? `transform:rotate(${p.rot}deg)` : "";
+    m = L.marker([la, lo], {
+      icon: L.divIcon({ className: "ft-sym", html: `<img src="${im.url}" width="${im.w}" height="${im.h}" style="${rot}" alt="">`, iconSize: [im.w, im.h], iconAnchor: anchorOf(p, im) }),
+      interactive: false, keyboard: false, pane: p.L === "plane" ? "planes" : "markerPane",
+    });
+    m._ftF = f; m._ftG = p.L === "plane" ? "planes" : "markerPane";
+    MK.set(f, m);
+    return m;
+  }
+  // which labels show: the ones that never hide first, then each colliding group in priority order
+  const FREE = [["sym", "lbl", 0], ["sym", "plane", 0], ["laysym", "a", 12.5], ["surf", "plane", 0]];
+  const RULES = [["surf", "tag", 0], ["laysym", "g", 15], ["laysym", "t", 14], ["sym", "code", 3], ["sym", "fix", 7], ["plc", null, 0]];
+  let placeRaf = 0;
+  const placeSoon = () => { if (!placeRaf) placeRaf = requestAnimationFrame(() => { placeRaf = 0; placeSymbols(); }); };
+  function placeSymbols() {
+    if (!LM || !SYMG) return;
+    const z = mlz(), want = new Set(), boxes = [], B = LM.getBounds().pad(0.15);
+    const inView = (f) => B.contains([f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+    const hit = (b) => boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+    for (const [src, k, minz] of FREE) if (z >= minz) for (const f of SYMS[src]) if (f.properties.L === k && !f.properties.hide && inView(f)) want.add(f);
+    for (const [src, k, minz] of RULES) {
+      if (z < minz) continue;
+      let list = SYMS[src].filter((f) => (k == null || f.properties.L === k) && !f.properties.hide);
+      if (src === "plc") list = list.filter((f) => z >= f.properties.mz).sort((a, b) => a.properties.k - b.properties.k);
+      const pad = src === "plc" ? 3 : 1;
+      for (const f of list) {
+        if (!inView(f)) continue;
+        const p = f.properties, im = imgOf(p.img), [ax, ay] = anchorOf(p, im);
+        const q = LM.latLngToContainerPoint([f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+        const b = [q.x - ax - pad, q.y - ay - pad, q.x - ax + im.w + pad, q.y - ay + im.h + pad];
+        if (hit(b)) continue;
+        boxes.push(b); want.add(f);
+      }
+    }
+    for (const m of [...SHOWN]) if (!want.has(m._ftF)) { SYMG[m._ftG].removeLayer(m); SHOWN.delete(m); }
+    for (const f of want) { const m = markerOf(f); if (!SHOWN.has(m)) { SYMG[m._ftG].addLayer(m); SHOWN.add(m); } }
+  }
+  const SRC = {};
+  function symSource(id) {
+    return {
+      setData(fc) {
+        const all = (fc && fc.features) || [];
+        if (id === "surf") { SRC.surfdot.setData(FC(all.filter((f) => f.properties.L === "dot"))); SYMS.surf = all.filter((f) => f.properties.L !== "dot"); }
+        else SYMS[id] = all;
+        placeSoon();
+      },
+    };
+  }
   function glMarkers(list) {
     GL.markers = list;
-    const s_ = GL.ready && GL.map.getSource("sym");
-    if (s_) s_.setData(FC(list));
+    SYMS.sym = list;
+    placeSoon();
     return list;
   }
   // move or hide one airplane without redrawing anything else
-  const mkHandle = (f) => f ? { setLatLng: (p) => { f.geometry.coordinates = [p[1], p[0]]; flushSym(); },
-    setOpacity: (o) => { f.properties.hide = o ? 0 : 1; flushSym(); } } : null;
-  const SYM = (overlap) => ({ "icon-image": ["get", "img"], "icon-anchor": ["get", "anc"], "icon-allow-overlap": overlap, "icon-ignore-placement": overlap, "icon-padding": 1 });
+  const mkHandle = (f) => f ? { setLatLng: (p) => { f.geometry.coordinates = [p[1], p[0]]; const m = MK.get(f); if (m) m.setLatLng(p); },
+    setOpacity: (o) => { f.properties.hide = o ? 0 : 1; placeSoon(); } } : null;
+  // Each paint says what it draws; everything else on the map is cleared.
+  function glSet(obj) {
+    for (const id of DYN) {
+      const v = obj[id], src = SRC[id];
+      if (!src) continue;
+      if (!v || (Array.isArray(v) && !v.length)) {
+        if (!GL.empty[id]) { src.setData(FC()); GL.empty[id] = true; GL.src[id] = null; GL.sig[id] = null; }
+        continue;
+      }
+      const fc = Array.isArray(v) ? FC(v) : v;
+      if (fc === GL.src[id]) continue;   // the same (big) collection as last time: leave it
+      // the same lines and dots as already drawn (most live updates change nothing here): leave them,
+      // rather than taking every route off the map and putting it back
+      const sig = Array.isArray(v) ? JSON.stringify(v) : null;
+      if (sig && sig === GL.sig[id] && !GL.empty[id]) { GL.src[id] = fc; continue; }
+      src.setData(fc); GL.src[id] = fc; GL.empty[id] = false; GL.sig[id] = sig;
+    }
+  }
   // ---------- place names and borders (Esri imagery) ----------
-  // From Natural Earth via the add-on (/api/places): drawn as crisp text like the map's other labels,
-  // so they're sharp at every zoom and don't jump in size between tile zooms. Countries, then states
-  // and provinces, then cities by population, each from the zoom Natural Earth suggests; the map
-  // drops ones that would collide. Hidden on Mapbox, Google and Dark, whose tiles have names.
+  // From Natural Earth via the add-on (/api/places): countries, then states and provinces, then
+  // cities by population, each from the zoom Natural Earth suggests; ones that would collide hide.
   let PLACES = null, placesP = null;
-  const placesOn = () => { const st = mapStyle(); return !(st === "dark" || (st === "mapbox" && mbTok()) || (st === "google" && gReady())); };
+  const placesOn = () => mapStyle() !== "dark";
   function loadPlaces() {
     if (PLACES || placesP) return placesP;
     placesP = fetch("api/places").then((r) => r.ok ? r.json() : Promise.reject(new Error(r.status))).then((d) => {
@@ -2212,173 +2303,98 @@
     return placesP;
   }
   function paintPlaces() {
-    const map = GL.map;
-    if (!map || !GL.ready) return;
-    const vis = placesOn() ? "visible" : "none";
-    for (const id of ["plc", "brd0", "brd1"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
-    if (vis === "none") return;
+    if (!LM || !SRC.plc) return;
+    if (!placesOn()) { SRC.plc.setData(FC()); SRC.brd.setData(FC()); SRC.plc._set = SRC.brd._set = null; return; }
     if (!PLACES) { loadPlaces(); return; }
-    const a = map.getSource("plc"), b = map.getSource("brd");
-    if (a && a._ftSet !== PLACES.pts) { a.setData(PLACES.pts); a._ftSet = PLACES.pts; }
-    if (b && b._ftSet !== PLACES.lines) { b.setData(PLACES.lines); b._ftSet = PLACES.lines; }
+    if (SRC.plc._set !== PLACES.pts) { SRC.plc.setData(PLACES.pts); SRC.plc._set = PLACES.pts; }
+    if (SRC.brd._set !== PLACES.lines) { SRC.brd.setData(PLACES.lines); SRC.brd._set = PLACES.lines; }
   }
-  // the globe lowers its zoom number as you move toward the poles (it keeps the earth the same size),
-  // so zoom-based rules would drop names and state lines there: shift them by the same amount
-  let plcOff = null;
-  function placeZoomFix(force) {
-    const map = GL.map;
-    if (!map || !GL.ready || !map.getLayer("plc")) return;
-    const off = flatMap() ? 0 : Math.round(-Math.log2(Math.max(0.2, Math.cos(map.getCenter().lat * Math.PI / 180))) * 10) / 10;
-    if (!force && off === plcOff) return;
-    plcOff = off;
-    map.setFilter("plc", [">=", ["+", ["zoom"], off], ["get", "mz"]]);
-    map.setLayerZoomRange("brd1", Math.max(0, 2.3 - off), 24);
+  // Radar. NOAA (default): the National Weather Service's MRMS mosaic, every NEXRAD radar merged and
+  // quality-controlled, as on radar.weather.gov; new every 5 minutes. RainViewer: worldwide, but raw.
+  const radarSrc = () => pref("ft-radar-src", "noaa");
+  const NOAA_RADAR = "https://mapservices.weather.noaa.gov/eventdriven/rest/services/radar/radar_base_reflectivity/MapServer/export"
+    + "?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&layers=show:3&f=image";
+  let radarT = null, RADAR_L = null, NoaaLayer = null;
+  async function glRadar(on) {
+    if (!LM) return;
+    if (RADAR_L) { LM.removeLayer(RADAR_L); RADAR_L = null; }
+    clearInterval(radarT); radarT = null;
+    if (!on) return;
+    try {
+      const common = { maxZoom: 21, opacity: 0.65, pane: "radar", updateWhenZooming: false, updateWhenIdle: true };
+      if (radarSrc() === "noaa") {
+        // one 512 px picture per tile, cut out of the national mosaic by its box (Web Mercator meters)
+        NoaaLayer = NoaaLayer || L.TileLayer.extend({ getTileUrl(c) {
+          const W = 20037508.342789244, span = 2 * W / 2 ** (c.z - 1), x0 = -W + c.x * span, y1 = W - c.y * span;
+          return this._url.replace("{bbox-epsg-3857}", `${x0},${y1 - span},${x0 + span},${y1}`);
+        } });
+        RADAR_L = new NoaaLayer(`${NOAA_RADAR}&_t=${Math.floor(Date.now() / 300000)}`, { ...common, tileSize: 512, zoomOffset: -1, maxNativeZoom: 11, attribution: "Radar &copy; NOAA/NWS MRMS" });
+      } else {
+        if (!RADAR || Date.now() - RADAR.at > 300000) {
+          const d = await fetch("https://api.rainviewer.com/public/weather-maps.json").then((r) => r.json());
+          const fr = d.radar.past[d.radar.past.length - 1];
+          RADAR = { url: `${d.host}${fr.path}/256/{z}/{x}/{y}/2/1_1.png`, at: Date.now() };
+        }
+        RADAR_L = L.tileLayer(RADAR.url, { ...common, tileSize: 256, maxNativeZoom: 7, attribution: "Radar &copy; RainViewer" });
+      }
+      RADAR_L.addTo(LM);
+      radarT = setInterval(() => { if (radarOn() && !document.hidden) glRadar(true); }, 300000);
+    } catch {}
   }
-  function placeLayers(add) {
-    const map = GL.map;
-    for (const id of ["plc", "brd"]) if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: FC() });
-    add({ id: "brd0", type: "line", source: "brd", filter: ["==", ["get", "a"], 0], paint: { "line-color": "#fff", "line-opacity": 0.5, "line-width": 0.9 } });
-    add({ id: "brd1", type: "line", source: "brd", minzoom: 2.3, filter: ["==", ["get", "a"], 1], paint: { "line-color": "#fff", "line-opacity": 0.28, "line-width": 0.7 } });
-    add({ id: "plc", type: "symbol", source: "plc", filter: [">=", ["zoom"], ["get", "mz"]],
-      layout: { ...SYM(false), "icon-padding": 3, "symbol-sort-key": ["get", "k"], "icon-offset": ["case", ["==", ["get", "anc"], "left"], ["literal", [-4, 0]], ["literal", [0, 0]]] } });
-    setTimeout(() => { paintPlaces(); placeZoomFix(true); }, 0);
-  }
-  function symLayers(add) {
-    const not = ["!=", ["get", "hide"], 1];
-    add({ id: "sym-fix", type: "symbol", source: "sym", minzoom: 7, filter: ["all", ["==", ["get", "L"], "fix"], not], layout: SYM(false) });
-    add({ id: "sym-code", type: "symbol", source: "sym", minzoom: 3, filter: ["all", ["==", ["get", "L"], "code"], not], layout: SYM(false) });
-    add({ id: "lay-a", type: "symbol", source: "laysym", minzoom: 12.5, filter: ["==", ["get", "L"], "a"], layout: SYM(true) });
-    add({ id: "lay-t", type: "symbol", source: "laysym", minzoom: 14, filter: ["==", ["get", "L"], "t"], layout: SYM(false) });
-    add({ id: "lay-g", type: "symbol", source: "laysym", minzoom: 15, filter: ["==", ["get", "L"], "g"], layout: SYM(false) });
-    add({ id: "surf-dot", type: "circle", source: "surf", filter: ["==", ["get", "L"], "dot"], paint: { "circle-radius": 2.5, "circle-color": "#8e8e93" } });
-    add({ id: "surf-plane", type: "symbol", source: "surf", filter: ["==", ["get", "L"], "plane"],
-      layout: { ...SYM(true), "icon-rotate": ["get", "rot"], "icon-rotation-alignment": "map" } });
-    add({ id: "surf-tag", type: "symbol", source: "surf", filter: ["==", ["get", "L"], "tag"], layout: SYM(false) });
-    add({ id: "sym-lbl", type: "symbol", source: "sym", filter: ["all", ["==", ["get", "L"], "lbl"], not], layout: SYM(true) });
-    add({ id: "sym-plane", type: "symbol", source: "sym", filter: ["all", ["==", ["get", "L"], "plane"], not],
-      layout: { ...SYM(true), "icon-rotate": ["get", "rot"], "icon-rotation-alignment": "map" } });
+
+  // ---------- the camera ----------
+  // MapLibre kept a padding (the part of the screen above the sheet) and centered things in it;
+  // Leaflet has none, so the map's center is placed so the point you want sits in that space.
+  let MOVING = false;
+  const padOff = (p) => L.point(((p.right || 0) - (p.left || 0)) / 2, ((p.bottom || 0) - (p.top || 0)) / 2);
+  const centerFor = (latlng, zl, pad) => LM.unproject(LM.project(latlng, zl).add(padOff(pad)), zl);
+  const camPoint = () => { const zl = LM.getZoom(); return LM.unproject(LM.project(LM.getCenter(), zl).subtract(padOff(GL.pad)), zl); };
+  const holdTiles = () => {};   // (Leaflet already keeps the pictures it has while the camera moves)
+  function camTo(o, dur) {
+    if (!LM) return;
+    const target = o.center ? L.latLng(o.center[1], o.center[0]) : camPoint();
+    const pad = { ...GL.pad, ...(o.padding || {}) };
+    const zl = Math.max(1.5, Math.min(20, o.zoom != null ? o.zoom + 1 : LM.getZoom()));
+    GL.pad = pad;
+    const c = centerFor(target, zl, pad);
+    if (!dur) { LM.setView(c, zl, { animate: false }); return; }
+    const dz = Math.abs(zl - LM.getZoom());
+    if (dz < 0.05) { LM.panTo(c, { animate: true, duration: Math.max(0.3, dur / 1000) }); return; }
+    FLYING = dz >= 1;
+    // only the long zooms (an airport button, coast to gates) hide routes and dots mid-move; reframing a
+    // page or a small zoom just lets them scale with the map
+    if (FLYING && dz > 4 && GL.flyStart) GL.flyStart();
+    // quick: under a second even for a coast-to-airport zoom (it was up to 2 s)
+    LM.flyTo(c, zl, { duration: Math.min(1.1, Math.max(0.5, (dur / 1000) * (dz > 3 ? 1.1 : 0.8))), easeLinearity: 0.2 });
   }
   // Fit the page's routes into the part of the screen the sheet doesn't cover (at its middle stop).
   function glFit(animate, now) {
-    const map = GL.map;
-    if (!map) return;
+    if (!LM) return;
     const b = GL.bounds;
     const padding = mapPad(GL.opts.kind === "leg" || GL.opts.kind === "nas", now);
-    // a program's centers usually span the whole country, wider than a phone: use the full width
-    // (center labels sit on their centers, nothing hangs off to the right)
     if (GL.opts.kind === "nas") { padding.left = 18; padding.right = 58; }
-    // My Flights: the routes centered on the screen, as wide as it allows (the buttons may overlap a
-    // corner; shifting everything left to dodge them made the globe look lopsided)
-    if (!GL.opts.kind) { padding.left = 26; padding.right = 26; }   // Passport: the whole globe, centered
-    // My Flights: keep clear of the blurred strip under the status bar (and the credit line in it)
-    // and of the button column on the right, so the routes sit in the open part of the map
+    if (!GL.opts.kind) { padding.left = 26; padding.right = 26; }
     if (GL.opts.kind === "home") { padding.left = 22; padding.right = 66; padding.top = Math.max(padding.top, 92); }
     if (GL.opts.kind === "leg") padding.top = Math.max(padding.top, 92);
     GL.fitBottom = padding.bottom;
     const dur = animate ? 900 : 0;
-    // Face-on, like Flighty: the camera looks straight at the middle of the routes, and the map's
-    // padding slides the whole picture into the part of the screen above the sheet. (fitBounds
-    // instead aimed the camera far south of the routes to make room for the sheet: on the globe that
-    // tilts the view, so the routes sat foreshortened near the top edge of the earth.)
+    // nothing to frame yet (the flights are still loading): stay where the map opened, which is where you
+    // left it last time, rather than flying to a default and then on to your routes a moment later
+    if (!GL.globeView && !b.length && !GL.everFit) return;
     if (GL.globeView || !b.length) {
       const c = GL.globeView || [35, -85];
       camTo({ center: [c[1], c[0]], zoom: GL.globeZoom || 1.6, padding }, dur);
       return;
     }
-    let w = 180, e = -180, s = 90, n = -90;
-    for (const [la, lo] of b) { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
-    const my = (la) => Math.log(Math.tan(Math.PI / 4 + Math.max(-85, Math.min(85, la)) * Math.PI / 360));
-    const cLat = Math.atan(Math.sinh((my(s) + my(n)) / 2)) * 180 / Math.PI, center = [(w + e) / 2, cLat];
-    // the zoom at which the box fills the padded area (Web Mercator: 512 px world at zoom 0); on the
-    // globe the map's zoom number means the same scale at the point it's centered on
-    const W = MAP_EL.clientWidth || window.innerWidth, H = MAP_EL.clientHeight || window.innerHeight;
-    const aw = Math.max(80, W - padding.left - padding.right), ah = Math.max(80, H - padding.top - padding.bottom);
-    const dx = Math.max(1e-6, (e - w) / 360), dy = Math.max(1e-6, (my(n) - my(s)) / (2 * Math.PI));
-    // with room around them, like Flighty: My Flights' routes take about 90% of the open space (some
-    // context and the globe's curve around them), a flight 85%, Passport 90%, an FAA program all of it
+    // longitudes kept on one side of the date line, around the first point
+    const ref = b[0][1], pts = b.map(([la, lo]) => { let x = lo; while (x - ref > 180) x -= 360; while (x - ref < -180) x += 360; return [la, x]; });
+    const bounds = L.latLngBounds(pts);
+    // with room around them, like Flighty: My Flights' routes take about 90% of the open space, a flight 85%
     const fill = { home: 0.9, leg: 0.85, nas: 1 }[GL.opts.kind] || 0.9;
-    const maxZ = GL.maxZoom || 7;
-    let c = center, z = Math.max(0.5, Math.min(Math.log2(Math.min(aw / (dx * 512), ah / (dy * 512)) * fill), maxZ));
-    // Then measure on screen, the way you'd eyeball it: try the camera (no frame is drawn in
-    // between), see where the routes' northern, southern, eastern and western ends land, and nudge
-    // until they sit the same distance from the edges of the space above the sheet. The globe's
-    // curve makes a flat-map estimate sit a little high or low; this takes it out.
-    try {
-      const orig = { center: map.getCenter(), zoom: map.getZoom(), padding: map.getPadding() };
-      const pts = b.map(([la, lo]) => [lo, la]);
-      for (let i = 0; i < 4; i++) {
-        map.jumpTo({ center: c, zoom: z, padding });
-        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-        for (const p of pts) { const q = map.project(p); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
-        if (!isFinite(x0)) break;
-        const k = Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0)) * fill;
-        const tx = padding.left + aw / 2, ty = padding.top + ah / 2, mx = (x0 + x1) / 2, my_ = (y0 + y1) / 2;
-        const cc = map.unproject([mx, my_]);   // the camera's point shows at (tx, ty): aim it at the routes' middle
-        c = [cc.lng, cc.lat];
-        z = Math.max(0.5, Math.min(z + Math.log2(k), maxZ));
-        if (Math.abs(Math.log2(k)) < 0.03 && Math.abs(mx - tx) < 3 && Math.abs(my_ - ty) < 3) break;
-      }
-      map.jumpTo(orig);
-    } catch {}
-    camTo({ center: c, zoom: z, padding }, dur);
-  }
-  // Short moves glide. Zooming far out (from an airport back to your routes) pulls back like a
-  // camera: the zoom eases out while the center travels in step with how much of the earth comes
-  // into view, so the airport stays roughly put at first and the view settles over your routes as
-  // it widens (a fly-to slid sideways first; a plain glide looked like passing through the globe).
-  // Zooming far in still flies, which already looks right.
-  let camAnim = 0;
-  // A long zoom (into an airport, out to your routes) would load and draw imagery at every zoom
-  // level it passes through, most of it on screen for a split second: that's the stutter. The way
-  // Google's map does it instead: keep showing the pictures already loaded, stretched, while the
-  // camera moves, refreshing them only every 3 zoom levels, then load the sharp ones where it stops
-  // (usually already on the phone: the trip-map download saves the close-ups of your airports).
-  const HOLD = { on: false, z: 0, t: 0 };
-  const holdCaches = () => { const sc = (GL.map && GL.map.style && GL.map.style.sourceCaches) || {}; return ["base", "under"].map((k) => sc[k]).filter((c) => c && c.pause && c.resume); };
-  function holdTiles() {
-    if (!GL.map || HOLD.on) return;
-    HOLD.on = true; HOLD.z = GL.map.getZoom();
-    for (const c of holdCaches()) { try { c.pause(); } catch {} }
-    clearTimeout(HOLD.t); HOLD.t = setTimeout(releaseTiles, 3500);   // never stuck
-  }
-  function releaseTiles() {
-    clearTimeout(HOLD.t);
-    if (!HOLD.on) return;
-    HOLD.on = false;
-    for (const c of holdCaches()) { try { c.resume(); } catch {} }
-    try { GL.map.triggerRepaint(); } catch {}
-  }
-  function holdStep() {   // during the move: a fresh set every 3 zoom levels
-    if (!HOLD.on) return;
-    const z = GL.map.getZoom();
-    if (Math.abs(z - HOLD.z) < 3) return;
-    HOLD.z = z;
-    for (const c of holdCaches()) { try { c.resume(); c.pause(); } catch {} }
-  }
-  function camTo(o, dur) {
-    const map = GL.map;
-    cancelAnimationFrame(camAnim); camAnim = 0;
-    const z0 = map.getZoom(), z1 = o.zoom ?? z0;
-    if (dur && Math.abs(z1 - z0) > 2.5) holdTiles();
-    if (!dur || Math.abs(z1 - z0) <= 2.5) { map.easeTo({ ...o, duration: dur }); return; }
-    if (z1 > z0) { map.flyTo({ ...o, duration: Math.min(2200, Math.max(1300, dur * 1.6)), curve: 1.42, essential: true }); return; }
-    const M = maplibregl.MercatorCoordinate, a = M.fromLngLat(map.getCenter()), bC = M.fromLngLat(o.center);
-    const p0 = map.getPadding(), p1 = { ...p0, ...(o.padding || {}) };
-    const s0 = 2 ** -z0, s1 = 2 ** -z1, T = Math.min(1800, Math.max(1100, dur * 1.4)), t0 = performance.now();
-    const ease = (t) => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    map.stop();
-    const stopOnTouch = () => { cancelAnimationFrame(camAnim); camAnim = 0; releaseTiles(); };
-    map.once("dragstart", stopOnTouch); map.once("zoomstart", (e) => { if (e.originalEvent) stopOnTouch(); });
-    const step = (now) => {
-      const t = Math.min(1, (now - t0) / T), e = ease(t), z = z0 + (z1 - z0) * e;
-      const f = (2 ** -z - s0) / (s1 - s0);   // how far the view has widened, 0 to 1
-      const x = a.x + (bC.x - a.x) * f, y = a.y + (bC.y - a.y) * f;
-      const pad = {}; for (const k of ["top", "bottom", "left", "right"]) pad[k] = p0[k] + (p1[k] - p0[k]) * e;
-      map.jumpTo({ center: new M(x, y).toLngLat(), zoom: z, padding: pad });
-      if (t < 1) camAnim = requestAnimationFrame(step);
-      else { camAnim = 0; map.fire("moveend"); }
-    };
-    camAnim = requestAnimationFrame(step);
+    let zl = LM.getBoundsZoom(bounds, false, L.point(padding.left + padding.right, padding.top + padding.bottom));
+    zl = Math.max(1.5, Math.min(zl + Math.log2(fill), (GL.maxZoom || 7) + 1));
+    const mid = LM.unproject(LM.project(bounds.getSouthWest(), zl).add(LM.project(bounds.getNorthEast(), zl)).divideBy(2), zl);
+    camTo({ center: [mid.lng, mid.lat], zoom: zl - 1, padding }, dur);
   }
   // The part of the screen the map shows above the sheet (at its middle stop), less room for the
   // buttons on the right, the speed pill on top, and labels that hang off to the right of a point.
@@ -2390,27 +2406,27 @@
     return { top: document.getElementById("telem") ? 96 : 52, left: 36, right: labels ? 140 : 80,
       bottom: Math.max(24, Math.min(H - 170, H - top + 12)) };
   }
-  // shift a centered point into the middle of the part of the map you can see
   const padOffset = (p) => [(p.left - p.right) / 2, (p.top - p.bottom) / 2];
   function restyleAll() {
-    if (!GL.map) return;
-    GL.ready = false;
-    GL.layoutFor = null;
-    GL.map.setStyle(glStyle(), { diff: false });
+    if (!LM) return;
+    if (GL.base) LM.removeLayer(GL.base);
+    GL.base = baseLayer().addTo(LM);
+    paintPlaces();
   }
   function glControls() {
-    const ctl = {
+    const Ctl = L.Control.extend({
       onAdd() {
-        const d = document.createElement("div");
-        d.className = "maplibregl-ctrl gl-ctrls";
+        const d = L.DomUtil.create("div", "gl-ctrls");
         d.innerHTML = `<div class="map-stack"><button type="button" data-a="style" aria-label="Map style">${IC.map}</button><button type="button" data-a="radar" class="${radarOn() ? "on" : ""}" aria-label="Weather radar">${IC.cloud}</button><button type="button" data-a="apts" class="only-home" aria-label="Airport status">${TOWER}</button></div>
           <button type="button" class="map-center" data-a="fit" aria-label="Center">${IC.locate}</button>
           <button type="button" class="map-center only-leg" data-a="dep" aria-label="Zoom to the departure airport">${IC.takeoff}</button>
           <button type="button" class="map-center only-leg" data-a="arr" aria-label="Zoom to the arrival airport">${IC.land}</button>
           <button type="button" class="map-center xpdr only-surf" data-a="xpdr" aria-label="Transponder filter">XPDR</button>
           <button type="button" class="map-center xpdr only-surf" data-a="ids" aria-label="Show callsigns">ID</button>`;
+        L.DomEvent.disableClickPropagation(d);
+        L.DomEvent.disableScrollPropagation(d);
         const on = (a, f) => { d.querySelector(`[data-a="${a}"]`).onclick = (e) => { e.preventDefault(); f(); }; };
-        on("style", () => { const L = STYLES(); setPref("ft-mapstyle", L[(L.indexOf(mapStyle()) + 1) % L.length]); restyleAll(); });
+        on("style", () => { const S_ = STYLES(); setPref("ft-mapstyle", S_[(S_.indexOf(mapStyle()) + 1) % S_.length]); restyleAll(); });
         on("radar", () => {
           const v = !radarOn();
           setPref("ft-radar", v ? "1" : "0");
@@ -2419,74 +2435,93 @@
         });
         on("apts", () => go("#/airports"));
         on("fit", () => glFit(true, true));
-        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p && Math.abs(GL.map.getZoom() - 14) > 2.5) holdTiles(); if (p) GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, padding: mapPad(false) }); });
+        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) camTo({ center: [p[1], p[0]], zoom: 14, padding: mapPad(false) }, 1200); });
         on("xpdr", () => { setPref("ft-surf-all", pref("ft-surf-all", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         on("ids", () => { setPref("ft-surf-ids", pref("ft-surf-ids", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         GL.ctl = d;
         paintTower();
         return d;
       },
-      onRemove() {},
-    };
-    GL.map.addControl(ctl, "top-right");
+    });
+    new Ctl({ position: "topright" }).addTo(LM);
   }
+  // What the rest of the app calls GL.map (the MapLibre calls it used, on Leaflet).
+  function mapAdapter() {
+    return {
+      getZoom: () => mlz(),
+      getCenter: () => { const c = camPoint(); return { lat: c.lat, lng: c.lng }; },
+      getBounds: () => LM.getBounds(),
+      getSource: (id) => SRC[id] || null,
+      getLayer: () => null,
+      easeTo: (o) => camTo(o, o.duration ?? 500),
+      flyTo: (o) => camTo(o, o.duration ?? 1200),
+      jumpTo: (o) => camTo(o, 0),
+      getPadding: () => ({ ...GL.pad }),
+      isMoving: () => MOVING,
+      resize: () => LM.invalidateSize({ pan: false }),
+      hasImage: (id) => IMGC.has(id),
+      addImage: (id) => { imgOf(id); },
+      setPixelRatio: () => {},
+      stop: () => LM.stop(),
+      triggerRepaint: () => {},
+    };
+  }
+  // The map opens on the last My Flights framing (saved whenever My Flights' map stops moving), so
+  // nothing visibly moves while your flights load.
+  const LAST_CAM = (() => {
+    try { const v = JSON.parse(localStorage.getItem("ft-lcam") || "null"); if (v && Array.isArray(v.c) && isFinite(v.z)) return v; } catch {}
+    return { c: [35, -85], z: 2.6 };
+  })();
   function glInit() {
     if (GL.map) return true;
-    if (!window.maplibregl || !MAP_EL) return false;
+    if (!window.L || !MAP_EL) return false;
     tcInit();
-    const map = GL.map = new maplibregl.Map({ container: MAP_EL, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
-      dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 8,
-      pixelRatio: mapPR() });
-    map.touchZoomRotate.disableRotation();
-    map.keyboard.disable();
-    map.addControl(GL.attrib = new maplibregl.AttributionControl({ compact: false }), "top-left");
-    map.on("styleimagemissing", (e) => {
-      if (!e.id || !e.id.startsWith("x:") || map.hasImage(e.id)) return;
-      try { map.addImage(e.id, drawImg(JSON.parse(e.id.slice(2))), { pixelRatio: IMG_R }); } catch {}
-    });
+    LM = L.map(MAP_EL, { zoomControl: false, attributionControl: false, worldCopyJump: true, zoomSnap: 0, zoomDelta: 1,
+      wheelPxPerZoomLevel: 90, minZoom: 1.5, maxZoom: 20, center: LAST_CAM.c, zoom: LAST_CAM.z, inertia: true, bounceAtZoomLimits: false,
+      zoomAnimationThreshold: 6, fadeAnimation: true, markerZoomAnimation: true, tapHold: false });
+    for (const [n, zi] of [["night", 250], ["radar", 260], ["lay", 350], ["artcc", 380], ["brd", 390], ["dots", 450], ["planes", 650]]) {
+      const p = LM.createPane(n); p.style.zIndex = zi; p.style.pointerEvents = "none";
+    }
+    L.control.attribution({ prefix: false, position: "topleft" }).addTo(LM);
+    GL.base = baseLayer().addTo(LM);
+    GL.night = L.imageOverlay(nightImage(), MERC_LL, { pane: "night", interactive: false }).addTo(LM);
+    VSTY.surfdot = { pane: "dots", s: () => [{ radius: 2.5, color: "#8e8e93", fillColor: "#8e8e93", fillOpacity: 1, stroke: false }] };
+    liveInit();
+    for (const id of [...DYN, ...LAY, "brd", "surfdot"]) SRC[id] = LIVE_IDS.includes(id) ? liveSource(id) : vecSource(id);
+    for (const id of ["sym", "laysym", "surf", "plc"]) SRC[id] = symSource(id);
+    SYMG = { markerPane: L.layerGroup().addTo(LM), planes: L.layerGroup().addTo(LM) };
+    GL.map = mapAdapter();
+    window.__ftMap = LM;   // (for testing)
+    GL.ready = true;
     glControls();
-    // every style load (the first, and after a Satellite/Dark switch): our layers, then the page's picture
-    map.on("style.load", () => {
-      glLayers();
-      GL.ready = true;
-      if (GL.paint) { const fit = GL.fitPending; GL.fitPending = false; GL.paint(GL.data, fit); }
-      layoutCheck();
-    });
     // labels by zoom (airport codes, route fixes, taxiways, gates), in the old map's zoom numbers
-    const zc = () => { const z = map.getZoom() + 1; for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
-    map.on("zoom", zc); zc();
-    map.on("moveend", () => { if (camAnim) return; releaseTiles(); layoutCheck(); surfaceNow(); gAttr(); });
-    map.on("move", holdStep);
-    map.on("dragstart", releaseTiles); map.on("touchstart", () => { if (HOLD.on && !camAnim) { map.stop(); releaseTiles(); } });
-    // The globe keeps its size as you drag north or south by lowering the zoom number (by
-    // log2 cos(latitude)), and tiles are picked from that number: halfway across, the map switched
-    // to the next coarser tiles, so the picture went soft and baked-in labels jumped bigger. Scaling
-    // each source's tile size by cos(latitude) undoes that: the same tiles as long as the globe
-    // looks the same size.
-    const latFix = () => {
-      if (!GL.ready) return;
-      // (the flat map doesn't change its zoom number with latitude: nothing to undo)
-      const c = flatMap() ? 1 : Math.max(0.25, Math.cos(map.getCenter().lat * Math.PI / 180));
-      for (const id of ["under", "base", "lbl"]) {
-        const src = map.getSource(id);
-        if (!src) continue;
-        if (!src._ftTs) src._ftTs = src.tileSize;
-        src.tileSize = src._ftTs * c;
-      }
-    };
-    map.on("move", latFix);
-    map.on("moveend", () => { if (!camAnim) placeZoomFix(); });
+    const zc = () => { const z = LM.getZoom(); for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
+    LM.on("zoom", zc); zc();
+    LM.on("movestart zoomstart", () => { MOVING = true; });
+    LM.on("moveend", () => { MOVING = false; placeSymbols(); layoutCheck(); surfaceNow(); });
+    LM.on("zoomend", () => { for (const s of Object.values(SRC)) if (s.restyle) s.restyle(); if (GL.lastSurface) paintSurface(GL.lastSurface); });
+    // Lines and dots are drawn once and the browser scales the drawing while the camera moves. Fine for
+    // a small zoom, but over a long one (an airport button: zoom 3 to 15) a 4 px airport dot grew past
+    // the whole screen and routes got fat. Redrawing them mid-move made them jump about, so instead,
+    // once a camera flight has zoomed more than a level from where it started, they fade out and come
+    // back drawn sharp where it stops. Pinches and drags never hide them.
+    let flyZ0 = null;
+    const flyEnd = () => { FLYING = false; flyZ0 = null; MAP_EL.classList.remove("ft-flyfar"); };
+    GL.flyStart = () => { flyZ0 = LM.getZoom(); };
+    LM.on("zoom", () => { if (FLYING && flyZ0 != null && Math.abs(LM.getZoom() - flyZ0) > 2.5) MAP_EL.classList.add("ft-flyfar"); });
+    // a camera flight ends where it stops, or the moment you touch the map
+    LM.on("moveend", flyEnd);
+    LM.on("moveend", () => { if (GL.opts.kind !== "home" || !GL.bounds.length) return; try { const c = LM.getCenter(); localStorage.setItem("ft-lcam", JSON.stringify({ c: [+c.lat.toFixed(4), +c.wrap().lng.toFixed(4)], z: +LM.getZoom().toFixed(2) })); } catch {} });
+    MAP_EL.addEventListener("touchstart", flyEnd, { passive: true });
+    loadPlaces();
+    if (radarOn()) glRadar(true);
     setTimeout(warmWorld, 8000);
     setTimeout(warmTrips, 20000);
-    // back on screen (after swiping home, locking, another app): pick up where it stopped, a few
-    // seconds in so the screen you return to loads first. Finished runs still wait their 6 hours.
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) setTimeout(() => { if (!document.hidden) warmTrips(); }, 4000);
     });
-    map.on("style.load", latFix);
-    map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
-    setInterval(() => { const src = GL.ready && map.getSource("night"); if (src) src.updateImage({ url: nightImage(), coordinates: MERC }); }, 600000);
+    setInterval(() => { if (GL.night) GL.night.setUrl(nightImage()); }, 600000);
     return true;
   }
   // A page puts its picture on the map. A new page glides the camera to its routes; the same page
@@ -2503,9 +2538,6 @@
     GL.map.resize();
     paint(data, fit);
   }
-  // always framed for where the sheet actually is (Passport opens with it lower than My Flights)
-  // A page draws its map before the router moves the sheet to that page's resting spot, so the
-  // framing waits a frame and measures the sheet where it really is (like the center button).
   // A page draws its map before the sheet has glided to that page's resting spot (Passport rests
   // lower than My Flights), so the framing waits until the sheet stops moving, then frames once for
   // the room actually left above it (as the center button does): one movement, not two.
@@ -2518,7 +2550,7 @@
       if (GL.view !== view) return;
       const g = document.querySelector(".sheet-gap"), y = g ? Math.round(g.getBoundingClientRect().bottom) : 0;
       still = y === last ? still + 1 : 0; last = y;
-      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = true; return; }
+      if (still >= 3 || performance.now() - t0 > 700) { GL.fitRaf = 0; glFit(!!GL.everFit, true); GL.everFit = GL.everFit || GL.bounds.length > 0; bootCheck(); return; }
       GL.fitRaf = requestAnimationFrame(tick);
     };
     GL.fitRaf = requestAnimationFrame(tick);
@@ -2627,7 +2659,7 @@
       if (!map || !GL.ready) return;
       while (ids.length && (dl.timeRemaining() > 2 || ids.length % 8)) {
         const id = ids.pop();
-        if (!map.hasImage(id)) { try { map.addImage(id, drawImg(JSON.parse(id.slice(2))), { pixelRatio: IMG_R }); } catch {} }
+        if (!map.hasImage(id)) map.addImage(id);
       }
       if (ids.length) idle(drawSome);
     };
@@ -3515,7 +3547,6 @@
         <button type="button" class="gl-row" id="p-refresh"><span>Check all flights now</span><span class="small muted" id="p-refresh-msg"></span></button>
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Map sharpness<small class="gl-sub">Fewer pixels to draw: Fast is softer but the lightest</small></span><div class="seg mini">${[["full", "Full"], ["balanced", "Balanced"], ["fast", "Fast"]].map(([k, l]) => `<button type="button" data-mapq="${k}" class="${pref("ft-mapq", "full") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
-        <div class="gl-row"><span>Map shape<small class="gl-sub">Flat is lighter to draw: smoother dragging and zooming</small></span><div class="seg mini">${[["globe", "Globe"], ["flat", "Flat"]].map(([k, l]) => `<button type="button" data-proj="${k}" class="${(flatMap() ? "flat" : "globe") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
         <div class="gl-row"><span>Map for your trips<small class="gl-sub" id="wt-info">${(() => { const w = warmStatus(); return WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}${WARMT.home ? " · home network, full speed" : ""}` : w ? `Saved: your routes, every zoom over their airports and the inbound airports, their diagrams, and your Passport airports (${w.tiles.toLocaleString()} tiles) · checked ${ago(w.at / 1000)}` : "Downloads in the background while the app is open"; })()}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="wt-now">Update</button>' : ""}</div>
@@ -3700,6 +3731,7 @@
       document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
       morphing = route === lastRoute && $root.childElementCount > 0;
       document.body.classList.toggle("sheetmode", !/^#\/(add|tools|notify|history\/(stats|find|alerts))/.test(route));
+      if (!document.body.classList.contains("sheetmode")) requestAnimationFrame(bootDone);   // no map on this page
       const m = route.match(/^#\/leg\/([\w-]+)/);
       const ma = route.match(/^#\/aircraft\/([\w-]+)\/(\d+)/);
       const mh = route.match(/^#\/history(?:\/(stats|alerts))?(?:\/(\d{4}))?$/);
@@ -3861,7 +3893,19 @@
   if ("serviceWorker" in navigator && window.isSecureContext && !/hassio_ingress|api\/ingress/.test(location.pathname)) {
     navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {});
     // a tapped notification while the app is open: go to that flight
-    navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.go) go(e.data.go); });
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data && e.data.go) go(e.data.go);
+      // The page opens from the phone's copy and the new one is fetched behind it. When that turns out
+      // to be a new version: just opened, switch to it now; otherwise the next time the app is hidden.
+      // (once per version, so a page that can't load can never reload itself in a loop)
+      if (e.data && e.data.updated) {
+        let seen = null;
+        try { seen = sessionStorage.getItem("ft-updated"); sessionStorage.setItem("ft-updated", String(Date.now())); } catch {}
+        if (seen && Date.now() - Number(seen) < 60000) return;
+        if (performance.now() < 5000) location.reload();
+        else document.addEventListener("visibilitychange", () => { if (document.hidden) location.reload(); }, { once: true });
+      }
+    });
     // ask iOS / the browser to keep the app's storage (map tiles, flights) rather than clear it when space runs low
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then((p) => p || navigator.storage.persist()); } catch {}
   }

@@ -370,7 +370,7 @@ a.card.inbound { display: block; }
 /* Tile seams: Safari can leave a hairline between tiles. Base-map tiles overlap by half a pixel
    (drawn normally, so the overlap can't brighten); the transparent label tiles are left alone. */
 .leaflet-container img.leaflet-tile { mix-blend-mode: normal !important; }
-.leaflet-tile-pane img.leaflet-tile { width: 256.5px !important; height: 256.5px !important; }
+/* (the half-pixel overlap is set per tile in app.js, from the layer's own tile size: 128, 256 or 512) */
 .leaflet-container { background: #0a1424 !important; }
 
 /* live-update indicator */
@@ -964,22 +964,8 @@ body:has(.telem) .mapbg .leaflet-top.leaflet-right { top: calc(var(--sat) + 48px
 .sheet-head .xbtn { margin: 0; }
 @media (max-width: 380px) { .fr-cities { font-size: 17px; } .fr-times { font-size: 14px; } .ep-big { font-size: 29px; } }
 
-/* ---- 3D globe maps (MapLibre) ---- */
-.mapbg.maplibregl-map {
-  background-color: #000;
-  background-image: radial-gradient(1.2px 1.2px at 12% 18%, rgba(255,255,255,.85), transparent 60%),
-    radial-gradient(1px 1px at 63% 41%, rgba(255,255,255,.6), transparent 60%), radial-gradient(1px 1px at 37% 77%, rgba(255,255,255,.7), transparent 60%),
-    radial-gradient(1.4px 1.4px at 85% 12%, rgba(255,255,255,.8), transparent 60%), radial-gradient(1px 1px at 91% 66%, rgba(255,255,255,.5), transparent 60%),
-    radial-gradient(1px 1px at 24% 52%, rgba(255,255,255,.45), transparent 60%), radial-gradient(1.2px 1.2px at 52% 8%, rgba(255,255,255,.65), transparent 60%),
-    radial-gradient(1px 1px at 72% 88%, rgba(255,255,255,.55), transparent 60%);
-  background-size: 260px 260px;
-}
-.mapbg .maplibregl-ctrl-top-right, .mapbg .maplibregl-ctrl-top-left { top: var(--sat); }
 .gl-ctrls { display: flex; flex-direction: column; align-items: flex-end; margin: 10px 10px 0 0 !important; background: none !important; box-shadow: none !important; }
 .gl-ctrls .map-center { display: grid; place-items: center; cursor: pointer; color: #fff; padding: 0; }
-.mapbg .maplibregl-ctrl-attrib { background: rgba(0,0,0,.35) !important; color: rgba(255,255,255,.6); font-size: 9px; margin: 6px !important; }
-.mapbg .maplibregl-ctrl-attrib a { color: rgba(255,255,255,.6); }
-.mapbg .maplibregl-ctrl-attrib-button { filter: invert(1); opacity: .6; }
 .pbadge.gl { width: 28px; height: 28px; }
 .gl-code { font: 700 10px/1 -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000, 0 0 1px #000;
   white-space: nowrap; pointer-events: none; display: none; }
@@ -1012,7 +998,6 @@ body:not(.sheetmode) #map { visibility: hidden; }
 /* ---- smoother map: nothing blurs what's behind it while the map moves (the blur was redrawn on
    every frame of a pan or zoom); a lighter sheet shadow ---- */
 .map-stack, .map-center, .telem { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: rgba(38,38,42,.94) !important; }
-.mapbg .maplibregl-ctrl-attrib { backdrop-filter: none; }
 .sheet { box-shadow: 0 -4px 16px rgba(0,0,0,.35); }
 
 /* the Mine / A friend's switch: its hidden radio buttons got the form's full-width input style and,
@@ -1041,9 +1026,6 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .map-stack button[data-lvl="red"] { color: var(--red); }
 
 /* the map's credit line: one small pill, top left, always spelled out */
-.mapbg .maplibregl-ctrl-attrib.maplibregl-compact { min-height: 0; }
-.mapbg .maplibregl-ctrl-attrib { border-radius: 9px; padding: 2px 7px !important; margin: 8px 0 0 10px !important; max-width: calc(100vw - 90px); }
-.mapbg .maplibregl-ctrl-attrib-inner { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; line-height: 1.35; }
 .attr-logo { height: 11px; vertical-align: middle; }
 .attr-mb { font-size: 11px; color: #fff; letter-spacing: -0.02em; margin-right: 2px; }
 
@@ -1063,3 +1045,27 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .gl-row > .seg.mini { flex: 1 1 100%; }
 .gl-row > .seg.mini button { flex: 1; padding: 7px 6px; }
 .pa-photo { margin: 10px 0 8px; filter: drop-shadow(0 6px 8px rgba(29,42,85,.28)); }
+
+
+/* ---- Leaflet copy of the app (/leaflet/): the map's frame, controls and labels ---- */
+.mapbg.leaflet-container { background-color: #000; font: inherit; }
+.mapbg .leaflet-top { top: var(--sat); }
+.mapbg .leaflet-control-container .leaflet-top.leaflet-right .gl-ctrls { margin: 10px 10px 0 0; }
+.mapbg .leaflet-control-attribution { background: rgba(0,0,0,.35) !important; color: rgba(255,255,255,.6); font-size: 9px; line-height: 1.35;
+  border-radius: 9px; padding: 2px 7px !important; margin: 8px 0 0 10px !important; max-width: calc(100vw - 90px); }
+.mapbg .leaflet-control-attribution a { color: rgba(255,255,255,.6); }
+.ft-sym { background: none; border: 0; pointer-events: none; }
+.ft-sym img { display: block; max-width: none; }
+/* the satellite tiles: no seams between them while the browser scales them during a zoom */
+.ft-base img.leaflet-tile { outline: 1px solid transparent; }
+/* the satellite, dimmed a touch per tile (cheap for Safari, unlike fading the whole layer) */
+.ft-sat .leaflet-tile-pane img.leaflet-tile { filter: brightness(0.86); }
+
+/* long camera flights: routes and dots fade out mid-zoom (they'd be stretched) and come back sharp */
+#map canvas:not(.ft-live) { transition: opacity .18s ease; }
+#map.ft-flyfar canvas:not(.ft-live) { opacity: 0; transition: opacity .1s ease; }
+
+/* opening the app: the map and sheet appear together, once your routes are framed and the first
+   imagery is in (at most 1.5 s), instead of a blank map, then routes, then imagery, then a nudge */
+body.booting #map, body.booting #app, body.booting #top { opacity: 0; }
+body.boot-fade #map, body.boot-fade #app, body.boot-fade #top { transition: opacity .35s ease; }

@@ -25,10 +25,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <!-- the map library is served by the add-on (cached on the phone for a year), from the CDN only if
      it's missing; it loads in the background and never holds up the first draw -->
-<link rel="stylesheet" href="maplibre-gl.css" onerror="this.onerror=null;this.href='https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css'">
+<link rel="stylesheet" href="leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="booting">
 <header class="top" id="top">
   <span id="live" class="live" title="Connecting…"><i></i>Live</span>
   <a id="drive" class="live drive" href="#/tools" hidden title="Google Drive backup"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.99 5.99 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg><b>Drive</b></a>
@@ -45,7 +45,7 @@
   </div>
   <a class="tab-search" href="#/history/find" data-tab="search" aria-label="Search"><svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM15.5 15.5 20 20"/></svg></a>
 </nav>
-<script async src="maplibre-gl.js" onload="window.__mapReady&&__mapReady()" onerror="var s=document.createElement('script');s.src='https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js';s.onload=function(){window.__mapReady&&__mapReady()};document.head.appendChild(s)"></script>
+<script async src="leaflet.js" onload="window.__mapReady&&__mapReady()"></script>
 <script defer src="app.js"></script>
 </body>
 </html>

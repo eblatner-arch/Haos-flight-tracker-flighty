@@ -42,9 +42,8 @@ DATA_DIR = os.environ.get("FT_DATA", "/data")
 LIVERY_DIR = os.path.join(DATA_DIR, "livery")
 SHOT_DIR = os.environ.get("FT_SHOTS", "/share/flight_tracker_flighty")
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
-# A second copy of the app at /leaflet/ (the same add-on, same data), drawing its map with Leaflet
-# instead of MapLibre, to compare the two. Files not in www-leaflet come from www.
-WWW_L = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www-leaflet")
+# /leaflet/ was a second copy of the app while Leaflet was being tried out; it now answers with the
+# same app (Home Screen icons made for it keep working).
 PORT = int(os.environ.get("FT_PORT", "8099"))
 VERSION = os.environ.get("FT_VERSION", "dev")
 SUPERVISOR = os.environ.get("FT_SUPERVISOR_URL", "http://supervisor")
@@ -3793,7 +3792,7 @@ STATIC = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=
 # phone keeps those for a year and only re-checks index.html (a 304 when nothing changed).
 _FILES = {}
 _COMPRESSIBLE = ("text/", "application/json", "application/manifest+json", "image/svg+xml")
-_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|maplibre-gl\.(?:js|css)|leaflet\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
+_ASSET_REF = re.compile(r'(?<=["\'])((?:app\.js|style\.css|leaflet\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|manifest\.webmanifest))(?=["\'])')
 
 
 def static_file(full):
@@ -3811,11 +3810,7 @@ def static_file(full):
 
 
 def web_file(name, www=WWW):
-    """A web file's path: from www-leaflet first when serving the Leaflet copy, else www."""
-    if www != WWW:
-        p = os.path.join(www, name)
-        if os.path.isfile(p):
-            return p
+    """A web file's path."""
     return os.path.join(WWW, name)
 
 
@@ -3885,15 +3880,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json", "no-cache", '"' + hashlib.sha1(body).hexdigest()[:16] + '"')
 
     def _leaflet(self):
-        """/leaflet/... is the Leaflet copy of the app: same API underneath."""
+        """/leaflet/... is the same app (it was the Leaflet test copy): same files, same API."""
         p = self.path.split("?", 1)[0]
         if p == "/leaflet" or p.startswith("/leaflet/"):
             self.path = self.path[len("/leaflet"):] or "/"
             if not self.path.startswith("/"):
                 self.path = "/" + self.path
-            self.www = WWW_L
-        else:
-            self.www = WWW
+        self.www = WWW
 
     def do_GET(self):
         if self.path.split("?", 1)[0] == "/leaflet":   # the page needs the trailing slash for its relative links
