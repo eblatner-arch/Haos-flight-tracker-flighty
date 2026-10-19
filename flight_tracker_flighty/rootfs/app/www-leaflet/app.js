@@ -1870,11 +1870,15 @@
   function baseLayer() {
     const sat = mapStyle() !== "dark", q = lowData() ? "fast" : pref("ft-mapq", "full");
     const size = q === "full" ? { tileSize: 128, zoomOffset: 1, maxNativeZoom: 18 } : q === "fast" ? { tileSize: 512, zoomOffset: -1, maxNativeZoom: 20 } : { tileSize: 256, maxNativeZoom: 19 };
-    return L.tileLayer(sat ? ESRI_IMG : darkTiles(), {
+    const layer = L.tileLayer(sat ? ESRI_IMG : darkTiles(), {
       ...size, maxZoom: 21, subdomains: "abcd", crossOrigin: true, opacity: sat ? 0.86 : 1,
       updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 4, className: "ft-base",
       attribution: sat ? "&copy; Esri, Maxar &middot; Natural Earth" : "&copy; OpenStreetMap &copy; CARTO",
     });
+    // Safari can leave a hairline between tiles: each one overlaps the next by half a pixel, sized from
+    // this layer's own tiles (a fixed 256 px drew the 128 px Full tiles at double size, out of place).
+    layer.on("tileloadstart", (e) => { const s = layer.getTileSize(); e.tile.style.width = s.x + 0.5 + "px"; e.tile.style.height = s.y + 0.5 + "px"; });
+    return layer;
   }
   // The night side as a picture laid over the earth: dark where the sun is down, a soft twilight edge.
   function nightImage() {

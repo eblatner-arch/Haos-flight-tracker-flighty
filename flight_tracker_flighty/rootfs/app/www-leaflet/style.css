@@ -370,7 +370,7 @@ a.card.inbound { display: block; }
 /* Tile seams: Safari can leave a hairline between tiles. Base-map tiles overlap by half a pixel
    (drawn normally, so the overlap can't brighten); the transparent label tiles are left alone. */
 .leaflet-container img.leaflet-tile { mix-blend-mode: normal !important; }
-.leaflet-tile-pane img.leaflet-tile { width: 256.5px !important; height: 256.5px !important; }
+/* (the half-pixel overlap is set per tile in app.js, from the layer's own tile size: 128, 256 or 512) */
 .leaflet-container { background: #0a1424 !important; }
 
 /* live-update indicator */

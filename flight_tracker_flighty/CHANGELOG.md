@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.28.1
+- /leaflet/: the satellite map no longer looks scrambled. Every tile was drawn 256 px wide, but Full sharpness lays 128 px tiles (and Fast 512 px), so each square showed the wrong piece of the world under the borders and place names. Tiles are now drawn at their real size, still overlapping by half a pixel so no seams show.
+
 ## 4.28.0
 - New setting (Settings → Notifications): **Open alerts in the iPhone app**. When on, tapping a Home Assistant notification opens that flight in the Flights iPhone app (link `ericsflights://leg/<id>`, a scheme of its own, so it never opens Flighty or anything else). Off by default: taps keep opening this web app.
 
