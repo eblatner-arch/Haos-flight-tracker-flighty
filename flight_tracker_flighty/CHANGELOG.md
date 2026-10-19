@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.29.0
+- /leaflet/: routes, your track, the filed route, fixes and airport dots are now drawn live, like the MapLibre map: redrawn in the same frame as every drag, pinch and camera move, at their real size the whole time. No more stretching mid-zoom, giant dots, fading out during long zooms, or catching up a moment after the map stops. (Borders, center boundaries and airport diagrams still draw the old way.)
+
 ## 4.28.8
 - /leaflet/: routes stop flashing out and back in. Every live update (a few seconds apart while you're flying) took every route, track and airport dot off the map and redrew it, even when nothing had changed; now only what actually changed is redrawn.
 - /leaflet/: routes only fade out during the long zooms (an airport button, coast down to the gates), not when a page simply reframes them.

@@ -1972,6 +1972,107 @@
     }
     return out;
   }
+  // ---------- routes, tracks and airport dots: redrawn every frame the map moves ----------
+  // Like MapLibre: one canvas fixed to the screen, cleared and redrawn in the same frame as every move
+  // (drag, pinch, camera flight), from points projected once per data change. Lines and dots keep their
+  // size and place the whole time: no stretching, no catching up afterwards. Cheap: a few hundred points.
+  const LIVE_IDS = ["plan", "routes", "track", "fixes", "aps", "pts"];   // drawn in this order
+  const LIVE = { cv: null, ctx: null, w: 0, h: 0, dpr: 1, src: {}, raf: 0 };
+  function liveInit() {
+    const pane = LM.createPane("live");
+    pane.style.zIndex = 440; pane.style.pointerEvents = "none";
+    const cv = LIVE.cv = L.DomUtil.create("canvas", "ft-live", pane);
+    cv.style.position = "absolute"; cv.style.left = "0"; cv.style.top = "0";
+    LIVE.ctx = cv.getContext("2d");
+    const size = () => {
+      const sz = LM.getSize(), dpr = Math.min(window.devicePixelRatio || 1, 3);
+      LIVE.w = sz.x; LIVE.h = sz.y; LIVE.dpr = dpr;
+      cv.width = Math.round(sz.x * dpr); cv.height = Math.round(sz.y * dpr);
+      cv.style.width = sz.x + "px"; cv.style.height = sz.y + "px";
+    };
+    size();
+    LM.on("move zoom viewreset", liveDraw);
+    LM.on("moveend zoomend", liveDraw);
+    LM.on("resize", () => { size(); liveDraw(true); });
+  }
+  const liveSoon = () => { if (!LIVE.raf) LIVE.raf = requestAnimationFrame(() => { LIVE.raf = 0; liveDraw(true); }); };
+  function liveDraw(force) {
+    const cv = LIVE.cv, ctx = LIVE.ctx;
+    if (!cv || !LM) return;
+    // a frame fires both "zoom" and "move": draw it once
+    const vk = `${LM.getZoom()}|${LM.getPixelOrigin()}|${LM._getMapPanePos()}`;
+    if (force !== true && vk === LIVE.key) return;
+    LIVE.key = vk;
+    // the canvas stays put on screen while the map's pane slides under it
+    L.DomUtil.setPosition(cv, LM.containerPointToLayerPoint([0, 0]));
+    ctx.setTransform(LIVE.dpr, 0, 0, LIVE.dpr, 0, 0);
+    ctx.clearRect(0, 0, LIVE.w, LIVE.h);
+    const z = LM.getZoom(), k = LM.getZoomScale(z, 0), o = LM.getPixelOrigin(), pp = LM._getMapPanePos();
+    const ox = -o.x + pp.x, oy = -o.y + pp.y, mz = z - 1;
+    const W = 256 * k;   // one world across, in pixels: a copy shifted by this when the map has wrapped
+    for (const id of LIVE_IDS) {
+      const src = LIVE.src[id];
+      if (!src || !src.items.length || (src.cfg.minz && mz < src.cfg.minz)) continue;
+      // looks that depend on the zoom are worked out again only when it has changed a little
+      if (src.cfg.zoomy && Math.abs((src.z ?? -99) - z) > 0.05) { src.z = z; for (const it of src.items) it.st = src.cfg.s(it.props); }
+      // the world copy nearest the screen (the map may have jumped by a world when you pan past 180°)
+      let shift = 0;
+      if (src.cx != null) { const cx = src.cx * k + ox, mid = LIVE.w / 2; shift = Math.round((mid - cx) / W) * W; }
+      for (const it of src.items) {
+        for (const st of it.st) {
+          if (it.pt) {
+            const x = it.pt[0] * k + ox + shift, y = it.pt[1] * k + oy;
+            if (x < -60 || y < -60 || x > LIVE.w + 60 || y > LIVE.h + 60) continue;
+            ctx.beginPath(); ctx.arc(x, y, st.radius ?? 5, 0, Math.PI * 2);
+            if (st.fill !== false) { ctx.globalAlpha = st.fillOpacity ?? 0.2; ctx.fillStyle = st.fillColor || st.color; ctx.fill(); }
+            if (st.stroke !== false && (st.weight ?? 3) > 0) { ctx.globalAlpha = st.opacity ?? 1; ctx.strokeStyle = st.color; ctx.lineWidth = st.weight ?? 3; ctx.stroke(); }
+          } else {
+            ctx.beginPath();
+            for (const line of it.lines) {
+              for (let i = 0; i < line.length; i++) {
+                const x = line[i][0] * k + ox + shift, y = line[i][1] * k + oy;
+                if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+              }
+            }
+            ctx.globalAlpha = st.opacity ?? 1; ctx.strokeStyle = st.color; ctx.lineWidth = st.weight ?? 3;
+            ctx.lineCap = st.lineCap || "round"; ctx.lineJoin = st.lineJoin || "round";
+            ctx.setLineDash(st.dashArray ? String(st.dashArray).split(/[ ,]+/).map(Number) : []);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.globalAlpha = 1; ctx.setLineDash([]);
+  }
+  // project to zoom-0 pixels once; each frame only scales and shifts
+  const p0 = (lat, lng) => { const p = LM.project([lat, lng], 0); return [p.x, p.y]; };
+  function liveSource(id) {
+    const cfg = VSTY[id];
+    const src = LIVE.src[id] = { cfg, items: [], z: null, cx: null };
+    return {
+      cfg,
+      setData(fc) {
+        const feats = (fc && fc.features) || [], items = [];
+        let sx = 0, n = 0;
+        for (const f of feats) {
+          const g = f.geometry, props = f.properties || {};
+          if (!g) continue;
+          const it = { props, st: cfg.s(props) };
+          if (g.type === "Point") { it.pt = p0(g.coordinates[1], g.coordinates[0]); sx += it.pt[0]; n++; }
+          else if (g.type === "LineString" || g.type === "MultiLineString") {
+            const parts = g.type === "LineString" ? [g.coordinates] : g.coordinates;
+            it.lines = parts.map((c) => unwrap(c).map(([la, lo]) => p0(la, lo)));
+            for (const l of it.lines) if (l.length) { sx += l[0][0]; n++; }
+          } else continue;
+          items.push(it);
+        }
+        src.items = items; src.z = LM.getZoom(); src.cx = n ? sx / n : null;
+        liveSoon();
+      },
+      restyle() { if (cfg.zoomy) liveSoon(); },
+      vis() { liveSoon(); },
+    };
+  }
   // A vector source: setData redraws its group; zoom-dependent looks are re-applied after each zoom.
   function vecSource(id) {
     const cfg = VSTY[id], grp = L.layerGroup();
@@ -2369,7 +2470,8 @@
     GL.base = baseLayer().addTo(LM);
     GL.night = L.imageOverlay(nightImage(), MERC_LL, { pane: "night", interactive: false }).addTo(LM);
     VSTY.surfdot = { pane: "dots", s: () => [{ radius: 2.5, color: "#8e8e93", fillColor: "#8e8e93", fillOpacity: 1, stroke: false }] };
-    for (const id of [...DYN, ...LAY, "brd", "surfdot"]) SRC[id] = vecSource(id);
+    liveInit();
+    for (const id of [...DYN, ...LAY, "brd", "surfdot"]) SRC[id] = LIVE_IDS.includes(id) ? liveSource(id) : vecSource(id);
     for (const id of ["sym", "laysym", "surf", "plc"]) SRC[id] = symSource(id);
     SYMG = { markerPane: L.layerGroup().addTo(LM), planes: L.layerGroup().addTo(LM) };
     GL.map = mapAdapter();

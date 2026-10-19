@@ -1080,5 +1080,5 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .ft-sat .leaflet-tile-pane img.leaflet-tile { filter: brightness(0.86); }
 
 /* long camera flights: routes and dots fade out mid-zoom (they'd be stretched) and come back sharp */
-#map canvas { transition: opacity .18s ease; }
-#map.ft-flyfar canvas { opacity: 0; transition: opacity .1s ease; }
+#map canvas:not(.ft-live) { transition: opacity .18s ease; }
+#map.ft-flyfar canvas:not(.ft-live) { opacity: 0; transition: opacity .1s ease; }
