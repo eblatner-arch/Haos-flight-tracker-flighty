@@ -8,7 +8,7 @@ const SHELL = "ft-shell-v1";
 // answers, else the last copy on the phone, so every page opens with no signal. Live streams and
 // one-off actions are left alone.
 const DATA_BOX = "ft-data-v1";
-const DATA = /^api\/(state|leg\/|history|hist\/|alerts|airports|nas|places|artcc|airport\/[^/]+\/layout|settings|rules|backup|push\/key)/;
+const DATA = /^api\/(state|leg\/|history|hist\/|alerts|airports|nas|places|artcc|airport\/[^/]+\/layout|settings|rules|backup|push\/key|liveries)/;
 async function dataFirst(req) {
   const box = await caches.open(DATA_BOX);
   try {
@@ -40,6 +40,10 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
   const rel = url.pathname.slice(scope.pathname.length);
   const page = rel === "" || rel === "index.html";
+  if (/^api\/livery\//.test(rel)) {   // aircraft pictures never change: the phone's copy, else fetch and keep
+    e.respondWith(caches.open(SHELL).then(async (box) => (await box.match(req)) || fetch(req).then((r) => { if (r.ok) box.put(req, r.clone()); return r; })));
+    return;
+  }
   if (/^api\//.test(rel)) { if (DATA.test(rel)) e.respondWith(dataFirst(req)); return; }
   if (!page && !ASSET.test(rel)) return;
   e.respondWith((async () => {

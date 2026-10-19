@@ -24,6 +24,7 @@ import alerts as alerting
 import flightaware as fa
 import gdrive
 import history
+import livery
 import rules as rules_mod
 import schedule
 import sources
@@ -37,6 +38,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("flight_tracker_flighty")
 
 DATA_DIR = os.environ.get("FT_DATA", "/data")
+LIVERY_DIR = os.path.join(DATA_DIR, "livery")
 SHOT_DIR = os.environ.get("FT_SHOTS", "/share/flight_tracker_flighty")
 WWW = os.path.join(os.path.dirname(os.path.abspath(__file__)), "www")
 PORT = int(os.environ.get("FT_PORT", "8099"))
@@ -3959,6 +3961,15 @@ class Handler(BaseHTTPRequestHandler):
                 d.pop("now", None)
                 return self._send_json_tagged(d)
             return self._send(404, {"error": "not found"})
+        if path == "/api/liveries":
+            return self._send(200, livery.index(), cache="no-cache")
+        m = re.match(r"^/api/livery/(N[0-9A-Z]{1,5})\.png$", path)
+        if m:
+            p = livery.path(LIVERY_DIR, m.group(1))
+            if os.path.exists(p):
+                with open(p, "rb") as f:
+                    return self._send(200, f.read(), "image/png", cache="public, max-age=31536000, immutable")
+            return self._send(404, {"error": "no picture"})
         m = re.match(r"^/api/shot/([\w-]+)\.png$", path)
         if m:
             p = os.path.join(SHOT_DIR, m.group(1) + ".png")
@@ -4191,6 +4202,7 @@ def main():
     gdrive.init(DATA_DIR, CFG)
     init_app_settings()
     push_init()
+    livery.start(LIVERY_DIR)
     init_rules()
     if not CFG["airline_icao"]:
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")

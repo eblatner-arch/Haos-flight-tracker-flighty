@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.24.0
+- United 737 pictures in today's livery from Kyle's AI Works (kyles-ai-works.com): 737-700, -800, -900/-900ER, MAX 8 and MAX 9. The add-on downloads them on first start into /data/livery, cuts them out, and checks each one's paint: only the current livery (blue engines, no gold) is used, older-livery pictures are skipped. Not stored in the repository.
+- The flight page and inbound page show the picture of the exact tail when there is one, else one of the same type. The 737-700 now has its own picture, and the -900 no longer shows the old gold-globe livery.
+- Passport: the Most flown aircraft card shows the real picture for that type.
+- The pictures are kept on the phone (offline) and downloaded with the trip maps.
+
 ## 4.23.1
 - Map for your trips now also saves: each trip airport's diagram (runways, taxiways, gates, names) so it draws with no signal; every zoom over those airports from the region (zoom 9) down to the gates (zoom 16), wider at close zooms; and the airports and routes of the aircraft's inbound legs.
 

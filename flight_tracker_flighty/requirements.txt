@@ -8,3 +8,4 @@ airportsdata
 openpyxl
 solace-pubsubplus
 cryptography>=42
+Pillow>=10

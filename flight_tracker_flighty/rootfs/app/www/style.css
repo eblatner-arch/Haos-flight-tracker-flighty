@@ -1062,3 +1062,4 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .gl-row:has(> .seg) > span { flex: 1 1 100%; }
 .gl-row > .seg.mini { flex: 1 1 100%; }
 .gl-row > .seg.mini button { flex: 1; padding: 7px 6px; }
+.pa-photo { margin: 10px 0 8px; filter: drop-shadow(0 6px 8px rgba(29,42,85,.28)); }

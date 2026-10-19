@@ -1583,14 +1583,33 @@
     <path d="M30 55 44 51l2 5-18 2z" fill="#2a3242"/>
     <g fill="#3a4354">${Array.from({ length: 26 }, (_, i) => `<rect x="${70 + i * 9.4}" y="51" width="4.2" height="5" rx="1.6"/>`).join("")}</g>
     <path d="M24 66c40 3 230 1 340-6" stroke="#cdd3dd" stroke-width="1"/></svg>`;
-  // United's real side views, cut out: 737-800 (also for the -700 until there's a -700 picture),
-  // MAX 8, -900 and MAX 9 (also MAX 10). Other types and airlines keep the drawing.
+  // United's 737s, side on, in today's livery: Kyle's AI Works' pictures (downloaded and sorted by the
+  // add-on, api/liveries), the exact tail when he painted it, else one of the same type; the pictures
+  // shipped with the app until those arrive. Other types and airlines keep the drawing.
+  let LIV = null;
+  try { LIV = JSON.parse(localStorage.getItem("ft-liv") || "null"); } catch {}
+  (async () => { try { const d = await api("api/liveries"); if (d && d.ready) { LIV = d; localStorage.setItem("ft-liv", JSON.stringify(d)); } } catch {} })();
+  const acKey = (type, name) => {
+    const t = (type || "").toUpperCase(), nm = (name || "").toUpperCase();
+    return /^B3[9X]M$/.test(t) || /MAX ?(9|10)/.test(nm) ? "b39m" : t === "B38M" || /MAX ?8/.test(nm) ? "b38m"
+      : t === "B739" || /737-9\d\d/.test(nm) ? "b739" : t === "B738" || /737-8\d\d/.test(nm) ? "b738"
+      : t === "B737" || /737-7\d\d/.test(nm) ? "b737" : "";
+  };
+  const BUNDLED = { b738: 1, b38m: 1, b39m: 1 };   // (the shipped -900 is the old livery)
+  function acSrc(k, tail) {
+    if (!k) return "";
+    const T = (tail || "").toUpperCase(), L = LIV || {};
+    if (T && (L.tails || {})[T] === k) return `api/livery/${T}.png`;
+    const of = (L.types || {})[k] || [];
+    if (of.length) return `api/livery/${of[0]}.png`;
+    if (k === "b737" && BUNDLED.b738) return "ac-b738.png";
+    return BUNDLED[k] ? `ac-${k}.png` : "";
+  }
   function acArt(leg) {
-    const f = leg.flight || {}, t = (f.aircraft_type || "").toUpperCase(), nm = (f.aircraft_name || "").toUpperCase();
+    const f = leg.flight || {};
     if (airlineCode(leg) !== "UA") return "";
-    const k = /^B3[9X]M$/.test(t) || /MAX ?(9|10)/.test(nm) ? "b39m" : t === "B38M" || /MAX ?8/.test(nm) ? "b38m"
-      : t === "B739" || /737-9\d\d/.test(nm) ? "b739" : /^B73[78]$/.test(t) || /737-[78]\d\d/.test(nm) ? "b738" : "";
-    return k ? `<img class="ac-photo" src="ac-${k}.png" alt="" loading="lazy" decoding="async">` : "";
+    const u = acSrc(acKey(f.aircraft_type, f.aircraft_name), f.tail);
+    return u ? `<img class="ac-photo" src="${u}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : "";
   }
   const TYPE_NAME = { B737: "Boeing 737-700", B738: "Boeing 737-800", B739: "Boeing 737-900", B38M: "Boeing 737 MAX 8", B39M: "Boeing 737 MAX 9",
     B3XM: "Boeing 737 MAX 10", B752: "Boeing 757-200", B753: "Boeing 757-300", B763: "Boeing 767-300", B764: "Boeing 767-400",
@@ -1676,7 +1695,7 @@
         <div class="pc-btn">All Delay Stats ${IC.chev}</div></a>` : ""}
       ${ac ? `<a class="pcard acft" href="#/history/find?${new URLSearchParams({ ...(year ? { year } : {}), ac: ac[0] })}">
         <div class="pa-k">Most flown aircraft</div><div class="pa-n">${esc(ac[0])}</div><div class="pa-c">${ac[1]} flights</div>
-        ${planeSide("#2b4aa0")}<div class="pc-btn">All Aircraft Stats ${IC.chev}</div></a>` : ""}`;
+        ${(() => { const u = acSrc(acKey("", ac[0])); return u ? `<img class="ac-photo pa-photo" src="${u}" alt="" loading="lazy" decoding="async">` : planeSide("#2b4aa0"); })()}<div class="pc-btn">All Aircraft Stats ${IC.chev}</div></a>` : ""}`;
   }
 
 
@@ -1769,6 +1788,7 @@
       let pass = null;
       try { pass = JSON.parse(localStorage.getItem("ft-c:api/history") || "null"); } catch {}
       for (const a of Object.values((pass && pass.airports) || {})) if (a && a.lat != null) for (let z = 6; z <= 12; z++) box(a.lat, a.lon, z, z <= 9 ? 0 : 1);
+      for (const t of Object.keys((LIV && LIV.tails) || {})) { try { await fetch(`api/livery/${t}.png`); } catch {} }
       const c = await caches.open(TC_NAME), list = [...want];
       WARMT.total = list.length; WARMT.done = 0;
       let got = 0;
