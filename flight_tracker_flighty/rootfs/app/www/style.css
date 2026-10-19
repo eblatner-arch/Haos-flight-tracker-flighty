@@ -1056,3 +1056,9 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .ac-photo { display: block; width: 100%; height: auto; margin: 14px 0 6px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.45)); }
 .ac-count { margin-top: 6px; }
 .ac-count b { color: var(--text); }
+
+/* settings rows with a segmented choice: label on top, the choice full width below (nothing cut off) */
+.gl-row:has(> .seg) { flex-wrap: wrap; }
+.gl-row:has(> .seg) > span { flex: 1 1 100%; }
+.gl-row > .seg.mini { flex: 1 1 100%; }
+.gl-row > .seg.mini button { flex: 1; padding: 7px 6px; }

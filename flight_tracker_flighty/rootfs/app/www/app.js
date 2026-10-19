@@ -1284,7 +1284,9 @@
   // ---------- maps: satellite, radar, night ----------
   const ESRI_IMG = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
   const ESRI_LBL = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
-  const mapStyle = () => pref("ft-mapstyle", "satellite");
+  // Esri satellite or the dark map (Mapbox and Google were removed in 4.23.0: their tiles can't be
+  // kept on the phone)
+  const mapStyle = () => { const v = pref("ft-mapstyle", "satellite"); return v === "dark" ? "dark" : "satellite"; };
   // Globe (default, like Flighty) or a flat map: lighter to draw, so smoother to drag
   const flatMap = () => pref("ft-proj", "globe") === "flat";
   // Map sharpness: how many pixels the map draws per screen point. Full = 2 (sharp on a Retina
@@ -1699,7 +1701,7 @@
   // only downloads what isn't there. Kept until there are more than TC_MAX (oldest go first).
   // Needs a secure page (https: the Home Assistant app, Nabu Casa) for Cache Storage; on plain
   // http the tiles load directly, as before. Google tiles are never kept (Google's terms).
-  const TC_NAME = "ft-tiles-v1", TC_MAX = 6000;
+  const TC_NAME = "ft-tiles-v1", TC_MAX = 16000;
   let TC_ON = false;
   function tcInit() {
     if (TC_ON || !window.maplibregl || !maplibregl.addProtocol || !window.caches || !window.isSecureContext) return;
@@ -1723,6 +1725,54 @@
     }, 30000);
   }
   const tc = (u) => TC_ON ? u.replace(/^https:\/\//, "tc://") : u;
+  // ---------- the map for your trips, downloaded ahead ----------
+  // In the background, a little at a time: the satellite imagery along your upcoming flights' routes
+  // (zoom 3-8, the views My Flights and a flight page open on), close-ups of their airports (to zoom
+  // 15, the airport diagram view), and every airport in your Passport (to zoom 12). Kept on the
+  // phone with the tiles you've seen, so the map opens complete with no signal. Skips what's already
+  // saved, so after the first run it only fetches new trips; runs at most every 6 hours.
+  const tileXY = (la, lo, z) => {
+    const n = 2 ** z, R = Math.max(-85, Math.min(85, la)) * Math.PI / 180;
+    return [Math.floor((lo + 180) / 360 * n) & (n - 1), Math.max(0, Math.min(n - 1, Math.floor((1 - Math.log(Math.tan(R) + 1 / Math.cos(R)) / Math.PI) / 2 * n)))];
+  };
+  const WARMT = { running: false, done: 0, total: 0 };
+  function warmStatus() { try { return JSON.parse(localStorage.getItem("ft-warm-trips") || "null"); } catch { return null; } }
+  async function warmTrips(force) {
+    if (!TC_ON || lowData() || WARMT.running || !STATE) return;
+    const st = warmStatus();
+    if (!force && st && Date.now() - st.at < 6 * 3600e3) return;
+    WARMT.running = true;
+    try {
+      const want = new Set(), add = (z, x, y) => want.add(`${z}/${y}/${x}`);
+      const box = (la, lo, z, r) => { const [x, y] = tileXY(la, lo, z), n = 2 ** z; for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) { const yy = y + dy; if (yy >= 0 && yy < n) add(z, (x + dx + n) % n, yy); } };
+      const now = Date.now() / 1000, legs = (STATE.legs || []).filter((l) => !l.finished && (l.sched_out || 0) < now + 14 * 86400);
+      const close = new Map();
+      for (const l of legs) {
+        const A = ll(l.dep_ap), B = ll(l.arr_ap);
+        if (!A || !B) continue;
+        for (const p of gcPoints(A, B, 48)) for (let z = 3; z <= 8; z++) box(p[0], p[1], z, z <= 5 ? 1 : 0);
+        close.set(l.dep, A); close.set(l.arr, B);
+      }
+      for (const [, p] of close) for (let z = 9; z <= 15; z++) box(p[0], p[1], z, z <= 12 ? 1 : 2);
+      // Passport airports
+      let pass = null;
+      try { pass = JSON.parse(localStorage.getItem("ft-c:api/history") || "null"); } catch {}
+      for (const a of Object.values((pass && pass.airports) || {})) if (a && a.lat != null) for (let z = 6; z <= 12; z++) box(a.lat, a.lon, z, z <= 9 ? 0 : 1);
+      const c = await caches.open(TC_NAME), list = [...want];
+      WARMT.total = list.length; WARMT.done = 0;
+      let got = 0;
+      for (const k of list) {
+        if (document.hidden || lowData()) break;   // only while the app is open and data saver is off
+        const [z, y, x] = k.split("/");
+        const u = ESRI_IMG.replace("{z}", z).replace("{y}", y).replace("{x}", x);
+        WARMT.done++;
+        if (await c.match(u)) continue;
+        try { const r = await fetch(u); if (r.ok) { await c.put(u, r); got++; } } catch {}
+        await new Promise((ok) => setTimeout(ok, 40));   // gently, behind everything else
+      }
+      if (WARMT.done >= WARMT.total) localStorage.setItem("ft-warm-trips", JSON.stringify({ at: Date.now(), tiles: list.length, fetched: got }));
+    } catch {} finally { WARMT.running = false; }
+  }
   // Once: the whole world's coarsest imagery (zoom 0-3, 85 tiles, about 2 MB) into the phone's tile
   // store, so the backdrop under the map is never missing, wherever and however far you zoom.
   async function warmWorld() {
@@ -1799,7 +1849,7 @@
   // allowance is 200,000 a month. Not kept on the phone (Mapbox's terms).
   const mbTok = () => ((STATE && STATE.map_tiles) || {}).mapbox || "";
   const mbTiles = () => `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${encodeURIComponent(mbTok())}`;
-  const STYLES = () => ["satellite", ...(mbTok() ? ["mapbox"] : []), ...(gKey() ? ["google"] : []), "dark"];
+  const STYLES = () => ["satellite", "dark"];
 
   function darkTiles() {
     const mt = (STATE && STATE.map_tiles) || {};
@@ -2309,6 +2359,7 @@
     map.on("move", latFix);
     map.on("moveend", () => { if (!camAnim) placeZoomFix(); });
     setTimeout(warmWorld, 8000);
+    setTimeout(warmTrips, 20000);
     map.on("style.load", latFix);
     map.on("zoomend", () => { if (GL.lastSurface) paintSurface(GL.lastSurface); });
     // the night side moves: redraw it every 10 minutes
@@ -3338,8 +3389,9 @@
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Map sharpness<small class="gl-sub">Fewer pixels to draw: Fast is softer but the lightest</small></span><div class="seg mini">${[["full", "Full"], ["balanced", "Balanced"], ["fast", "Fast"]].map(([k, l]) => `<button type="button" data-mapq="${k}" class="${pref("ft-mapq", "full") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map shape<small class="gl-sub">Flat is lighter to draw: smoother dragging and zooming</small></span><div class="seg mini">${[["globe", "Globe"], ["flat", "Flat"]].map(([k, l]) => `<button type="button" data-proj="${k}" class="${(flatMap() ? "flat" : "globe") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
-        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Esri"], ...(mbTok() ? [["mapbox", "Mapbox"]] : []), ...(gKey() ? [["google", "Google"]] : []), ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Satellite"], ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
+        <div class="gl-row"><span>Map for your trips<small class="gl-sub" id="wt-info">${(() => { const w = warmStatus(); return WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}` : w ? `Saved: your routes, their airports and your Passport airports (${w.tiles.toLocaleString()} tiles) · checked ${ago(w.at / 1000)}` : "Downloads in the background while the app is open"; })()}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="wt-now">Update</button>' : ""}</div>
         <div class="gl-row"><span>Saved map tiles<small class="gl-sub" id="tc-info">${TC_ON ? "…" : "Needs the https address (the Home Assistant app)"}</small></span>${TC_ON ? '<button type="button" class="btn mini" id="tc-clear">Clear</button>' : ""}</div>
         <label class="gl-row"><span>Weather radar on maps</span><span class="switch"><input type="checkbox" id="p-radar" ${radarOn() ? "checked" : ""}><span></span></span></label>
         <div class="gl-row"><span>Radar source<small class="gl-sub">NOAA: filtered, US and nearby · RainViewer: worldwide, unfiltered</small></span><div class="seg mini">${[["noaa", "NOAA"], ["rv", "RainViewer"]].map(([k, l]) => `<button type="button" data-rs="${k}" class="${radarSrc() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
@@ -3431,6 +3483,12 @@
     const tci = document.getElementById("tc-info");
     const tcShow = () => tileCacheInfo().then((i) => { if (tci && i) tci.textContent = `${i.n.toLocaleString()} tiles kept on this phone${i.bytes ? ` · ${i.bytes < 1048576 ? `${Math.max(1, Math.round(i.bytes / 1024))} KB` : `${Math.round(i.bytes / 1048576)} MB`} stored by the app` : ""}`; });
     if (TC_ON) tcShow();
+    const wtb = document.getElementById("wt-now"), wti = document.getElementById("wt-info");
+    if (wtb) wtb.onclick = () => {
+      warmTrips(true);
+      const t = setInterval(() => { if (!document.body.contains(wti)) return clearInterval(t);
+        wti.textContent = WARMT.running ? `Downloading… ${WARMT.done.toLocaleString()} of ${WARMT.total.toLocaleString()}` : "Done"; if (!WARMT.running) { clearInterval(t); tcShow(); } }, 700);
+    };
     const tcb = document.getElementById("tc-clear");
     if (tcb) tcb.onclick = async () => { tcb.disabled = true; await tileCacheClear(); tcb.disabled = false; tcShow(); };
     wirePush();

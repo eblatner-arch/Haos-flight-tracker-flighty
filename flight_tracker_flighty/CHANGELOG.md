@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.23.0
+- Settings: rows with a choice (Map sharpness, Map shape, Map, Radar source) now put the label on top and the choice full width underneath, so nothing is cut off on the phone.
+- Map: Mapbox and Google are gone as choices; Satellite (Esri) or Dark. Anyone who had them picked is moved to Satellite.
+- New: Map for your trips. While the app is open, it quietly downloads the satellite imagery along your upcoming flights' routes (next 14 days), close-ups of their airports down to the diagram view, and the airports in your Passport, and keeps them on the phone with the tiles you've seen, so those maps open complete with no signal. Skips what's already saved, runs at most every 6 hours, pauses with Data saver on. Settings → Map for your trips → Update runs it now.
+- The phone now keeps up to 16,000 map tiles (was 6,000).
+
 ## 4.22.1
 - Settings → Map sharpness: Full (as before), Balanced (half the pixels) or Fast (a quarter). The map is the same size on screen but softer, and has far less to redraw each frame, for smoother dragging and zooming. Takes effect at once.
 
