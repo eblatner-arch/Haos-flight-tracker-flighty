@@ -1287,6 +1287,11 @@
   const mapStyle = () => pref("ft-mapstyle", "satellite");
   // Globe (default, like Flighty) or a flat map: lighter to draw, so smoother to drag
   const flatMap = () => pref("ft-proj", "globe") === "flat";
+  // Map sharpness: how many pixels the map draws per screen point. Full = 2 (sharp on a Retina
+  // screen), Balanced = 1.4 (half the pixels), Fast = 1 (a quarter): the same size on screen,
+  // softer, but far less for the phone to redraw every frame.
+  const MAPQ = { full: 2, balanced: 1.4, fast: 1 };
+  const mapPR = () => Math.min(window.devicePixelRatio || 1, MAPQ[pref("ft-mapq", "full")] || 2);
   const lowData = () => pref("ft-lowdata", "0") === "1";
   const radarOn = () => pref("ft-radar", "0") === "1" && !lowData();
   let RADAR = null;
@@ -2265,7 +2270,7 @@
     tcInit();
     const map = GL.map = new maplibregl.Map({ container: MAP_EL, style: glStyle(), center: [-85, 35], zoom: 1.6, attributionControl: false,
       dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 120, maxTileCacheZoomLevels: 8,
-      pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
+      pixelRatio: mapPR() });
     map.touchZoomRotate.disableRotation();
     map.keyboard.disable();
     map.addControl(GL.attrib = new maplibregl.AttributionControl({ compact: false }), "top-left");
@@ -3331,6 +3336,7 @@
         <a class="gl-row" href="#/add"><span>Add a flight</span>${IC.chev}</a>
         <button type="button" class="gl-row" id="p-refresh"><span>Check all flights now</span><span class="small muted" id="p-refresh-msg"></span></button>
         <label class="gl-row"><span>24-hour time</span><span class="switch"><input type="checkbox" id="p-24h" ${CLOCK24 ? "checked" : ""}><span></span></span></label>
+        <div class="gl-row"><span>Map sharpness<small class="gl-sub">Fewer pixels to draw: Fast is softer but the lightest</small></span><div class="seg mini">${[["full", "Full"], ["balanced", "Balanced"], ["fast", "Fast"]].map(([k, l]) => `<button type="button" data-mapq="${k}" class="${pref("ft-mapq", "full") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map shape<small class="gl-sub">Flat is lighter to draw: smoother dragging and zooming</small></span><div class="seg mini">${[["globe", "Globe"], ["flat", "Flat"]].map(([k, l]) => `<button type="button" data-proj="${k}" class="${(flatMap() ? "flat" : "globe") === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div class="gl-row"><span>Map</span><div class="seg mini">${[["satellite", "Esri"], ...(mbTok() ? [["mapbox", "Mapbox"]] : []), ...(gKey() ? [["google", "Google"]] : []), ["dark", "Dark"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${mapStyle() === k ? "on" : ""}">${l}</button>`).join("")}</div></div>
         ${mapStyle() === "google" && GSESS.err ? `<div class="gl-row"><span class="err small">Google tiles: ${esc(GSESS.err)} (showing Esri)</span></div>` : ""}
@@ -3406,6 +3412,11 @@
       if (radarOn()) glRadar(true);
     });
     document.getElementById("p-low").onchange = (e) => { setPref("ft-lowdata", e.target.checked ? "1" : "0"); restyleAll(); };
+    $app.querySelectorAll("[data-mapq]").forEach((b) => b.onclick = () => {
+      setPref("ft-mapq", b.dataset.mapq);
+      $app.querySelectorAll("[data-mapq]").forEach((x) => x.classList.toggle("on", x === b));
+      if (GL.map) { try { GL.map.setPixelRatio(mapPR()); } catch {} }   // takes effect at once
+    });
     $app.querySelectorAll("[data-proj]").forEach((b) => b.onclick = () => {
       setPref("ft-proj", b.dataset.proj);
       $app.querySelectorAll("[data-proj]").forEach((x) => x.classList.toggle("on", x === b));

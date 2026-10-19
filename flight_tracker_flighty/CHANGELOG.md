@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.22.1
+- Settings → Map sharpness: Full (as before), Balanced (half the pixels) or Fast (a quarter). The map is the same size on screen but softer, and has far less to redraw each frame, for smoother dragging and zooming. Takes effect at once.
+
 ## 4.22.0
 - Notifications straight to your phone (Web Push): Settings → Notifications on this phone → Turn on. Alerts arrive as Flighty, from the Home Screen app itself, and tapping one opens the app right on that flight (or switches to it if the app is open). Uses the app's https address and iOS 16.4 or later; open the app from the Home Screen icon to turn it on. "Send a test" checks it.
 - Settings → Home Assistant app notifications: turn it off once your phone gets alerts directly, so each comes once. On by default.
