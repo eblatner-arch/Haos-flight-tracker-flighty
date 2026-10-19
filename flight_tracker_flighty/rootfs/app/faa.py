@@ -3,8 +3,8 @@ built and airworthiness date (an airliner's is within days of its first flight a
 
 The zip (about 70 MB, updated by the FAA every day) is downloaded into /data, and the parts we use
 are loaded into a small SQLite database (/data/faa.sqlite, about 300,000 aircraft). It's downloaded
-again when a tail isn't in it (newly registered), or is but as a different type than the flight
-says (the N-number was reused), at most once a day, and every 30 days anyway.
+again only when a tail isn't in it (newly registered), or is but as a different type than the flight
+says (the N-number was reused), at most once a day.
 
 An airplane that came from abroad or changed hands can carry a recent airworthiness date: the
 deregistered file is searched for the same serial number's earliest one, and when none is older,
@@ -27,7 +27,6 @@ log = logging.getLogger("faa")
 
 URL = "https://registry.faa.gov/database/ReleasableAircraft.zip"
 SHARE = ("/share/ReleasableAircraft.zip", "/share/flight_tracker/ReleasableAircraft.zip")
-REFRESH_DAYS = 30
 RETRY_HOURS = 24
 
 _dir = "/data"
@@ -231,10 +230,11 @@ def start(d):
     except sqlite3.Error:
         pass
 
-    def loop():
+    def first():   # no database yet: build one (tries again every 6 hours until it works)
         time.sleep(60)
-        while True:
-            if not _state["built"] or time.time() - _state["built"] > REFRESH_DAYS * 86400:
-                refresh("monthly" if _state["built"] else "first time")
-            time.sleep(6 * 3600)
-    threading.Thread(target=loop, daemon=True, name="faa-monthly").start()
+        while not _state["built"]:
+            refresh("first time")
+            if not _state["built"]:
+                time.sleep(6 * 3600)
+    if not _state["built"]:
+        threading.Thread(target=first, daemon=True, name="faa-first").start()

@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.25.1
+- FAA registry: no more monthly download. After the first one, a fresh copy is downloaded only when a tail isn't in it or is listed as a different type than the flight (at most once a day).
+
 ## 4.25.0
 - Aircraft card: "First flight · Oct 23, 2012 · 13 years 11 months old" under the picture, on every flight and inbound page, for US-registered tails. From the FAA aircraft registry: its airworthiness date (within days of an airliner's first flight). An airframe that came from abroad with no earlier US record shows the year it was built instead.
 - The add-on downloads the FAA registry (registry.faa.gov ReleasableAircraft.zip, about 70 MB) a minute after first start and loads it into /data/faa.sqlite (about 25 MB; the zip is deleted after). It downloads a fresh copy when a tail isn't in it yet (newly registered) or is listed as a different type than the flight (a reused N-number), at most once a day, and every 30 days anyway. Earlier registrations of the same serial number are checked for the airframe's first airworthiness date.
