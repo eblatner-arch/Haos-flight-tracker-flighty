@@ -53,6 +53,7 @@ HOUR = 3600
 
 DEFAULTS = {
     "ha_notify": True,
+    "ios_app_links": False,
     "ics_file_path": "/homeassistant/ics2gcal/feed.ics",
     "airline_icao": "",
     "flight_regex": "",
@@ -161,6 +162,7 @@ APP_SETTINGS = {
     "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
     "nas_minutes": ("int", 2, 60, "FAA NAS status", "Minutes between NAS status checks.", "FAA NAS status"),
+    "ios_app_links": ("bool", None, None, "Open alerts in the iPhone app", "Tapping a Home Assistant notification opens the flight in the Flights iPhone app (ericsflights://) instead of this web app. Only turn on with that app installed.", "Notifications"),
     "ha_notify": ("bool", None, None, "Home Assistant app notifications", "Also send alerts through Home Assistant (notify service in the add-on configuration). Turn off once your phone gets them straight from the app (Settings → Notifications on this phone), so you don't get each one twice.", "Notifications"),
 }
 
@@ -436,7 +438,12 @@ def _send_ha(alert):
             # Custom notification icon: Android companion today, iOS companion once its custom-icon
             # support ships (home-assistant/iOS#4672). Older apps ignore these keys.
             "notification_icon": "mdi:airplane", "notification_icon_color": "#FFFFFF", "color": "#3B4FB8"}
-    if INGRESS["path"]:
+    if CFG.get("ios_app_links"):
+        # the Flights iPhone app (its own link scheme, nothing else answers to it): open on the flight
+        url = f"ericsflights://leg/{urllib.parse.quote(str(alert['leg']))}" if alert.get("leg") else "ericsflights://"
+        data["url"] = url
+        data["clickAction"] = url
+    elif INGRESS["path"]:
         url = INGRESS["path"]
         if INGRESS.get("full") and url.endswith("/") and alert.get("leg"):
             url += f"#/leg/{alert['leg']}"  # the web app opens on the flight the push is about

@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.28.0
+- New setting (Settings → Notifications): **Open alerts in the iPhone app**. When on, tapping a Home Assistant notification opens that flight in the Flights iPhone app (link `ericsflights://leg/<id>`, a scheme of its own, so it never opens Flighty or anything else). Off by default: taps keep opening this web app.
+
 ## 4.27.0
 - Test: the whole app again at **/leaflet/** (e.g. https://ericsflights.duckdns.org:8090/leaflet/), drawing its map with Leaflet instead of MapLibre, to compare side by side. Same add-on, same data and alerts; nothing about the normal app changes. Add it to the Home Screen as its own icon ("Flighty L").
   - A flat map (no globe). The satellite tiles are plain pictures the browser moves and scales itself: while the camera moves, the ones already there are stretched, and sharp ones load where it stops.
