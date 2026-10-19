@@ -23,6 +23,7 @@ import airports
 import alerts as alerting
 import flightaware as fa
 import gdrive
+import faa
 import history
 import livery
 import rules as rules_mod
@@ -3668,6 +3669,7 @@ def api_debug():
                        "gemini_model": CFG.get("gemini_model"), "watch_hours": CFG["watch_hours"],
                        "home_tz": TZNAME, "viewer_port": 6081},
             "manual": STATE["manual"],
+            "faa": faa.status(),
             "screenshots": dict(zip(("count", "bytes"), shot_usage()), keep_hours=SHOT_KEEP_HOURS),
             "aeroapi": {"enabled": bool(CFG.get("aeroapi_key")),
                         "budget": float(CFG.get("aeroapi_monthly_budget") or 0),
@@ -3972,6 +3974,11 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 home = False
             return self._send(200, {"home": bool(home)})
+        m = re.match(r"^/api/tail/(N[0-9A-Za-z]{1,5})$", path)
+        if m:   # FAA registry: model, year built, airworthiness date
+            q = self._query()
+            d = faa.lookup(m.group(1), q.get("type"))
+            return self._send(200, {"found": bool(d), **(d or {}), "registry": faa.status()}, cache="no-cache")
         if path == "/api/liveries":
             return self._send(200, livery.index(), cache="no-cache")
         m = re.match(r"^/api/livery/(N[0-9A-Z]{1,5})\.png$", path)
@@ -4214,6 +4221,7 @@ def main():
     init_app_settings()
     push_init()
     livery.start(LIVERY_DIR)
+    faa.start(DATA_DIR)
     init_rules()
     if not CFG["airline_icao"]:
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")

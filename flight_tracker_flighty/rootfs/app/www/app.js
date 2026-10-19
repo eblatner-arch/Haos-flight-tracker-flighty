@@ -1616,6 +1616,53 @@
     B772: "Boeing 777-200", B77W: "Boeing 777-300ER", B788: "Boeing 787-8", B789: "Boeing 787-9", B78X: "Boeing 787-10",
     A319: "Airbus A319", A320: "Airbus A320", A20N: "Airbus A320neo", A21N: "Airbus A321neo", A321: "Airbus A321",
     E75L: "Embraer 175", E175: "Embraer 175", CRJ2: "CRJ-200", CRJ7: "CRJ-700", CRJ9: "CRJ-900" };
+  // How old the airplane is, from the FAA registry (api/tail/N…): its airworthiness date (within days
+  // of an airliner's first flight), or the year it was built when that's all there is. Asked once per
+  // tail and type, kept on the phone; the card fills in when the answer arrives.
+  const TAILI = new Map();
+  const tailKey = (t, ty) => `ft-tail:${t}:${ty || ""}`;
+  function tailInfo(t, ty) {
+    const k = tailKey(t, ty);
+    if (TAILI.has(k)) return TAILI.get(k);
+    try { const c = JSON.parse(localStorage.getItem(k) || "null"); if (c && (c.found || Date.now() - c.at < 86400e3)) { TAILI.set(k, c); return c; } } catch {}
+    return undefined;
+  }
+  function ageText(d) {
+    if (!d || !d.found) return "";
+    const now = new Date();
+    if (d.aw) {
+      const [y, m, dd] = d.aw.split("-").map(Number);
+      let yrs = now.getFullYear() - y, mos = now.getMonth() + 1 - m;
+      if (now.getDate() < dd) mos--;
+      if (mos < 0) { yrs--; mos += 12; }
+      const when = new Date(y, m - 1, dd).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+      const age = yrs < 0 ? "brand new" : `${yrs ? `${yrs} year${yrs === 1 ? "" : "s"} ` : ""}${mos} month${mos === 1 ? "" : "s"} old`;
+      return `First flight · ${when} · ${age}`;
+    }
+    if (d.year) { const a = now.getFullYear() - d.year; return `Built ${d.year} · about ${a} year${a === 1 ? "" : "s"} old`; }
+    return "";
+  }
+  function fillAges() {
+    document.querySelectorAll(".ac-age[data-tail]:not([data-asked])").forEach(async (el) => {
+      el.dataset.asked = "1";
+      const t = el.dataset.tail, ty = el.dataset.type, k = tailKey(t, ty);
+      try {
+        const d = await api(`api/tail/${encodeURIComponent(t)}${ty ? `?type=${encodeURIComponent(ty)}` : ""}`);
+        const c = { found: !!d.found, aw: d.aw, year: d.year, model: d.model, at: Date.now() };
+        TAILI.set(k, c);
+        try { localStorage.setItem(k, JSON.stringify(c)); } catch {}
+        document.querySelectorAll(`.ac-age[data-tail="${CSS.escape(t)}"]`).forEach((x) => { const s = ageText(c); if (s) { x.textContent = s; x.hidden = false; } });
+      } catch {}
+    });
+  }
+  function ageLine(f) {
+    const t = (f.tail || "").toUpperCase();
+    if (!/^N[0-9A-Z]{1,5}$/.test(t)) return "";
+    const ty = (f.aircraft_type || "").toUpperCase(), c = tailInfo(t, ty);
+    if (c !== undefined) { const s = ageText(c); return s ? `<div class="ac-sub ac-age">${esc(s)}</div>` : ""; }
+    setTimeout(fillAges, 0);
+    return `<div class="ac-sub ac-age" data-tail="${esc(t)}" data-type="${esc(ty)}" hidden></div>`;
+  }
   function aircraftF(leg) {
     const f = leg.flight || {}, name = f.aircraft_name || TYPE_NAME[(f.aircraft_type || "").toUpperCase()] || f.aircraft_type;
     if (!name && !f.tail) return "";
@@ -1623,6 +1670,7 @@
     return `<div class="gk-card acard"><div class="ac-k">Aircraft</div><div class="ac-name">${esc(name || "Aircraft")}</div>
       <div class="ac-sub">${esc([f.tail, name !== f.aircraft_type && f.aircraft_type ? f.aircraft_type : "", f.tail_source ? `tail from ${f.tail_source}` : ""].filter(Boolean).join(" · "))}</div>
       ${acArt(leg) || planeSide(alColor(airlineCode(leg)))}
+      ${ageLine(f)}
       ${f.tail && n != null ? `<div class="ac-sub ac-count">${n ? `You've flown <b>${esc(f.tail)}</b> ${n} time${n === 1 ? "" : "s"} before.` : `First time on <b>${esc(f.tail)}</b>.`}</div>` : ""}</div>`;
   }
 
@@ -3477,6 +3525,7 @@
         <div class="k">Gemini</div><div>${d.gemini.enabled
           ? `${esc(d.gemini.model)}, only when page data can't be read · <b>${d.gemini.today}</b> today, <b>${d.gemini.month}</b> this month${d.gemini.last ? ` · last ${ago(d.gemini.last)}` : " · never used yet"}`
           : "off (no API key), never used"}</div>
+        <div class="k">FAA registry</div><div>${d.faa && d.faa.rows ? `${d.faa.rows.toLocaleString()} aircraft · FAA file of ${esc(d.faa.file_date || "?")}` : d.faa && d.faa.busy ? "downloading…" : "not loaded yet"}${d.faa && d.faa.busy && d.faa.rows ? " · updating now" : ""}${d.faa && d.faa.error ? ` · <span class="err">${esc(d.faa.error)}</span>` : ""}</div>
         <div class="k">Screenshots</div><div>${d.screenshots.count} files, ${(d.screenshots.bytes / 1048576).toFixed(1)} MB · deleted ${d.screenshots.keep_hours} h after a flight is done</div>
         <div class="k">Worker</div><div>${d.worker.busy ? "checking a flight now" : "idle"}${d.worker.last_cycle ? ` · last cycle ${ago(d.worker.last_cycle)}` : ""}${d.worker.error ? ` · <span class="err">${esc(d.worker.error)}</span>` : ""}</div>
         <div class="k">Tapping a push opens</div><div class="mono small">${esc(c.ingress)}</div>

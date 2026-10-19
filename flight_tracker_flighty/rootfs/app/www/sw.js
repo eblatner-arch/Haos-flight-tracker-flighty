@@ -8,7 +8,7 @@ const SHELL = "ft-shell-v1";
 // answers, else the last copy on the phone, so every page opens with no signal. Live streams and
 // one-off actions are left alone.
 const DATA_BOX = "ft-data-v1";
-const DATA = /^api\/(state|leg\/|history|hist\/|alerts|airports|nas|places|artcc|airport\/[^/]+\/layout|settings|rules|backup|push\/key|liveries)/;
+const DATA = /^api\/(state|leg\/|history|hist\/|alerts|airports|nas|places|artcc|airport\/[^/]+\/layout|settings|rules|backup|push\/key|liveries|tail\/)/;
 async function dataFirst(req) {
   const box = await caches.open(DATA_BOX);
   try {

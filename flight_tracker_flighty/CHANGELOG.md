@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.25.0
+- Aircraft card: "First flight · Oct 23, 2012 · 13 years 11 months old" under the picture, on every flight and inbound page, for US-registered tails. From the FAA aircraft registry: its airworthiness date (within days of an airliner's first flight). An airframe that came from abroad with no earlier US record shows the year it was built instead.
+- The add-on downloads the FAA registry (registry.faa.gov ReleasableAircraft.zip, about 70 MB) a minute after first start and loads it into /data/faa.sqlite (about 25 MB; the zip is deleted after). It downloads a fresh copy when a tail isn't in it yet (newly registered) or is listed as a different type than the flight (a reused N-number), at most once a day, and every 30 days anyway. Earlier registrations of the same serial number are checked for the airframe's first airworthiness date.
+- If the FAA site won't answer the add-on, put ReleasableAircraft.zip in /share and it's used instead.
+- Setup check: an FAA registry line (aircraft loaded, file date, errors).
+
 ## 4.24.2
 - Map for your trips resumes by itself when the app comes back on screen (after swiping home, locking the phone or switching apps), skipping what's already saved, instead of waiting for the next fresh start.
 
