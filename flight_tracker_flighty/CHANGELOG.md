@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.26.0
+- Smoother long zooms (the airport buttons, the locate button, zooming out to your routes): while the camera moves the map keeps showing the imagery it already has, stretched, and refreshes it only every 3 zoom levels, instead of loading and drawing every zoom level it passes for a split second. The sharp imagery loads where it stops (usually already on the phone). Touching the map ends it at once.
+- Airport diagrams are ready before you zoom in: both of the flight's airports are put on the map as soon as its page opens (drawn from zoom 12.5), instead of being fetched and built after the camera stops.
+- Airport diagrams open from the phone's copy right away (refreshed in the background), instead of waiting on the add-on first.
+
 ## 4.25.1
 - FAA registry: no more monthly download. After the first one, a fresh copy is downloaded only when a tail isn't in it or is listed as a different type than the flight (at most once a day).
 

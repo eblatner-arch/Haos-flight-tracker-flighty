@@ -2020,12 +2020,12 @@
     const add = (l, b) => { if (!map.getLayer(l.id)) map.addLayer(l, b); };
     add({ id: "night", type: "raster", source: "night", paint: { "raster-fade-duration": 0 } }, before);
     placeLayers(add);
-    add({ id: "lay-term", type: "fill", source: "lay-term", paint: { "fill-color": "#c8cdd8", "fill-opacity": 0.14 } });
-    add({ id: "lay-term-line", type: "line", source: "lay-term", paint: { "line-color": "#c8cdd8", "line-opacity": 0.5, "line-width": 1 } });
-    add({ id: "lay-twy", type: "line", source: "lay-twy", layout: { "line-join": "round" }, paint: { "line-color": "#fff", "line-opacity": 0.12, "line-width": widthM(23) } });
+    add({ id: "lay-term", type: "fill", minzoom: 12.5, source: "lay-term", paint: { "fill-color": "#c8cdd8", "fill-opacity": 0.14 } });
+    add({ id: "lay-term-line", type: "line", minzoom: 12.5, source: "lay-term", paint: { "line-color": "#c8cdd8", "line-opacity": 0.5, "line-width": 1 } });
+    add({ id: "lay-twy", type: "line", minzoom: 12.5, source: "lay-twy", layout: { "line-join": "round" }, paint: { "line-color": "#fff", "line-opacity": 0.12, "line-width": widthM(23) } });
     add({ id: "lay-twycl", type: "line", source: "lay-twy", minzoom: 16, paint: { "line-color": "#f6c445", "line-opacity": 0.45, "line-width": 1 } });
-    add({ id: "lay-rwy", type: "line", source: "lay-rwy", layout: { "line-cap": "butt" }, paint: { "line-color": "#fff", "line-opacity": 0.22, "line-width": widthM(45) } });
-    add({ id: "lay-rwycl", type: "line", source: "lay-rwy", paint: { "line-color": "#fff", "line-opacity": 0.55, "line-width": 1, "line-dasharray": [8, 8] } });
+    add({ id: "lay-rwy", type: "line", minzoom: 12.5, source: "lay-rwy", layout: { "line-cap": "butt" }, paint: { "line-color": "#fff", "line-opacity": 0.22, "line-width": widthM(45) } });
+    add({ id: "lay-rwycl", type: "line", minzoom: 12.5, source: "lay-rwy", paint: { "line-color": "#fff", "line-opacity": 0.55, "line-width": 1, "line-dasharray": [8, 8] } });
     add({ id: "artcc-fill", type: "fill", source: "artcc", paint: { "fill-color": ["get", "c"], "fill-opacity": ["get", "o"] } });
     add({ id: "artcc-line", type: "line", source: "artcc", paint: { "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": ["get", "lo"] } });
     add({ id: "plan", type: "line", source: "plan", paint: { "line-color": ["coalesce", ["get", "c"], route], "line-width": 2, "line-opacity": ["coalesce", ["get", "o"], 0.6], "line-dasharray": [2.5, 2.5] } });
@@ -2328,10 +2328,38 @@
   // it widens (a fly-to slid sideways first; a plain glide looked like passing through the globe).
   // Zooming far in still flies, which already looks right.
   let camAnim = 0;
+  // A long zoom (into an airport, out to your routes) would load and draw imagery at every zoom
+  // level it passes through, most of it on screen for a split second: that's the stutter. The way
+  // Google's map does it instead: keep showing the pictures already loaded, stretched, while the
+  // camera moves, refreshing them only every 3 zoom levels, then load the sharp ones where it stops
+  // (usually already on the phone: the trip-map download saves the close-ups of your airports).
+  const HOLD = { on: false, z: 0, t: 0 };
+  const holdCaches = () => { const sc = (GL.map && GL.map.style && GL.map.style.sourceCaches) || {}; return ["base", "under"].map((k) => sc[k]).filter((c) => c && c.pause && c.resume); };
+  function holdTiles() {
+    if (!GL.map || HOLD.on) return;
+    HOLD.on = true; HOLD.z = GL.map.getZoom();
+    for (const c of holdCaches()) { try { c.pause(); } catch {} }
+    clearTimeout(HOLD.t); HOLD.t = setTimeout(releaseTiles, 3500);   // never stuck
+  }
+  function releaseTiles() {
+    clearTimeout(HOLD.t);
+    if (!HOLD.on) return;
+    HOLD.on = false;
+    for (const c of holdCaches()) { try { c.resume(); } catch {} }
+    try { GL.map.triggerRepaint(); } catch {}
+  }
+  function holdStep() {   // during the move: a fresh set every 3 zoom levels
+    if (!HOLD.on) return;
+    const z = GL.map.getZoom();
+    if (Math.abs(z - HOLD.z) < 3) return;
+    HOLD.z = z;
+    for (const c of holdCaches()) { try { c.resume(); c.pause(); } catch {} }
+  }
   function camTo(o, dur) {
     const map = GL.map;
     cancelAnimationFrame(camAnim); camAnim = 0;
     const z0 = map.getZoom(), z1 = o.zoom ?? z0;
+    if (dur && Math.abs(z1 - z0) > 2.5) holdTiles();
     if (!dur || Math.abs(z1 - z0) <= 2.5) { map.easeTo({ ...o, duration: dur }); return; }
     if (z1 > z0) { map.flyTo({ ...o, duration: Math.min(2200, Math.max(1300, dur * 1.6)), curve: 1.42, essential: true }); return; }
     const M = maplibregl.MercatorCoordinate, a = M.fromLngLat(map.getCenter()), bC = M.fromLngLat(o.center);
@@ -2339,7 +2367,7 @@
     const s0 = 2 ** -z0, s1 = 2 ** -z1, T = Math.min(1800, Math.max(1100, dur * 1.4)), t0 = performance.now();
     const ease = (t) => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
     map.stop();
-    const stopOnTouch = () => { cancelAnimationFrame(camAnim); camAnim = 0; };
+    const stopOnTouch = () => { cancelAnimationFrame(camAnim); camAnim = 0; releaseTiles(); };
     map.once("dragstart", stopOnTouch); map.once("zoomstart", (e) => { if (e.originalEvent) stopOnTouch(); });
     const step = (now) => {
       const t = Math.min(1, (now - t0) / T), e = ease(t), z = z0 + (z1 - z0) * e;
@@ -2391,7 +2419,7 @@
         });
         on("apts", () => go("#/airports"));
         on("fit", () => glFit(true, true));
-        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p) GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, padding: mapPad(false) }); });
+        for (const [a, side] of [["dep", "dep_ap"], ["arr", "arr_ap"]]) on(a, () => { const p = GL.leg && ll(GL.leg[side]); if (p && Math.abs(GL.map.getZoom() - 14) > 2.5) holdTiles(); if (p) GL.map.flyTo({ center: [p[1], p[0]], zoom: 14, duration: 1200, padding: mapPad(false) }); });
         on("xpdr", () => { setPref("ft-surf-all", pref("ft-surf-all", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         on("ids", () => { setPref("ft-surf-ids", pref("ft-surf-ids", "0") === "1" ? "0" : "1"); if (GL.lastSurface) paintSurface(GL.lastSurface); });
         GL.ctl = d;
@@ -2427,7 +2455,9 @@
     // labels by zoom (airport codes, route fixes, taxiways, gates), in the old map's zoom numbers
     const zc = () => { const z = map.getZoom() + 1; for (const n of [4, 8, 15, 16, 17]) MAP_EL.classList.toggle(`z${n}`, z >= n); };
     map.on("zoom", zc); zc();
-    map.on("moveend", () => { if (camAnim) return; layoutCheck(); surfaceNow(); gAttr(); });
+    map.on("moveend", () => { if (camAnim) return; releaseTiles(); layoutCheck(); surfaceNow(); gAttr(); });
+    map.on("move", holdStep);
+    map.on("dragstart", releaseTiles); map.on("touchstart", () => { if (HOLD.on && !camAnim) { map.stop(); releaseTiles(); } });
     // The globe keeps its size as you drag north or south by lowering the zoom number (by
     // log2 cos(latitude)), and tiles are picked from that number: halfway across, the map switched
     // to the next coarser tiles, so the picture went soft and baked-in labels jumped bigger. Scaling
@@ -2620,6 +2650,7 @@
   }
   function paintLeg(leg, fit) {
     GL.leg = leg;
+    setTimeout(() => idle(layoutCheck), 400);   // its airports' diagrams, ready before you zoom in
     warmAirports(leg);
     const route = css("--route"), violet = css("--violet"), muted = "#9aa3b3";
     const plan = [], track = [], aps = [], fixes = [], marks = [], bounds = [];
@@ -2718,24 +2749,26 @@
     if (GL.ready) { const s_ = GL.map.getSource("laysym"); if (s_) s_.setData(FC()); }
     GL.layoutFor = null; GL.layoutShown = false;
   }
+  // Both of the flight's airports are put on the map as soon as its page opens (the layers only
+  // draw from zoom 12.5), so zooming in finds the diagram already there instead of loading it once
+  // the camera stops.
   async function layoutCheck() {
     const map = GL.map, leg = GL.leg;
     if (!map || !GL.ready || !leg) return;
-    if (map.getZoom() < 13) { if (GL.layoutShown) { const keep = GL.layoutFor; clearLayout(); GL.layoutFor = keep; } return; }
-    const c = map.getCenter(), here = [c.lat, c.lng];
-    const ap = [leg.dep_ap, leg.arr_ap].map((a) => a && ll(a) ? { code: a.iata || a.icao, pos: ll(a) } : null)
-      .filter((a) => a && a.code && kmBetween(here, a.pos) < 8)[0];
-    if (!ap) return;
-    if (GL.layoutFor === ap.code && GL.layoutShown) return;
-    if (!LAYOUTS[ap.code]) {
-      LAYOUTS[ap.code] = api(`api/airport/${encodeURIComponent(ap.code)}/layout`).then(buildLayout).catch(() => { delete LAYOUTS[ap.code]; return null; });
+    const codes = [...new Set([leg.dep_ap, leg.arr_ap].filter((a) => a && ll(a)).map((a) => a.iata || a.icao).filter(Boolean))];
+    if (!codes.length) return;
+    const key = codes.join("+");
+    if (GL.layoutFor === key && GL.layoutShown) return;
+    GL.layoutFor = key; GL.layoutShown = false;
+    for (const code of codes) if (!LAYOUTS[code]) {
+      LAYOUTS[code] = api(`api/airport/${encodeURIComponent(code)}/layout`).then(buildLayout).catch(() => { delete LAYOUTS[code]; return null; });
     }
-    const L_ = await LAYOUTS[ap.code];
-    if (!L_ || GL.leg !== leg || map.getZoom() < 13) return;
-    clearLayout();
-    for (const id of LAY) GL.map.getSource(id).setData(L_[id]);
-    GL.map.getSource("laysym").setData(L_.labels);
-    GL.layoutFor = ap.code; GL.layoutShown = true;
+    const Ls = (await Promise.all(codes.map((c) => LAYOUTS[c]))).filter(Boolean);
+    if (!Ls.length || GL.leg !== leg || GL.layoutFor !== key || !GL.ready) { if (GL.layoutFor === key) GL.layoutFor = null; return; }
+    const merge = (id) => FC(Ls.flatMap((L_) => L_[id].features));
+    for (const id of LAY) { const s_ = map.getSource(id); if (s_) s_.setData(merge(id)); }
+    const s2 = map.getSource("laysym"); if (s2) s2.setData(merge("labels"));
+    GL.layoutShown = true;
   }
   function buildLayout(d) {
     if (!d || !d.features) return null;
@@ -2889,6 +2922,7 @@
     const center = all.length && d.center ? d.center : null;
     if (!SURF.zoomed && center && ["taxi_out", "landed"].includes(d.phase)) {
       const me = all.find((t) => t.mine);
+      if (Math.abs(GL.map.getZoom() - 14) > 2.5) holdTiles();
       GL.map.easeTo({ center: me ? [me.lon, me.lat] : [center[1], center[0]], zoom: 14, duration: 900, padding: mapPad(false) });
       SURF.zoomed = true;
     }

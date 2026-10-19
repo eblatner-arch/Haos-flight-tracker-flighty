@@ -44,6 +44,15 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(caches.open(SHELL).then(async (box) => (await box.match(req)) || fetch(req).then((r) => { if (r.ok) box.put(req, r.clone()); return r; })));
     return;
   }
+  if (/^api\/airport\/[^/]+\/layout$/.test(rel)) {   // airport diagrams hardly change: the phone's copy at once, refreshed behind it
+    e.respondWith(caches.open(DATA_BOX).then(async (box) => {
+      const hit = await box.match(req, { ignoreVary: true });
+      const fresh = fetch(req).then((r) => { if (r && r.ok) box.put(req, r.clone()); return r; });
+      if (hit) { e.waitUntil(fresh.catch(() => {})); return hit; }
+      return fresh;
+    }));
+    return;
+  }
   if (/^api\//.test(rel)) { if (DATA.test(rel)) e.respondWith(dataFirst(req)); return; }
   if (!page && !ASSET.test(rel)) return;
   e.respondWith((async () => {
