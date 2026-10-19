@@ -464,11 +464,35 @@
       .concat(rot.map((r, i) => `<a class="rot-step ${i === n ? "on" : ""} ph-${slug(r.phase)}" href="#/aircraft/${id}/${i}"><b>${esc(r.display_ident || r.ident || "?")}</b><span>${esc((r.origin || {}).iata || "?")}→${esc((r.destination || {}).iata || "?")}</span><i>${esc(r.status)}</i></a>`))
       .join('<span class="rot-arrow">‹</span>')}</div>`;
   }
-  // what the FAA, towers, surface radar and the airline said about an inbound leg
-  function acLog(h) {
+  // every lookup and what it changed; on an inbound leg's page, the lookups of that airplane
+  function lookupLog(hist, more) {
+    if (!hist.length) return "";
+    return fold("leg-log", "Lookup Log", `<div class="card">${hist.map((h) => `<div class="hist">
+          <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
+            ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B|adsb/.test(x) ? "adsb" : ""}">${esc(x)}</span>`).join("")}</div>
+          ${(h.seen || []).length ? `<div class="hist-seen">${h.seen.map((x) => `<div><span class="faint">${esc(x.src)}</span> ${x.tail ? `<b>${esc(x.tail)}</b>${x.note ? ` <span class="faint">· ${esc(x.note)}</span>` : ""}` : `<span class="faint">${esc(x.note || "no tail")}</span>`}</div>`).join("")}</div>` : ""}
+          ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
+            : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
+          ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
+        </div>`).join("")}${more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${more} older</button>` : ""}</div>`, false);
+  }
+  // your inbound's lookups live in your flight's log: pick out the ones about it (its FlightAware
+  // page, its transponder) and what they changed on your flight (Inbound, Inbound due, Tail)
+  function inboundHist(ac) {
+    if (ac.n !== 0) return [];
+    const inb = (x) => /\(inbound\)/.test(x), field = (c) => /^Inbound|^Tail$/.test(c.field);
+    return (ac.parent.history || []).map((h) => {
+      const seen = (h.seen || []).filter((x) => / · inbound /.test(x.src || ""));
+      const changes = (h.changes || []).filter(field);
+      if (!seen.length && !changes.length && !h.sources.some(inb)) return null;
+      return { ...h, sources: h.sources.filter((x) => inb(x) || seen.some((y) => y.src.startsWith(x))), seen, changes, error: null, note: null };
+    }).filter(Boolean);
+  }
+  // what the FAA, towers, surface radar and the airline said about a flight (yours or an inbound leg)
+  function acLog(h, inbound) {
     return fold("ac-log", "Data Log", `<div class="card">${(h.log || []).length ? h.log.map((x) => `<div class="hl"><div class="hl-t">${hm(x.at)}<span class="faint"> · ${esc(x.src || "")}</span></div><div class="small">${esc(x.text)}</div></div>`).join("")
-      : `<div class="small muted">Nothing from the FAA's feeds for this leg yet${STATE && STATE.swim && STATE.swim.status === "connected" ? "" : " (SWIM isn't connected)"}. Times come from FlightAware until they report it.</div>`}
-      <div class="small faint" style="margin-top:8px">The Times card says who reported each time. The log is cleared 15 minutes after this leg is at the gate.</div></div>`, false);
+      : `<div class="small muted">Nothing from the FAA's feeds for this ${inbound ? "leg" : "flight"} yet${STATE && STATE.swim && STATE.swim.status === "connected" ? "" : " (SWIM isn't connected)"}. Times come from FlightAware until they report it.</div>`}
+      <div class="small faint" style="margin-top:8px">The Times card says who reported each time.${inbound ? " The log is cleared 15 minutes after this leg is at the gate." : ""}</div></div>`, false);
   }
   function problemBanners(leg) {
     const nf = notFound(leg) && leg.note && /^Not found/.test(leg.note) ? `<div class="banner warn"><span class="dot warn"></span><div>${esc(leg.note)}</div></div>` : "";
@@ -2935,15 +2959,8 @@
         ${wx ? fold("leg-wx", "METARs", `<div class="card">${wx}</div>`, false) : ""}
         ${nasMinor([leg]).length ? fold("leg-nas", "Other NAS items", nasCard(nasMinor([leg])), false) : ""}
         ${(leg.alerts || []).length ? fold("leg-alerts", "Alerts for This Flight", alertsCard(leg.alerts), false) : ""}
-        ${(leg.history || []).length ? fold("leg-log", "Lookup Log", `<div class="card">${leg.history.map((h) => `<div class="hist">
-          <div class="hist-top"><span class="mono small">${fmt(h.at, undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}${h.quiet ? `–${fmt(h.last, undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}` : ""}</span>
-            ${h.sources.map((x) => `<span class="src ${/AeroAPI/.test(x) ? "aero" : /Gemini/.test(x) ? "gem" : /ADS-B|adsb/.test(x) ? "adsb" : ""}">${esc(x)}</span>`).join("")}</div>
-          ${(h.seen || []).length ? `<div class="hist-seen">${h.seen.map((x) => `<div><span class="faint">${esc(x.src)}</span> ${x.tail ? `<b>${esc(x.tail)}</b>${x.note ? ` <span class="faint">· ${esc(x.note)}</span>` : ""}` : `<span class="faint">${esc(x.note || "no tail")}</span>`}</div>`).join("")}</div>` : ""}
-          ${h.changes.length ? `<div class="hist-ch">${h.changes.map((c) => `<div><span class="faint">${esc(c.field)}</span> ${c.from ? `<s>${esc(c.from)}</s> → ` : ""}<b>${esc(c.to)}</b>${c.via ? ` <span class="faint small">via ${esc(c.via)}</span>` : ""}</div>`).join("")}</div>`
-            : `<div class="small faint">No changes${h.quiet ? ` · ${h.quiet} checks` : ""}</div>`}
-          ${h.error ? `<div class="small err">${esc(h.error)}</div>` : h.note && !h.changes.length ? `<div class="small faint">${esc(h.note)}</div>` : ""}
-        </div>`).join("")}${leg.history_more ? `<button class="btn" id="log-more" style="margin-top:10px">Show ${leg.history_more} older</button>` : ""}</div>`, false) : ""}
-        ${ac ? acLog(leg.flight) : ""}
+        ${ac ? acLog(leg.flight, true) : acLog(leg, false)}
+        ${lookupLog(ac ? inboundHist(ac) : leg.history || [], ac ? 0 : leg.history_more)}
         ${leg.shot ? fold("leg-shot", "Latest Screenshot", `<div class="card shot"><img loading="lazy" alt="FlightAware page" onerror="this.closest('details').remove()" src="api/shot/${leg.id}.png?t=${Math.round(leg.updated || 0)}"></div>`, false) : ""}
       </section>`;
     if (ac) {

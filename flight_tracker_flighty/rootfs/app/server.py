@@ -901,6 +901,7 @@ def swim_check(L, f, planned):
 
 
 ROT_LOG_KEEP = 80
+OWN_LOG_KEEP = 200  # your own flight's Data Log: kept for the whole flight
 
 
 def rotation_swim(L, now):
@@ -2600,6 +2601,19 @@ def update_leg(browser, lid):
         if L.get("inbound") and any(d.get("leg_id") == lid and d.get("what") == "inbound aircraft"
                                     and d["at"] >= now for d in STATE["debug"][-6:]):
             used.append("FlightAware page (inbound)")
+        # What the FAA, towers, surface radar and the airline said goes in the Data Log, the same
+        # log an inbound leg keeps; the lookup log keeps the lookups (and that SWIM came in).
+        # Before, these lines went through the lookup log's transponder dedupe, which turns digits
+        # into '#': "landing est. 19:48" then "19:49" read as the same line and the second was dropped.
+        sl = L.setdefault("swim_log", [])
+        keep = []
+        for x in L.get("_seen") or []:
+            if x["src"] == "FAA SWIM" and not x.get("tail") and x.get("note"):
+                sl.append({"at": now, "src": "FAA SWIM", "text": x["note"]})
+            else:
+                keep.append(x)
+        L["_seen"] = keep
+        del sl[:-OWN_LOG_KEEP]
         log_lookup(L, prev_snap, time.time(), used or ["no lookup"])  # stamped when the check finished, after the page load
         L["alerts"] = (L.get("alerts") or []) + new_alerts
         L["alerts"] = L["alerts"][-60:]
@@ -3430,6 +3444,7 @@ def leg_summary(L, now, nas, full=False, rotation_tracks=False, log_all=False):
         hist = list(reversed(L.get("history") or []))
         out["history"] = hist if log_all else hist[:LOG_SHOWN]
         out["history_more"] = max(0, len(hist) - len(out["history"]))
+        out["log"] = list(reversed(L.get("swim_log") or []))
         out["rotation"] = []
         for i, h in enumerate(L.get("rotation") or []):
             if not h:

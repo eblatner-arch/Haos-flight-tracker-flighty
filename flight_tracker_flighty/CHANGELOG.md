@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.20.1
+- Your flight's page now has the same Data Log as an inbound leg's: what the FAA, the towers, surface radar and the airline said, line by line, as it comes in. Before, these lines went into the Lookup Log, whose transponder dedupe turned digits into "#", so "landing est. 19:48" and then "19:49" read as the same line and every update after the first was dropped.
+- Your inbound's page now has a Lookup Log too: its FlightAware page and transponder checks, and what they changed (Inbound, Inbound due, Tail). Both pages show Data Log then Lookup Log.
+
 ## 4.20.0
 - An inbound leg's page is now the same page as your flight: the status banner, departure and arrival with times, gates and terminals, the progress line, Good to Know (weather, FAA programs at its airports, time zone change), its own Inbound Aircraft card (the leg before it, with the turn), the Times card with who reported each time, the Aircraft card, Flight Details, METARs and the map. Plus the strip of the airplane's day at the top and the FAA Data Log at the bottom. Tapping a leg in its Inbound Aircraft card goes one further back.
 
