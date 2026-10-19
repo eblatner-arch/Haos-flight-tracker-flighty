@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.28.5
+- /leaflet/: routes no longer jump around during a camera move. Redrawing them mid-move (4.28.2) landed a frame behind the camera. Now, once an airport/route camera move has zoomed more than a level, the routes and dots fade out for the rest of the move and come back drawn sharp where it stops, so there's no stretched giant dot either. Pinches and drags never hide them.
+- /leaflet/: faster camera moves: about a second at most, even zooming from the whole coast down to an airport (was up to 2 s).
+
 ## 4.28.4
 - /leaflet/: fixes 4.28.3 turning the map white and Safari closing the page ("A problem repeatedly occurred") when zooming out. That version held far too much for iPhone Safari's memory: a whole-earth layer stretched up to 128 times its size, a wide ring of extra tiles at every zoom, and the satellite dimmed by fading the whole tile layer, which makes Safari draw every layer into one huge picture while zooming. All three are gone: the softer layer under the sharp one is now a single zoom softer with a quarter of the tiles, the ring around the screen is back to normal, and the satellite is dimmed per tile.
 - /leaflet/: the automatic switch to a new version happens at most once a minute, so a page that can't load can never keep reloading itself.

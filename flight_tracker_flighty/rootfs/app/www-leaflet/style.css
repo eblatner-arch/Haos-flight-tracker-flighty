@@ -1078,3 +1078,7 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
 .ft-base img.leaflet-tile { outline: 1px solid transparent; }
 /* the satellite, dimmed a touch per tile (cheap for Safari, unlike fading the whole layer) */
 .ft-sat .leaflet-tile-pane img.leaflet-tile { filter: brightness(0.86); }
+
+/* long camera flights: routes and dots fade out mid-zoom (they'd be stretched) and come back sharp */
+#map canvas { transition: opacity .18s ease; }
+#map.ft-flyfar canvas { opacity: 0; transition: opacity .1s ease; }

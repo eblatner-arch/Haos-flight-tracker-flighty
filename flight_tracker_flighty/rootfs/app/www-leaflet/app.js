@@ -2236,7 +2236,9 @@
     const dz = Math.abs(zl - LM.getZoom());
     if (dz < 0.05) { LM.panTo(c, { animate: true, duration: Math.max(0.3, dur / 1000) }); return; }
     FLYING = dz >= 1;
-    LM.flyTo(c, zl, { duration: Math.min(2, Math.max(0.6, (dur / 1000) * (dz > 3 ? 1.5 : 1))), easeLinearity: 0.2 });
+    if (FLYING && GL.flyStart) GL.flyStart();
+    // quick: under a second even for a coast-to-airport zoom (it was up to 2 s)
+    LM.flyTo(c, zl, { duration: Math.min(1.1, Math.max(0.5, (dur / 1000) * (dz > 3 ? 1.1 : 0.8))), easeLinearity: 0.2 });
   }
   // Fit the page's routes into the part of the screen the sheet doesn't cover (at its middle stop).
   function glFit(animate, now) {
@@ -2361,21 +2363,18 @@
     LM.on("movestart zoomstart", () => { MOVING = true; });
     LM.on("moveend", () => { MOVING = false; placeSymbols(); layoutCheck(); surfaceNow(); });
     LM.on("zoomend", () => { for (const s of Object.values(SRC)) if (s.restyle) s.restyle(); if (GL.lastSurface) paintSurface(GL.lastSurface); });
-    // Lines and dots are drawn once and the browser scales the drawing while the camera moves. Over a
-    // long zoom (an airport button: zoom 3 to 15) that blew a 4 px airport dot up past the whole screen.
-    // Redraw them every half zoom level along the way, so they keep their size the whole trip.
-    LM.on("zoom", () => {
-      const z = LM.getZoom();
-      for (const r of Object.values(REND)) {
-        if (!r._map) continue;
-        if (r.__z == null) r.__z = z;
-        if (Math.abs(z - r.__z) >= 0.5) { r.__z = z; try { r._reset(); } catch {} }
-      }
-    });
-    LM.on("zoomend moveend", () => { const z = LM.getZoom(); for (const r of Object.values(REND)) r.__z = z; });
+    // Lines and dots are drawn once and the browser scales the drawing while the camera moves. Fine for
+    // a small zoom, but over a long one (an airport button: zoom 3 to 15) a 4 px airport dot grew past
+    // the whole screen and routes got fat. Redrawing them mid-move made them jump about, so instead,
+    // once a camera flight has zoomed more than a level from where it started, they fade out and come
+    // back drawn sharp where it stops. Pinches and drags never hide them.
+    let flyZ0 = null;
+    const flyEnd = () => { FLYING = false; flyZ0 = null; MAP_EL.classList.remove("ft-flyfar"); };
+    GL.flyStart = () => { flyZ0 = LM.getZoom(); };
+    LM.on("zoom", () => { if (FLYING && flyZ0 != null && Math.abs(LM.getZoom() - flyZ0) > 1) MAP_EL.classList.add("ft-flyfar"); });
     // a camera flight ends where it stops, or the moment you touch the map
-    LM.on("moveend", () => { FLYING = false; });
-    MAP_EL.addEventListener("touchstart", () => { FLYING = false; }, { passive: true });
+    LM.on("moveend", flyEnd);
+    MAP_EL.addEventListener("touchstart", flyEnd, { passive: true });
     loadPlaces();
     if (radarOn()) glRadar(true);
     setTimeout(warmWorld, 8000);
