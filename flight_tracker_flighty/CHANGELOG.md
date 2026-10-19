@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.22.0
+- Notifications straight to your phone (Web Push): Settings → Notifications on this phone → Turn on. Alerts arrive as Flighty, from the Home Screen app itself, and tapping one opens the app right on that flight (or switches to it if the app is open). Uses the app's https address and iOS 16.4 or later; open the app from the Home Screen icon to turn it on. "Send a test" checks it.
+- Settings → Home Assistant app notifications: turn it off once your phone gets alerts directly, so each comes once. On by default.
+- Everything offline: besides the app itself and the map tiles, every piece of data the app reads (flights, inbound legs, Passport, airports, alerts, place names, airport diagrams, settings) is kept on the phone and used when the add-on can't be reached; the Live dot turns gray while you're on the saved copy. The app also asks iOS to keep its storage rather than clear it when space runs low.
+- App manifest filled out (id, scope, portrait, maskable icon).
+- The add-on now includes the cryptography package (for signing and encrypting notifications).
+
 ## 4.21.0
 - The Aircraft card shows the real airplane for United's 737s: cut-out side views of the 737-800 (also used for the -700 for now), 737 MAX 8, 737-900 and 737 MAX 9 (also the MAX 10). Other types keep the drawing.
 - How many times you've flown that tail: "You've flown N38459 3 times before" or "First time on N38459", on your flight and on each inbound leg's page.

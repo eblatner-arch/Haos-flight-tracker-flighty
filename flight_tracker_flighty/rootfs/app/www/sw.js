@@ -4,6 +4,26 @@
 // always goes to the add-on. Files are named by their content (?v=...), so an old page always finds
 // the files it was built with; older copies are dropped as new ones arrive.
 const SHELL = "ft-shell-v1";
+// Data the app reads (flights, history, airports, alerts, map extras): fresh from the add-on when it
+// answers, else the last copy on the phone, so every page opens with no signal. Live streams and
+// one-off actions are left alone.
+const DATA_BOX = "ft-data-v1";
+const DATA = /^api\/(state|leg\/|history|hist\/|alerts|airports|nas|places|artcc|airport\/[^/]+\/layout|settings|rules|backup|push\/key)/;
+async function dataFirst(req) {
+  const box = await caches.open(DATA_BOX);
+  try {
+    const r = await fetch(req);
+    if (r && r.ok) box.put(req, r.clone()).catch(() => {});
+    return r;
+  } catch (err) {
+    const hit = await box.match(req, { ignoreVary: true });
+    if (hit) {   // marked, so the app shows it's offline (Live dot gray)
+      const h = new Headers(hit.headers); h.set("X-From-Phone", "1");
+      return new Response(await hit.blob(), { status: 200, headers: h });
+    }
+    throw err;
+  }
+}
 const ASSET = /^(app\.js|style\.css|maplibre-gl\.(?:js|css)|icon[\w.-]*\.(?:png|svg)|ac-[\w-]+\.png|manifest\.webmanifest)$/;
 
 self.addEventListener("install", (e) => {
@@ -20,6 +40,7 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
   const rel = url.pathname.slice(scope.pathname.length);
   const page = rel === "" || rel === "index.html";
+  if (/^api\//.test(rel)) { if (DATA.test(rel)) e.respondWith(dataFirst(req)); return; }
   if (!page && !ASSET.test(rel)) return;
   e.respondWith((async () => {
     const box = await caches.open(SHELL);
@@ -39,5 +60,32 @@ self.addEventListener("fetch", (e) => {
     });
     if (hit) { e.waitUntil(fresh.catch(() => {})); return hit; }
     return fresh;
+  })());
+});
+
+// ---------- notifications straight from the add-on ----------
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: "Flighty", body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Flighty", {
+    body: d.body || "", tag: d.tag || undefined, renotify: !!d.tag, icon: "icon-180.png", badge: "icon-180.png",
+    data: { url: d.url || "#/" },
+  }));
+});
+// a tap opens the app on that flight (or brings the open app there)
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const target = new URL(self.registration.scope);
+  target.hash = ((e.notification.data || {}).url || "#/").replace(/^#/, "");
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of all) {
+      if (c.url.startsWith(self.registration.scope)) {
+        await c.focus();
+        try { c.postMessage({ go: target.hash }); } catch {}
+        return;
+      }
+    }
+    await self.clients.openWindow(target.href);
   })());
 });

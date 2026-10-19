@@ -7,3 +7,4 @@ recurring-ical-events>=2.0
 airportsdata
 openpyxl
 solace-pubsubplus
+cryptography>=42

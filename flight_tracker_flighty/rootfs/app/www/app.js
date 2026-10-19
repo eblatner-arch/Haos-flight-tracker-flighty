@@ -167,6 +167,61 @@
   }, { capture: true, passive: true });
   document.addEventListener("touchcancel", () => { if (sw) unstyle(sw.el); sw = null; $root.style.transform = ""; $root.style.opacity = ""; }, { capture: true, passive: true });
 
+  // ---------- notifications straight to this phone (Web Push) ----------
+  // A Home Screen web app subscribes with the add-on's key; the add-on then sends alerts through
+  // Apple's (or Google's) push service, as "Flighty", and a tap opens this app on that flight.
+  const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const b64u8 = (s) => { const b = atob((s + "=".repeat((4 - s.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+  async function pushSub() {
+    if (!("serviceWorker" in navigator) || !window.PushManager) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? reg.pushManager.getSubscription() : null;
+  }
+  async function wirePush() {
+    const st = document.getElementById("wp-state"), msg = document.getElementById("wp-msg");
+    if (!st) return;
+    const on = document.getElementById("wp-on"), off = document.getElementById("wp-off"), test = document.getElementById("wp-test");
+    const show = async () => {
+      on.hidden = off.hidden = test.hidden = true;
+      if (!window.isSecureContext) { st.textContent = "Needs the app's https address (e.g. https://yourname.duckdns.org:port)."; return; }
+      if (!("serviceWorker" in navigator) || !window.PushManager || !window.Notification) {
+        st.textContent = /iPhone|iPad/.test(navigator.userAgent) && !isStandalone()
+          ? "Add this page to your Home Screen (Share → Add to Home Screen) and open it from there: iPhone allows notifications only for Home Screen apps."
+          : "This browser can't receive web notifications."; return;
+      }
+      let key = null; try { key = (await api("api/push/key")).key; } catch {}
+      if (!key) { st.textContent = "The add-on can't send phone notifications yet (update the add-on)."; return; }
+      const sub = await pushSub();
+      if (Notification.permission === "denied") { st.textContent = "Notifications are blocked for this app (on iPhone: Settings → Notifications → Flighty)."; return; }
+      if (sub) { st.textContent = "On. Alerts come straight to this phone as Flighty; tapping one opens the flight."; off.hidden = test.hidden = false; }
+      else { st.textContent = "Off. Turn on to get alerts here directly, as Flighty, opening right on the flight."; on.hidden = false; }
+    };
+    on.onclick = async () => {
+      msg.className = "small muted"; msg.textContent = "Turning on…";
+      try {
+        if ((await Notification.requestPermission()) !== "granted") throw new Error("permission not given");
+        const { key } = await api("api/push/key");
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(key) });
+        const label = /iPhone/.test(navigator.userAgent) ? "iPhone" : /iPad/.test(navigator.userAgent) ? "iPad" : /Android/.test(navigator.userAgent) ? "Android" : "browser";
+        await api("api/push/subscribe", { method: "POST", body: JSON.stringify({ sub: sub.toJSON(), label }) });
+        msg.className = "small"; msg.textContent = "On. Send a test to check.";
+      } catch (e) { msg.className = "small err"; msg.textContent = `Couldn't turn on: ${e.message}`; }
+      show();
+    };
+    off.onclick = async () => {
+      const sub = await pushSub();
+      if (sub) { try { await api("api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint: sub.endpoint }) }); } catch {} await sub.unsubscribe().catch(() => {}); }
+      msg.textContent = ""; show();
+    };
+    test.onclick = async () => {
+      const sub = await pushSub();
+      msg.className = "small muted"; msg.textContent = "Sending…";
+      try { await api("api/push/test", { method: "POST", body: JSON.stringify({ endpoint: sub && sub.endpoint }) }); msg.className = "small"; msg.textContent = "Sent: it should appear in a few seconds."; }
+      catch (e) { msg.className = "small err"; msg.textContent = `Not delivered (${e.message}). Turn it off and on again.`; }
+    };
+    show();
+  }
   async function api(path, opts) {
     // GETs revalidate (the add-on answers "not changed" with a tiny 304); changes always go through.
     // A GET gives up after 15 s on a weak signal instead of hanging the page.
@@ -182,6 +237,7 @@
     }
     finally { if (to) clearTimeout(to); }
     if (!r.ok) throw new Error(`${r.status}`);
+    if (r.headers.get("X-From-Phone")) { try { setLive(false); } catch {} }   // the phone's copy: no signal
     if (opts && opts.method === "POST") changed(path);
     return r.json();
   }
@@ -3302,6 +3358,10 @@
         <p class="small muted" style="margin:0 0 12px">Sends to ${esc(c.notify)}.</p>
         <button class="btn primary" id="t-notify">Send test notification</button>
         <div id="t-msg" class="small" style="margin-top:8px"></div>
+        <h3 style="margin:18px 0 4px">Notifications on this phone</h3>
+        <p class="small muted" style="margin:0 0 10px" id="wp-state">…</p>
+        <div class="actions" style="margin:0"><button class="btn primary" id="wp-on" hidden>Turn on</button><button class="btn" id="wp-test" hidden>Send a test</button><button class="btn" id="wp-off" hidden>Turn off</button></div>
+        <div id="wp-msg" class="small" style="margin-top:8px"></div>
       </div>
       ${fold("tools-setup", "Setup check", `<div class="card"><div class="kv">
         <div class="k">Schedule file</div><div>${sch.exists ? "✓ " : '<span class="err">missing </span>'}<span class="mono small">${esc(sch.path)}</span></div>
@@ -3362,6 +3422,7 @@
     if (TC_ON) tcShow();
     const tcb = document.getElementById("tc-clear");
     if (tcb) tcb.onclick = async () => { tcb.disabled = true; await tileCacheClear(); tcb.disabled = false; tcShow(); };
+    wirePush();
     document.getElementById("t-notify").onclick = async (e) => {
       const msg = document.getElementById("t-msg");
       e.target.disabled = true; msg.className = "small muted"; msg.textContent = "Sending…";
@@ -3602,6 +3663,10 @@
   // session, so there's nothing stable to keep.
   if ("serviceWorker" in navigator && window.isSecureContext && !/hassio_ingress|api\/ingress/.test(location.pathname)) {
     navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {});
+    // a tapped notification while the app is open: go to that flight
+    navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.go) go(e.data.go); });
+    // ask iOS / the browser to keep the app's storage (map tiles, flights) rather than clear it when space runs low
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then((p) => p || navigator.storage.persist()); } catch {}
   }
   // Draw the last known state right away, then fetch the current one.
   const snap = loadSnapshot();

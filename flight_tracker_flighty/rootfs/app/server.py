@@ -28,6 +28,10 @@ import rules as rules_mod
 import schedule
 import sources
 import swim
+try:
+    import webpush
+except Exception as _e:   # cryptography missing: phone notifications off, everything else runs
+    webpush = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("flight_tracker_flighty")
@@ -42,6 +46,7 @@ TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 HOUR = 3600
 
 DEFAULTS = {
+    "ha_notify": True,
     "ics_file_path": "/homeassistant/ics2gcal/feed.ics",
     "airline_icao": "",
     "flight_regex": "",
@@ -150,6 +155,7 @@ APP_SETTINGS = {
     "adsb_inbound_minutes": ("int", 0, 30, "ADS-B on your inbound", "While your inbound is taxiing or flying, read its transponder this often (free) to catch a tail swap that kept the same flight number, and keep its position fresh on the map. 0 turns it off.", "Tail and position sources"),
     "live_positions": ("bool", None, None, "Live ADS-B positions", "Use adsb.lol for up-to-the-minute positions on the map while taxiing or airborne.", "Tail and position sources"),
     "nas_minutes": ("int", 2, 60, "FAA NAS status", "Minutes between NAS status checks.", "FAA NAS status"),
+    "ha_notify": ("bool", None, None, "Home Assistant app notifications", "Also send alerts through Home Assistant (notify service in the add-on configuration). Turn off once your phone gets them straight from the app (Settings → Notifications on this phone), so you don't get each one twice.", "Notifications"),
 }
 
 
@@ -330,7 +336,93 @@ def _flush_batch():
                "ts": any(a.get("ts") for a in lst)})
 
 
+# ---------- notifications straight to the phone (Web Push) ----------
+# A Home Screen web app subscribes (Settings → Notifications on this phone); alerts then reach it
+# directly through Apple's / Google's push service, as "Flighty", and a tap opens the app on that
+# flight. Subscriptions are kept in /data; one the phone has dropped is removed on its first failure.
+PUSH_PATH = os.path.join(DATA_DIR, "push_subs.json")
+_push_lock = threading.Lock()
+VAPID = None
+
+
+def push_init():
+    global VAPID
+    if webpush is None:
+        log.warning("Phone notifications unavailable (the cryptography package is missing)")
+        return
+    try:
+        VAPID = webpush.Vapid(os.path.join(DATA_DIR, "vapid.pem"))
+    except Exception as e:
+        log.warning("Phone notifications unavailable: %s", e)
+
+
+def push_subs():
+    try:
+        with open(PUSH_PATH) as f:
+            return json.load(f) or []
+    except (OSError, ValueError):
+        return []
+
+
+def push_save(subs):
+    with _push_lock:
+        tmp = PUSH_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(subs, f)
+        os.replace(tmp, PUSH_PATH)
+
+
+def push_send(alert, only=None):
+    """-> (sent, failed) to every subscribed phone (or just `only`, an endpoint)."""
+    if not VAPID:
+        return 0, 0
+    subs = [x for x in push_subs() if not only or x.get("endpoint") == only]
+    if not subs:
+        return 0, 0
+    ts = alert.get("ts", alert.get("level") in ("warn", "critical"))
+    payload = {"title": alert["title"], "body": alert["message"], "tag": f"{alert.get('tag')}-{alert.get('key')}",
+               "url": f"#/leg/{alert['leg']}" if alert.get("leg") else "#/", "ts": bool(ts), "level": alert.get("level")}
+    ok = bad = 0
+    drop = set()
+    for x in subs:
+        try:
+            st = webpush.send(VAPID, x, payload, ttl=0 if ts else 3600, urgency="high" if ts else "normal",
+                              topic=payload["tag"])
+        except Exception as e:
+            log.warning("Phone notification failed (%s): %s", (x.get("label") or "phone"), e)
+            bad += 1
+            continue
+        if st in (200, 201, 202):
+            ok += 1
+        elif st in (404, 410):
+            drop.add(x["endpoint"])   # the phone unsubscribed (app removed, notifications turned off)
+            bad += 1
+        else:
+            log.warning("Phone notification to %s: HTTP %s", x.get("label") or "phone", st)
+            bad += 1
+    if drop:
+        push_save([x for x in push_subs() if x.get("endpoint") not in drop])
+        log.info("Removed %d phone subscription(s) that ended", len(drop))
+    return ok, bad
+
+
 def _send(alert):
+    sent = bad = 0
+    try:
+        sent, bad = push_send(alert)
+        if sent:
+            log.info("Pushed to %d phone(s): %s", sent, alert["title"])
+    except Exception as e:
+        log.warning("Phone notifications: %s", e)
+    if not CFG.get("ha_notify", True):
+        return (True, f"{sent} phone(s)") if sent or not bad else (False, "phone notification failed")
+    ok_ha, detail = _send_ha(alert)
+    if sent:
+        detail = f"{detail} + {sent} phone(s)"
+    return ok_ha or bool(sent), detail
+
+
+def _send_ha(alert):
     svc = (CFG.get("notify_service") or "").strip()
     if svc.startswith("notify."):
         svc = svc[7:]
@@ -3833,6 +3925,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, api_lookup(self._query()))
         if path == "/api/airports/status":
             return self._send(200, api_airports_status())
+        if path == "/api/push/key":
+            return self._send(200, {"key": VAPID.public if VAPID else None, "count": len(push_subs())})
         if path == "/api/places":
             d, tag = places_data()
             return self._send(200, d, cache="private, max-age=604800", etag=tag) if d else self._send(503, {"error": "place names not available yet"})
@@ -4036,6 +4130,26 @@ class Handler(BaseHTTPRequestHandler):
             mark_dirty()
             with LOCK:
                 return self._send(200, {"ok": True, "rules": rules_mod.catalog_for_ui(STATE["rules"])})
+        if path == "/api/push/subscribe":
+            b = self._json() or {}
+            sub = b.get("sub") or {}
+            if not VAPID or not (sub.get("endpoint") or "").startswith("https://") or not (sub.get("keys") or {}).get("p256dh"):
+                return self._send(400, {"error": "not a push subscription"})
+            subs = [x for x in push_subs() if x.get("endpoint") != sub["endpoint"]]
+            subs.append({"endpoint": sub["endpoint"], "keys": {"p256dh": sub["keys"]["p256dh"], "auth": sub["keys"]["auth"]},
+                         "label": (b.get("label") or "")[:60], "added": time.time()})
+            push_save(subs)
+            log.info("Phone subscribed to notifications (%s); %d in all", b.get("label") or "phone", len(subs))
+            return self._send(200, {"ok": True, "count": len(subs)})
+        if path == "/api/push/unsubscribe":
+            ep = (self._json() or {}).get("endpoint")
+            push_save([x for x in push_subs() if x.get("endpoint") != ep])
+            return self._send(200, {"ok": True})
+        if path == "/api/push/test":
+            ep = (self._json() or {}).get("endpoint")
+            sent, bad = push_send({"title": "Flighty", "message": f"Notifications on this phone work ({datetime.now(HOME_TZ):%H:%M}).",
+                                   "level": "warn", "tag": "test", "key": "push"}, only=ep)
+            return self._send(200 if sent else 502, {"ok": bool(sent), "sent": sent, "failed": bad})
         if path == "/api/test-notify":
             ok, detail = notify({"title": "Flight Tracker Flighty test", "level": "warn", "tag": "test", "key": "notify",
                                  "message": f"Notifications work. Sent {datetime.now(HOME_TZ):%H:%M} via "
@@ -4076,6 +4190,7 @@ def main():
     history.init(DATA_DIR)
     gdrive.init(DATA_DIR, CFG)
     init_app_settings()
+    push_init()
     init_rules()
     if not CFG["airline_icao"]:
         log.warning("airline_icao is empty: titles without an airline code (e.g. '2204 EWR-IAH') can't be tracked")
