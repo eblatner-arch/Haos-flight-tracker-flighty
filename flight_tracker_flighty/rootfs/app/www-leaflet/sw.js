@@ -75,6 +75,11 @@ self.addEventListener("fetch", (e) => {
     const hit = await box.match(key);
     const fresh = fetch(req).then(async (r) => {
       if (r && r.ok) {
+        // a new version of the page: tell the open app, so it switches to it (see app.js)
+        if (page && hit && hit.headers.get("ETag") && r.headers.get("ETag") && hit.headers.get("ETag") !== r.headers.get("ETag")) {
+          const tell = () => self.clients.matchAll({ type: "window" }).then((all) => all.forEach((c) => c.postMessage({ updated: true })));
+          setTimeout(tell, 300);
+        }
         await box.put(key, r.clone());
         if (!page) {   // drop older versions of this file
           for (const k of await box.keys()) {

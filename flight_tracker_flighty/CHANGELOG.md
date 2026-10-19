@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.28.3
+- /leaflet/: no more black screen when zooming out from an airport. The whole earth at zoom 3 (saved on the phone the first day) now sits under everything up to a regional view, and the softer imagery layer refreshes every 3 zoom levels during a long camera move, so the map fills in as it pulls back instead of shrinking to a small square.
+- /leaflet/: sharp tiles no longer try to load on every frame of an airport/route camera move. Each new level cancelled the one before, so nothing finished; now they load where the camera stops (dragging still loads as you go).
+- /leaflet/: the app switches to a new version by itself. The page opens from the phone's copy for speed, so after an update the first launch still ran the old code; now it reloads into the new one right away if you just opened it, or the next time you leave the app.
+
 ## 4.28.2
 - /leaflet/: no more black squares while dragging. Under the sharp satellite imagery there's now a second copy two zooms coarser (a sixteenth of the tiles, nearly always already on the phone), so anywhere a sharp tile is still loading you see the earth, just softer, until it arrives.
 - /leaflet/: tiles load while you drag and zoom, not only once you let go, and a wider ring of them stays in memory around the screen, so panning back is instant.
