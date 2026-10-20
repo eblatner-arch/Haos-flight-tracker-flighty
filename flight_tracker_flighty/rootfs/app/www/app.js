@@ -699,7 +699,7 @@
   const mins = (m) => m == null ? "—" : `${m > 0 ? "+" : ""}${Math.round(m)}`;
   // average arrival vs schedule, in words: "usually 15 min early"
   const avgArr = (m) => m == null ? "" : Math.round(m) === 0 ? "usually right on schedule" : `usually ${Math.abs(Math.round(m))} min ${m < 0 ? "early" : "late"}`;
-  const delayCls = (m) => m == null ? "" : m >= 15 ? "late" : m <= -5 ? "early" : "";
+  const delayCls = (m) => m == null ? "" : m >= 30 ? "vlate" : m >= 5 ? "late" : m <= -5 ? "early" : "";
   function histTabs(cur, year) {
     const y = year ? `/${year}` : "";
     if (cur === "stats") return `<a class="back plain" href="#/history${y}">‹ Passport</a><h1 class="ptitle">Flight Stats</h1>`;
@@ -1215,10 +1215,12 @@
     };
   }
   const minsLate = (a, s) => a && s ? Math.round((a - s) / 60) : 0;
-  const tone = (m, known = true) => !known ? "" : m >= 15 ? "red" : m >= 5 ? "amber" : "green";
+  // One color scheme everywhere (same as the iPhone app): green early or on time (under 5 min late),
+  // amber 5-29 late, orange 30+, red only for cancelled or diverted.
+  const tone = (m, known = true) => !known ? "" : m >= 30 ? "orange" : m >= 5 ? "amber" : "green";
   const lateWord = (m, known = true) => !known ? "Scheduled" : Math.abs(m) < 5 ? "On Time" : m > 0 ? `${fdur(m * 60)} Late` : `${fdur(-m * 60)} Early`;
   const lateLower = (m) => Math.abs(m) < 5 ? "on time" : m > 0 ? `${fdur(m * 60)} late` : `${fdur(-m * 60)} early`;
-  const lateTone = (t) => t === "red" || t === "amber" ? t : "";
+  const lateTone = (t) => t === "red" || t === "orange" || t === "amber" ? t : "";
 
   // ---------- the flight list ----------
   function whenCol(leg) {
@@ -2751,11 +2753,16 @@
         track.push(lineF(pts, { c: violet, w: 2.5, o: inbOpen ? 0.9 : 0.35 }));
       }
       const iw = (inb.waypoints || []).filter((p) => p[0] != null), iPlan = !["landed", "arrived", "cancelled", "diverted"].includes(inb.phase);
-      if (iPlan && iw.length > 1) plan.push(lineF(iw, { c: violet, o: 0.45 }));
-      else if (iPlan && ia && A) plan.push(lineF(gcPoints(ia, A), { c: violet, o: 0.45 }));
       let ip = null, ih = 0;
       if (leg.inbound_live) { ip = newestPos(leg.inbound_live, itr); ih = headingOf(leg.inbound_live, itr); }
       else if (inb.phase === "airborne" && itr.length) { ip = itr[itr.length - 1]; ih = headingOf(null, itr); }
+      // the dashed line is only what's left to fly: from the airplane on once it's moving
+      const iFly = ip && ["airborne", "taxi_out"].includes(inb.phase);
+      if (iPlan && iw.length > 1) {
+        let ahead = iw;
+        if (iFly) { let bi = 0, bd = Infinity; iw.forEach((p, i) => { const d = kmBetween(ip, p); if (d < bd) { bd = d; bi = i; } }); ahead = [[ip[0], ip[1]], ...iw.slice(bi + 1)]; }
+        if (ahead.length > 1) plan.push(lineF(ahead, { c: violet, o: 0.45 }));
+      } else if (iPlan && A && (iFly || ia)) plan.push(lineF(gcPoints(iFly ? [ip[0], ip[1]] : ia, A), { c: violet, o: 0.45 }));
       if (ip) { inbIdx = marks.length; marks.push(planeMk([ip[0], ip[1]], ih, violet)); GL.inbHdg = ih; if (inbOpen) bounds.push([ip[0], ip[1]]); }
       if (ia && inbOpen) { bounds.push(ia); marks.push(symF(ia, ["pill", (inb.origin || {}).iata || "", violet, 8], "lbl", "left")); }
     }

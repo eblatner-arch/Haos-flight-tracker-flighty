@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.30.5
+- One color scheme everywhere, the same as the iPhone app: green early or on time (under 5 min late), amber 5-29 min late, orange 30+, and red only for cancelled or diverted flights. The status banner follows it too (a late flight's banner is amber or orange, not red).
+- Your inbound's dashed line on the map starts at the airplane once it's moving (only what's left to fly), instead of drawing the whole route behind it.
+
 ## 4.30.4
 - EDCT slot swaps: when a flight holds an EDCT and a later FAA flight message shows its flight plan refiled to another departure time, that time becomes the EDCT ("from the flight plan"). Airlines swap slots within a program and refile to the new EDCT, and the swap itself isn't in the public feed (UA1577 SFO-SAN: the FAA's first slot 8:27 PM, United's swaps to 7:59 then 7:42; only the refiled 7:42 reached the add-on).
 - A datalink clearance's EDCT now wins when it's newer than the one held, even over the FAA's first assignment.

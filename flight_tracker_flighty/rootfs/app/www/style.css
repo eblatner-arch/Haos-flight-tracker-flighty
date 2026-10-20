@@ -1069,3 +1069,12 @@ body:not(.sheetmode) #map, body:not(.sheetmode) #map * { visibility: hidden !imp
    imagery is in (at most 1.5 s), instead of a blank map, then routes, then imagery, then a nudge */
 body.booting #map, body.booting #app, body.booting #top { opacity: 0; }
 body.boot-fade #map, body.boot-fade #app, body.boot-fade #top { transition: opacity .35s ease; }
+
+/* Colors (4.30.5, same as the iPhone app): green on time or early, amber 5-29 min late, orange 30+,
+   red only for cancelled or diverted. */
+:root { --orange: #ff8a3d; }
+.orange, .fr-st.orange, .ft b.orange, .ep-big.orange, .tt-c b.orange, .ts-v.orange { color: var(--orange); }
+.ti.orange { background: var(--orange); color: #2a1000; }
+.ib-pill.orange { background: #ff8a3d; color: #2a1000; }
+.sbanner.orange { background: #2a1608; border-color: #3d200c; } .sbanner.orange .sb-h, .sbanner.orange .sb-s { color: #ff9a55; }
+.hdl.vlate { color: var(--orange); }
