@@ -29,6 +29,10 @@ YOURS_BY_TYPE = {}   # message type -> the last few raw messages that mention on
 # slot): what the FAA sent around an EDCT change. Kept on disk with YOURS_BY_TYPE, so an add-on
 # update or restart doesn't wipe them before the samples are downloaded.
 EDCT_TRAIL = {}
+# airport -> the last ground delay program / ground stop messages for the airports your flights touch
+# (every revision, cancel and purge, raw), so an EDCT that's removed can be lined up with what the
+# program did at that minute. Kept on disk with the trail.
+PROGRAM_TRAIL = {}
 YOURS_PATH = None
 _yours_dirty = [False]
 _yours_saved = [0.0]
@@ -488,6 +492,10 @@ def handle(xml_text):
         _edct_sample(xml_text)
     if "fiMessage" in head and ('msgType="GS"' in head or 'msgType="GDP"' in head or 'msgType="AFP"' in head):
         try:
+            _program_keep(xml_text)
+        except Exception as e:
+            log.debug("SWIM program trail: %s", e)
+        try:
             _flow(xml_text)
         except Exception as e:
             log.debug("SWIM flow message: %s", e)
@@ -683,6 +691,35 @@ def load_edcts(path):
         pass
 
 
+def _k3(code):
+    c = (code or "").strip().upper()
+    return c[1:] if len(c) == 4 and c.startswith("K") else c
+
+
+def _program_keep(xml_text):
+    """A GDP/GS/AFP message for an airport one of your flights departs, lands at or holds an EDCT for."""
+    with LOCK:
+        apts = {_k3(e.get(k)) for cs in WATCH for e in EVENTS.get(cs, []) for k in ("dep", "arr")}
+        apts |= {_k3(e.get("element")) for cs in WATCH for e in EDCTS.get(cs, [])}
+    apts.discard("")
+    if not apts:
+        return
+    found = set(_re.findall(r"<(?:\w+:)?(?:airportId|ctlElement)>\s*([A-Z0-9]{3,4})\s*<", xml_text))
+    hit = sorted({_k3(a) for a in found} & apts)
+    if not hit:
+        return
+    t = (_TYPE_RE.findall(xml_text[:4000]) or ["flow"])[0]
+    m = _re.search(r"<(?:\w+:)?tmiStatus>\s*(\w+)", xml_text)
+    body = _re.search(r"fiMessage\b[^>]*>\s*<(?:\w+:)?(\w+)", xml_text)   # the message body: gdpAdvisory, gsCancel …
+    with LOCK:
+        for a in hit:
+            lst = PROGRAM_TRAIL.setdefault(a, [])
+            lst.append({"at": time.time(), "type": t, "status": m.group(1) if m else None,
+                        "kind": body.group(1) if body else None, "xml": xml_text[:250000]})
+            del lst[:-20]
+    _yours_dirty[0] = True
+
+
 def save_yours(force=False):
     """The raw messages about your flights (by type, and the EDCT trail) to disk, at most every 2 min,
     dropping trail entries older than 36 h and callsigns no longer watched for that long."""
@@ -697,8 +734,12 @@ def save_yours(force=False):
             EDCT_TRAIL[cs] = [m for m in EDCT_TRAIL[cs] if m.get("at", 0) > cut]
             if not EDCT_TRAIL[cs]:
                 del EDCT_TRAIL[cs]
+        for a in list(PROGRAM_TRAIL):
+            PROGRAM_TRAIL[a] = [m for m in PROGRAM_TRAIL[a] if m.get("at", 0) > cut]
+            if not PROGRAM_TRAIL[a]:
+                del PROGRAM_TRAIL[a]
         evs = {cs: [e for e in EVENTS.get(cs, []) if (e.get("got") or 0) > cut] for cs in WATCH if EVENTS.get(cs)}
-        data = json.dumps({"by_type": YOURS_BY_TYPE, "trail": EDCT_TRAIL, "events": evs})
+        data = json.dumps({"by_type": YOURS_BY_TYPE, "trail": EDCT_TRAIL, "programs": PROGRAM_TRAIL, "events": evs})
         _yours_dirty[0] = False
     try:
         tmp = YOURS_PATH + ".tmp"
@@ -722,6 +763,8 @@ def load_yours(path):
         YOURS_BY_TYPE[t] = (list(lst) + YOURS_BY_TYPE.get(t, []))[-4:]
     for cs, lst in (d.get("trail") or {}).items():
         EDCT_TRAIL[cs] = (list(lst) + EDCT_TRAIL.get(cs, []))[-10:]
+    for a, lst in (d.get("programs") or {}).items():
+        PROGRAM_TRAIL[a] = (list(lst) + PROGRAM_TRAIL.get(a, []))[-20:]
     # the parsed SWIM events for your flights survive a restart (the samples zip and the leg's facts)
     for cs, lst in (d.get("events") or {}).items():
         have = {(e.get("type"), e.get("at"), e.get("src")) for e in EVENTS.get(cs, [])}
@@ -1486,7 +1529,10 @@ def samples_zip():
                                                "edcts": {"flights": len(EDCTS), "yours": {k: EDCTS[k] for k in WATCH if k in EDCTS},
                                                          "by_program": _edct_counts()},
                                                "edct_trail": {k: [{"at": m.get("at"), "type": m.get("type")} for m in v]
-                                                              for k, v in list(EDCT_TRAIL.items())}},
+                                                              for k, v in list(EDCT_TRAIL.items())},
+                                               "program_trail": {k: [{"at": m.get("at"), "type": m.get("type"), "status": m.get("status"),
+                                                                      "kind": m.get("kind")} for m in v]
+                                                                 for k, v in list(PROGRAM_TRAIL.items())}},
                                               indent=1, default=str))
         for t, lst in SAMPLES.items():
             for i, x in enumerate(lst, 1):
@@ -1504,6 +1550,11 @@ def samples_zip():
                 stamp = time.strftime("%H%M%SZ", time.gmtime(m.get("at") or 0))
                 z.writestr(f"your_flights/edct_trail/{_re.sub(r'[^A-Za-z0-9_]+', '_', cs)}_{j:02d}_{stamp}_"
                            f"{_re.sub(r'[^A-Za-z0-9_]+', '_', m.get('type') or 'unknown')}.xml", m["xml"])
+        for a, lst in list(PROGRAM_TRAIL.items()):
+            for j, m in enumerate(list(lst), 1):
+                stamp = time.strftime("%H%M%SZ", time.gmtime(m.get("at") or 0))
+                z.writestr(f"your_flights/programs/{_re.sub(r'[^A-Za-z0-9_]+', '_', a)}_{j:02d}_{stamp}_"
+                           f"{_re.sub(r'[^A-Za-z0-9_]+', '_', (m.get('type') or '') + '_' + (m.get('kind') or m.get('status') or ''))}.xml", m["xml"])
         for i, m in enumerate(PDC_RAW, 1):
             z.writestr(f"your_flights/clearance_{i:02d}.xml", m["xml"])
         for i, x in enumerate(STDDS_RAW, 1):

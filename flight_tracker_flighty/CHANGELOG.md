@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.8
+- SWIM samples: every ground delay program / ground stop message (revisions, cancels, purges) for the airports your flights depart, land at or hold an EDCT for is now kept (last 20 per airport, 36 h, survives restarts) and saved in the samples zip under your_flights/programs/. This is to see what a program did at the minute an EDCT was removed (UA442 was released by the SAN GDP mid-taxi). Data only; no EDCT rules changed.
+
 ## 4.31.7
 - SWIM samples: EDCT trail files are numbered, so two records in the same second no longer collide (the zip asked to overwrite on unzip).
 
