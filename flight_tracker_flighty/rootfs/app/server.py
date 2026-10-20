@@ -794,7 +794,8 @@ def _swim_take(sw, ev):
             # a later datalink message (an EDCT revision, the pilot's WILCO) adds to the clearance
             sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got, "v": 3}
             e = _hhmm_near(ev["pdc"].get("edct"), _ts(ev["pdc"].get("at")) or got)
-            if e and not sw.get("edct_tfms") and e != sw.get("edct"):
+            newer = (_ts(ev["pdc"].get("at")) or got) > (sw.get("edct_at") or 0)
+            if e and e != sw.get("edct") and (not sw.get("edct_tfms") or newer):
                 # the EDCT printed in the clearance, when the FAA's own assignment didn't reach us
                 sw["edct_prev"] = sw.get("edct")
                 sw["edct"], sw["edct_at"], sw["edct_for"], sw["edct_new"] = e, got, None, True
@@ -838,6 +839,14 @@ def _swim_take(sw, ev):
             sw["edct_for"] = _iata(ev.get("element")) if ev.get("element") else None
             sw["edct_new"] = True
             sw["edct_tfms"] = True
+    pe = _ts(ev.get("etd_proposed"))
+    if (pe and sw.get("edct") and abs(pe - sw["edct"]) >= 120 and pe != _ts(ev.get("igtd"))
+            and (_ts(ev.get("at")) or got) > (sw.get("edct_at") or 0) and not ev.get("edct")):
+        # Holding an EDCT, and the flight plan now says another departure time: the slot moved (an
+        # airline slot swap, a revision) and only the refiled plan reached us. United refiles to the
+        # EDCT it holds (UA1577: FAA's 8:27 PM, swapped to 7:59 then 7:42; the 7:42 showed here).
+        sw["edct_prev"] = sw["edct"]
+        sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_src"] = pe, got, True, "flight plan"
     if ev.get("traj"):
         sw["traj"] = [[p[0], p[1]] for p in ev["traj"]]
         sw["traj_fixes"] = ev.get("traj_fixes") or []
@@ -892,19 +901,16 @@ def swim_check(L, f, planned):
         sw.pop("edct_tfms", None)
         sw.pop("edct_new", None)
         saw(L, "FAA SWIM", None, f"{ef} delay program cancelled: the EDCT no longer applies")
-    # The tower's own system (TFDM) plans the takeoff well before the EDCT, after the EDCT came in: the
-    # flight was released from the program (a revision, a slot swap, an exemption) and the new time
-    # never reached this feed. TFDM builds EDCTs into its takeoff plan, so it wouldn't plan one this
-    # early for a flight still holding a slot. (UA1577 SFO-SAN: EDCT 8:27 PM from the morning's GDP,
-    # tower planning 7:07 PM, off at 7:10.)
+    # The tower's own system (TFDM) targets the takeoff well before the EDCT, after the EDCT came in:
+    # the flight was released from the program. Only its target time counts (it builds the EDCT in);
+    # its "earliest possible" takeoff doesn't (a flight with a 7:42 slot can be ready at 7:07).
     if sw.get("edct") and (sw.get("tfdm_at") or 0) > (sw.get("edct_at") or 0):
         tdd = sw.get("tfdm_dep") or {}
         rdt = tdd.get("runwayDepartureTime") or {}
-        plan = [_ts(rdt.get(k)) for k in ("target", "estimated", "earliest") if isinstance(rdt.get(k), str)]
-        plan = [p for p in plan if p]
-        if plan and min(plan) < sw["edct"] - 15 * 60 and tdd.get("smpExemptionReason") != "EDCT":
+        tgt = _ts(rdt.get("target")) if isinstance(rdt.get("target"), str) else None
+        if tgt and tgt < sw["edct"] - 15 * 60 and tdd.get("smpExemptionReason") != "EDCT":
             tza_ = alerting.tz_for(L.get("dep"), f.get("origin") or {})
-            saw(L, "FAA SWIM", None, f"Tower plans takeoff {alerting.hhmm(min(plan), tza_)}, well before the "
+            saw(L, "FAA SWIM", None, f"Tower targets takeoff {alerting.hhmm(tgt, tza_)}, well before the "
                 f"{alerting.hhmm(sw['edct'], tza_)} EDCT: released from the program, the EDCT no longer applies")
             sw["edct_prev"] = sw.pop("edct")
             sw.pop("edct_tfms", None)

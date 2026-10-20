@@ -157,6 +157,10 @@ def parse(xml_text):
                     ev["off"] = sub.get("timeValue")
                 elif n == "etd" and sub.get("etdType") == "CONTROLLED" and sub.get("timeValue"):
                     ev["edct"] = sub.get("timeValue")
+                elif n == "etd" and sub.get("etdType") == "PROPOSED" and sub.get("timeValue"):
+                    # the flight plan's departure time: airlines refile it to the EDCT they hold (a slot
+                    # swap's new time shows here even when the swap itself isn't shared)
+                    ev["etd_proposed"] = sub.get("timeValue")
                 elif n == "eta" and sub.get("etaType") in ("ESTIMATED", "ACTUAL"):
                     if sub.get("etaType") == "ACTUAL":
                         ev["on"] = ev["on"] or sub.get("timeValue")

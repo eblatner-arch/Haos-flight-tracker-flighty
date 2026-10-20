@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.30.4
+- EDCT slot swaps: when a flight holds an EDCT and a later FAA flight message shows its flight plan refiled to another departure time, that time becomes the EDCT ("from the flight plan"). Airlines swap slots within a program and refile to the new EDCT, and the swap itself isn't in the public feed (UA1577 SFO-SAN: the FAA's first slot 8:27 PM, United's swaps to 7:59 then 7:42; only the refiled 7:42 reached the add-on).
+- A datalink clearance's EDCT now wins when it's newer than the one held, even over the FAA's first assignment.
+- 4.30.3's rule is narrowed: only the tower system's target takeoff can retire an EDCT, not its earliest-possible time (a flight with a 7:42 slot can be ready at 7:07).
+
 ## 4.30.3
 - A stale EDCT is dropped when the tower's own system (TFDM) plans the takeoff well before it (15+ min), after the EDCT came in: the flight was released from the program (a revision, a slot swap, an exemption) and the new time never reached this feed, often because it was sent while the add-on was restarting (the FAA feed has no replay). TFDM builds EDCTs into its plan, so it doesn't plan an early takeoff for a flight still holding a slot. The lookup log says when this happens. (UA1577 SFO-SAN kept the morning's 8:27 PM slot while the tower planned 7:07 and it left at 7:10.)
 
