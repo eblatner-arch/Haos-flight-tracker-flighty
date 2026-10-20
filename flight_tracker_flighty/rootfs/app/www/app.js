@@ -1363,9 +1363,6 @@
       const gateLine = ph === "taxi_out" ? "" : !T.outKnown ? "" : dm >= 5 ? `Gate ${fdur(dm * 60)} late. ` : "Gate on time. ";
       sub = `${gateLine}Takeoff slot (EDCT) ${hm(e.at, leg.dep_ap.tz)}${late != null && late >= 1 ? `, ${fdur(late * 60)} late` : ""}. ` +
         `Departures to ${e.for || leg.arr} are held${prog && prog.kind === "gs" ? " by a ground stop" : " by a ground delay program"}${why}.`;
-      // the gate departure is after the slot on file: the slot moved and the new time didn't reach us
-      if (e.stale) sub = `${gateLine}Departures to ${e.for || leg.arr} are held${prog && prog.kind === "gs" ? " by a ground stop" : " by a ground delay program"}${why}. ` +
-        `The takeoff slot on file (${hm(e.at, leg.dep_ap.tz)}) is before the gate departure, so it has probably moved (an airline slot swap the FAA feed doesn't share).`;
       if (cls !== "red") cls = "amber";
     }
     // the FAA's delay trend at an airport you're headed into
