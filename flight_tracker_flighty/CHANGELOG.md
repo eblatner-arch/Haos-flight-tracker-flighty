@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.10
+- Google Drive backup: History flights' Lookup Logs are now in the backup zip (logs/) along with history.json and the tracks, and Restore brings them back. Adding a log to a flight already in History triggers a backup.
+
 ## 4.31.9
 - Passport: a finished flight keeps its Lookup Log. It's saved with the flight when it goes into History (data/logs/<id>.json, merged on each re-save) and shown on its History page in the web app and the iPhone app. Flights already in History get theirs on the next check while their leg is still on the board; older ones never had one saved. Deleting a flight or clearing History removes its log too.
 

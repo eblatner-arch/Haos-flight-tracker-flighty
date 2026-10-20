@@ -627,7 +627,7 @@ def export_csv():
 
 
 def make_backup(extra=None):
-    """A zip with everything needed to rebuild History: history.json, every track, plus `extra`
+    """A zip with everything needed to rebuild History: history.json, every track and Lookup Log, plus `extra`
     (settings worth keeping) as state.json."""
     import zipfile
     out = io.BytesIO()
@@ -640,6 +640,10 @@ def make_backup(extra=None):
         for name in sorted(os.listdir(tdir)) if os.path.isdir(tdir) else []:
             if name.endswith(".json"):
                 z.write(os.path.join(tdir, name), f"tracks/{name}")
+        ldir = os.path.join(_DIR or ".", "logs")
+        for name in sorted(os.listdir(ldir)) if os.path.isdir(ldir) else []:
+            if name.endswith(".json"):
+                z.write(os.path.join(ldir, name), f"logs/{name}")
     return out.getvalue()
 
 
@@ -663,6 +667,12 @@ def restore_backup(blob):
             except Exception:
                 pts = None
         upsert(dict(rec, id=fid), pts=pts, prefer_new=False)
+        ln = f"logs/{os.path.basename(_log_path(fid))}"
+        if ln in names:
+            try:
+                save_log(fid, json.loads(z.read(ln)))
+            except Exception:
+                pass
     save()
     extra = json.loads(z.read("state.json")) if "state.json" in names else {}
     return {"flights": len(data.get("flights") or {}), "added": added}, extra

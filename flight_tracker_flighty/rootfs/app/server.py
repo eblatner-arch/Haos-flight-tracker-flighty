@@ -2958,6 +2958,7 @@ def archive_finished(now):
             if L.get("history_id") and L.get("history") and not history.has_log(L["history_id"]):
                 try:
                     history.save_log(L["history_id"], list(L["history"]))
+                    changed = True   # so the Drive backup picks it up
                 except Exception as e:
                     log.info("History: couldn't save the lookup log of %s: %s", L.get("display"), e)
             continue
