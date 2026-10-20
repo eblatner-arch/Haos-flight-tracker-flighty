@@ -1177,6 +1177,16 @@ def swim_overlay(L, f, now):
         f["route"], f["route_source"] = sw["route"], "FAA"
     delay = td_dep.get("departureDelay") or {}
     taxi_out = (td_dep.get("departureTaxiTime") or {}).get("totalEstimatedTaxiOutTime")
+    # The airline plans the push from the slot it holds. A gate departure estimate after the EDCT on
+    # file means the slot moved and the new one never reached us (an airline slot swap isn't in the
+    # public feed: UA1100 LAX-SAN, FAA's first slot 8:30 PM, swapped to 9:15 at once, gate 8:45).
+    out_e, out_a = (t.get("out") or {}).get("estimated"), (t.get("out") or {}).get("actual")
+    # The tower's takeoff estimate well after it says the same (it plans from the slot the flight holds:
+    # UA1100's tower estimate was 9:10 PM all afternoon).
+    tw_e = ((td_dep.get("runwayDepartureTime") or {}).get("estimated")) if isinstance(td_dep, dict) else None
+    tw_e = _ts(tw_e) if isinstance(tw_e, str) else None
+    edct_stale = bool(sw.get("edct") and not out_a and not t.get("off", {}).get("actual") and (
+        (out_e and out_e > sw["edct"] - 5 * 60) or (tw_e and tw_e > sw["edct"] + 15 * 60)))
     f["swim"] = {
         "route_at": sw.get("route_at"), "route_prev": sw.get("route_prev"), "route_changed": sw.get("route_changed"),
         "off": sw.get("off"), "on": sw.get("on"), "eta_src": eta_src,
@@ -1194,7 +1204,8 @@ def swim_overlay(L, f, now):
         # metering (TBFM): release time (ctm), the EDCT it holds (etm), meter fix, runway, scheduled times
         "tbfm": sw.get("tbfm"),
         "edct_src": sw.get("edct_src"),
-        "edct": {"at": sw.get("edct"), "cta": sw.get("cta"), "prev": sw.get("edct_prev"), "for": sw.get("edct_for")}
+        "edct": {"at": sw.get("edct"), "cta": sw.get("cta"), "prev": sw.get("edct_prev"), "for": sw.get("edct_for"),
+                 "stale": edct_stale}
         if sw.get("edct") else
         # the departure tower's system knows the flight has one even when the time itself hasn't reached us
         {"at": None, "tower": True} if (sw.get("tfdm_dep") or {}).get("smpExemptionReason") == "EDCT" else None,

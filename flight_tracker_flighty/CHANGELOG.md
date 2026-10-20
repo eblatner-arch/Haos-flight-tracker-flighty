@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.3
+- An EDCT that has probably moved is flagged instead of shown as fact: when the airline's gate departure estimate is after the slot on file, or the departure tower's takeoff estimate is 15+ minutes after it, the banner says the slot on file has probably moved (an airline slot swap the public FAA feed doesn't carry). Seen today: UA1100 LAX-SAN kept the FAA's first slot (8:30 PM) while United had swapped it to 9:15 two minutes after the program began; United's gate time was 8:45 and LAX tower's estimate 9:10.
+
 ## 4.31.2
 - Metering (TBFM) line uses the fields as the live feed sends them: release time = `std` (TBFM's scheduled departure, when departures are metered), EDCT = `etm`, scheduled (metered) landing = `sta_rwy` (else its estimate `eta_rwy`), the meter fix with its scheduled or estimated time, and the departure runway. `ctm` turned out to be a coordination-fix time, not a release time, and isn't shown. (UA1577 into SAN: metered landing 8:48 PM via LEJEN.)
 
