@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.2
+- Metering (TBFM) line uses the fields as the live feed sends them: release time = `std` (TBFM's scheduled departure, when departures are metered), EDCT = `etm`, scheduled (metered) landing = `sta_rwy` (else its estimate `eta_rwy`), the meter fix with its scheduled or estimated time, and the departure runway. `ctm` turned out to be a coordination-fix time, not a release time, and isn't shown. (UA1577 into SAN: metered landing 8:48 PM via LEJEN.)
+
 ## 4.31.1
 - TBFM reader matched to the real feed (tbfmmeteringpublication 1.1: `<tma>` messages with an `<air aid dap apt airType>` record per flight and its fields in groups like `<flt>` and `<eta>`): every field under a flight's record is read now, not only the top level, so meter-fix times and the rest come through.
 - SWIM samples keep one example of each TBFM record layout, so scheduled times, release times and EDCT records can be checked as they appear.

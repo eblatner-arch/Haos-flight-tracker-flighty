@@ -3214,12 +3214,15 @@
       ["Landing estimate from", sw.eta_src === "tower" ? `${leg.arr} tower (TFDM)` : sw.eta_src === "FAA" ? "FAA (TFMS)" : ""],
       ["EDCT", sw.edct && !sw.edct.at ? "assigned (per the departure tower; time not received yet)" : sw.edct ? [`${hm(sw.edct.at, tzA)}`, sw.edct.prev && `was ${hm(sw.edct.prev, tzA)}`, sw.edct.for && `${sw.edct.for} program`,
         sw.edct.cta && `arrival slot ${hm(sw.edct.cta, tzB)}`].filter(Boolean).join(" · ") : ""],
-      ["Metering (TBFM)", sw.tbfm ? [sw.tbfm.ctm && `release ${hm(Date.parse(sw.tbfm.ctm) / 1000, tzA)}`,
-        sw.tbfm.etm && `EDCT ${hm(Date.parse(sw.tbfm.etm) / 1000, tzA)}`, sw.tbfm.mfx && `meter fix ${sw.tbfm.mfx}`,
-        (sw.tbfm.trw || sw.tbfm.rwy) && `runway ${sw.tbfm.trw || sw.tbfm.rwy}`,
-        (sw.tbfm.sta_rwy || sw.tbfm.sta) && /T/.test(sw.tbfm.sta_rwy || sw.tbfm.sta) && `scheduled landing ${hm(Date.parse(sw.tbfm.sta_rwy || sw.tbfm.sta) / 1000, tzB)}`,
-        sw.tbfm.sta_mfx && /T/.test(sw.tbfm.sta_mfx) ? `meter fix at ${hm(Date.parse(sw.tbfm.sta_mfx) / 1000, tzB)}` : sw.tbfm.eta_mfx && /T/.test(sw.tbfm.eta_mfx) && `meter fix ~${hm(Date.parse(sw.tbfm.eta_mfx) / 1000, tzB)}`,
-        sw.tbfm.at && `updated ${ago(sw.tbfm.at)}`].filter(Boolean).join(" · ") : ""],
+      // TBFM's own fields (from the live feed): std = metered release time (its scheduled time of
+      // departure), etm = the EDCT it holds, sta_rwy = scheduled (metered) landing, eta_rwy = its estimate,
+      // mfx = meter fix with sta_sfx / eta_mfx its times. (ctm is a coordination-fix time, not shown.)
+      ["Metering (TBFM)", sw.tbfm ? [(() => { const T = (k, z) => sw.tbfm[k] && /T/.test(sw.tbfm[k]) ? hm(Date.parse(sw.tbfm[k]) / 1000, z) : null;
+        return [T("std", tzA) && `release ${T("std", tzA)}`, T("etm", tzA) && `EDCT ${T("etm", tzA)}`,
+          T("sta_rwy", tzB) ? `scheduled landing ${T("sta_rwy", tzB)}` : T("eta_rwy", tzB) && `landing est. ${T("eta_rwy", tzB)}`,
+          sw.tbfm.mfx && `meter fix ${sw.tbfm.mfx}${T("sta_sfx", tzB) ? ` at ${T("sta_sfx", tzB)}` : T("eta_mfx", tzB) ? ` ~${T("eta_mfx", tzB)}` : ""}`,
+          (sw.tbfm.trw || sw.tbfm.drw) && `runway ${(sw.tbfm.trw || sw.tbfm.drw).replace(/^\w+_/, "")}`,
+          sw.tbfm.at && `updated ${ago(sw.tbfm.at)}`].filter(Boolean).join(" · "); })()].join("") : ""],
       ["EDCT from", sw.edct_src === "TBFM" ? "TBFM (metering)" : sw.edct_src === "flight plan" ? "the refiled flight plan (a slot swap)" : sw.edct_src === "clearance" ? "the datalink clearance" : ""],
       ["Clearance (datalink)", sw.pdc ? [sw.pdc.cleared_to && `cleared to ${sw.pdc.cleared_to}`, sw.pdc.departure && `via ${sw.pdc.departure}`,
         sw.pdc.altitude && (/^\d+$/.test(sw.pdc.altitude) ? `maintain ${sw.pdc.altitude}` : sw.pdc.altitude),
