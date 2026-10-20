@@ -98,6 +98,21 @@ configuration:
   swim_stdds_password:
     name: FAA SWIM STDDS password
     description: The STDDS subscription's own "Connection Password". Blank uses the TFMS one.
+  swim_tbfm_queue:
+    name: FAA SWIM TBFM queue (optional)
+    description: Your TBFM "Metering Publication" subscription's "Queue Name". Adds departure release times, the EDCT TBFM holds (slot swaps included), meter fix and scheduled runway times for your flights. Blank leaves TBFM off.
+  swim_tbfm_vpn:
+    name: FAA SWIM TBFM message VPN
+    description: The TBFM subscription's "Message VPN" (TBFM).
+  swim_tbfm_host:
+    name: FAA SWIM TBFM connection URL
+    description: The TBFM subscription's "JMS Connection URL". Default tcps://ems2.swim.faa.gov:55443.
+  swim_tbfm_username:
+    name: FAA SWIM TBFM username
+    description: Only if it differs from the TFMS one.
+  swim_tbfm_password:
+    name: FAA SWIM TBFM password
+    description: The TBFM subscription's own "Connection Password". Blank uses the TFMS one.
   map_api_key:
     name: Map tiles API key (optional)
     description: Your free CARTO basemap key (carto.com/basemaps/apikey). Without one CARTO marks the map tiles "API key required". It's used by your browser to load the maps.

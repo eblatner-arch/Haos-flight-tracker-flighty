@@ -528,6 +528,9 @@ TFDM_TYPES = {}
 STDDS_STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "matched": 0,
                "last_message": None, "rate": 0.0}
 STDDS_TYPES = {}
+TBFM_STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "matched": 0,
+              "last_message": None, "rate": 0.0}
+TBFM_TYPES = {}
 STDDS_RAW = []           # last few surface messages for your airports
 WATCH_AIRPORTS = set()   # ICAO codes of your watched flights' airports (KEWR …), set by the server
 SURFACE = {}             # airport -> track id -> latest surface position
@@ -773,6 +776,117 @@ def handle_tfdm(xml_text):
         TFDM_STATE["matched"] += 1
         MATCHED_RAW.append({"at": time.time(), "xml": head, "feed": "TFDM"})
         del MATCHED_RAW[:-40]
+
+
+# ---------------------------------------------------------------- TBFM
+# Time Based Flow Management (metering): per flight, its departure and arrival airports, the meter
+# fix, runway, the scheduled (metered) times, the departure release time (ctm, "coordination time")
+# and the EDCT TBFM holds for it (etm). Read loosely: a flight record is any element that names a
+# flight (aid) with its own fields as children or attributes, whatever the namespace.
+_TBFM_TIMEY = _re.compile(r"(^|_)(etm|ctm|sta|eta|std|etd|stdt|eta_rwy|sta_rwy|rta|eto|sto|ott|ctd|cta|edct)", _re.I)
+
+
+def _tbfm_time(v, ref=None):
+    """A TBFM time -> ISO UTC. Seen shapes: ISO (with or without Z), epoch seconds or ms,
+    and DDHHMM / HHMM (nearest to ref)."""
+    v = (v or "").strip()
+    if not v:
+        return None
+    from datetime import datetime, timezone, timedelta
+    try:
+        if "T" in v or "-" in v:
+            d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if v.isdigit() and len(v) >= 10:
+            t = int(v) / (1000 if len(v) >= 13 else 1)
+            return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if v.isdigit() and len(v) in (4, 6):
+            base = datetime.now(timezone.utc) if not ref else datetime.fromisoformat(ref.replace("Z", "+00:00"))
+            day = int(v[:2]) if len(v) == 6 else None
+            hh, mm = int(v[-4:-2]), int(v[-2:])
+            best = None
+            for dd in (-1, 0, 1):
+                c = (base + timedelta(days=dd)).replace(hour=hh, minute=mm, second=0, microsecond=0)
+                if day is not None and c.day != day:
+                    continue
+                if best is None or abs((c - base).total_seconds()) < abs((best - base).total_seconds()):
+                    best = c
+            return best.strftime("%Y-%m-%dT%H:%M:%SZ") if best else None
+    except Exception:
+        return None
+    return None
+
+
+def parse_tbfm(xml_text):
+    """TBFM messages -> [{acid, dep, arr, type, src: 'TBFM', at, igtd, tbfm: {field: value}, edct}]."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    ref = (_re.search(r'(?:timestamp|msgTime|time)="([^"]+)"', xml_text[:3000], _re.I) or [None, None])[1]
+    out = []
+    for el in root.iter():
+        kids = {}
+        for c in list(el):
+            n = _local(c.tag)
+            t = (c.text or "").strip()
+            if t and not list(c) and n not in kids:
+                kids[n] = t
+        for k, v in el.attrib.items():
+            kids.setdefault(_local(k), v)
+        aid = (kids.get("aid") or kids.get("acid") or "").upper()
+        if not aid or not (kids.get("apt") or kids.get("dap")):
+            continue
+        typ = el.attrib.get("airType") or el.attrib.get("type") or _local(el.tag)
+        f = {}
+        for k, v in kids.items():
+            if _TBFM_TIMEY.search(k):
+                f[k] = _tbfm_time(v, ref) or v
+            elif k in ("mfx", "rwy", "trw", "gat", "cfg", "scn", "tra", "fps", "acs", "dfx", "dfix", "typ", "tbfmid", "apreq", "sus"):
+                f[k] = v
+        out.append({"acid": aid, "dep": _apt(kids.get("dap") or kids.get("orig") or ""), "arr": _apt(kids.get("apt") or kids.get("dest") or ""),
+                    "type": f"TBFM {typ}", "src": "TBFM", "at": ref, "igtd": None, "tbfm": f,
+                    "edct": f.get("etm") if isinstance(f.get("etm"), str) and "T" in f.get("etm", "") else None})
+    return out
+
+
+def handle_tbfm(xml_text):
+    """TBFM (metering): release times, scheduled runway times and the EDCT TBFM holds, for your flights."""
+    TBFM_STATE["messages"] += 1
+    TBFM_STATE["last_message"] = time.time()
+    if not xml_text.strip():
+        return
+    head = xml_text[:200000]
+    try:
+        types = _TYPE_RE.findall(head[:3000]) or _ROOT_RE.findall(head[:400])[:1] or ["unknown"]
+        for t in set(types):
+            TBFM_TYPES[t] = TBFM_TYPES.get(t, 0) + 1
+            lst = SAMPLES.setdefault("TBFM_" + t, [])
+            if len(lst) < 3:
+                lst.append(head)
+    except Exception:
+        pass
+    if not WATCH or not any(cs in xml_text for cs in WATCH):
+        return
+    hit = False
+    for ev in parse_tbfm(xml_text):
+        if ev["acid"] in WATCH:
+            hit = True
+            ev["got"] = time.time()
+            _keep(ev)
+            _news(ev, force=bool(ev.get("edct")))
+    if hit:
+        TBFM_STATE["matched"] += 1
+        MATCHED_RAW.append({"at": time.time(), "xml": head, "feed": "TBFM"})
+        del MATCHED_RAW[:-40]
+    # every TBFM message naming your flight is kept as a sample, so the reader can be tuned to it
+    with LOCK:
+        for cs in [c for c in WATCH if c in xml_text]:
+            lst = YOURS_BY_TYPE.setdefault("TBFM", [])
+            lst.append(head[:150000])
+            del lst[:-6]
 
 
 def _num(x):
@@ -1109,6 +1223,13 @@ def _feeds(cfg):
             out.append({"name": "TFDM", "state": TFDM_STATE, "handle": handle_tfdm, "queue": cfg["swim_tfdm_queue"],
                         "host": cfg.get("swim_tfdm_host") or "tcps://ems3.swim.faa.gov:55443",
                         "vpn": cfg.get("swim_tfdm_vpn") or "TFDM", "user": user, "password": pw})
+    if (cfg.get("swim_tbfm_queue") or "").strip():
+        user = cfg.get("swim_tbfm_username") or cfg.get("swim_username")
+        pw = cfg.get("swim_tbfm_password") or cfg.get("swim_password")
+        if user and pw:
+            out.append({"name": "TBFM", "state": TBFM_STATE, "handle": handle_tbfm, "queue": cfg["swim_tbfm_queue"],
+                        "host": cfg.get("swim_tbfm_host") or "tcps://ems2.swim.faa.gov:55443",
+                        "vpn": cfg.get("swim_tbfm_vpn") or "TBFM", "user": user, "password": pw})
     if (cfg.get("swim_stdds_queue") or "").strip():
         user = cfg.get("swim_stdds_username") or cfg.get("swim_username")
         pw = cfg.get("swim_stdds_password") or cfg.get("swim_password")
@@ -1330,6 +1451,7 @@ def samples_zip():
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.json", json.dumps({"state": STATE, "watching": sorted(WATCH), "types": TYPE_COUNTS, "airline_sent": SOURCE_COUNTS,
                                                "tfdm": {"state": TFDM_STATE, "types": TFDM_TYPES},
+                                               "tbfm": {"state": TBFM_STATE, "types": TBFM_TYPES},
                                                "stdds": {"state": STDDS_STATE, "types": STDDS_TYPES,
                                                          "airports": sorted(WATCH_AIRPORTS),
                                                          "targets": {k: len(v) for k, v in SURFACE.items()}},

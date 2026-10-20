@@ -765,6 +765,16 @@ def _hhmm_near(hhmm, ref):
 def _swim_take(sw, ev):
     """Fold one event into the leg's saved SWIM facts (newest wins, field by field)."""
     got = ev.get("got") or time.time()
+    if ev.get("src") == "TBFM":
+        # metering: keep what TBFM says about the flight (release time, runway times, meter fix),
+        # and its EDCT when it's newer than the one held (TBFM carries the current one, slot swaps included)
+        sw["tbfm"] = {**(sw.get("tbfm") or {}), **(ev.get("tbfm") or {}), "at": got}
+        e = _ts(ev.get("edct"))
+        if e and e != sw.get("edct") and got > (sw.get("edct_at") or 0):
+            sw["edct_prev"] = sw.get("edct")
+            sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_src"] = e, got, True, "TBFM"
+            sw["edct_for"] = sw.get("edct_for") or _iata(ev.get("arr"))
+        return
     if ev.get("src") == "STDDS":
         sf = ev.get("surface")
         if sf:
@@ -839,6 +849,7 @@ def _swim_take(sw, ev):
             sw["edct_for"] = _iata(ev.get("element")) if ev.get("element") else None
             sw["edct_new"] = True
             sw["edct_tfms"] = True
+            sw.pop("edct_src", None)   # the FAA's own assignment
     pe = _ts(ev.get("etd_proposed"))
     if (pe and sw.get("edct") and abs(pe - sw["edct"]) >= 120 and pe != _ts(ev.get("igtd"))
             and (_ts(ev.get("at")) or got) > (sw.get("edct_at") or 0) and not ev.get("edct")):
@@ -1180,6 +1191,9 @@ def swim_overlay(L, f, now):
         "state": sw.get("tfdm_state"),
         "surf_dep": sd or None, "surf_arr": sa or None, "tower_dep": sw.get("tower_dep"),
         "pdc": sw.get("pdc"),
+        # metering (TBFM): release time (ctm), the EDCT it holds (etm), meter fix, runway, scheduled times
+        "tbfm": sw.get("tbfm"),
+        "edct_src": sw.get("edct_src"),
         "edct": {"at": sw.get("edct"), "cta": sw.get("cta"), "prev": sw.get("edct_prev"), "for": sw.get("edct_for")}
         if sw.get("edct") else
         # the departure tower's system knows the flight has one even when the time itself hasn't reached us
@@ -3667,6 +3681,7 @@ def api_state():
             "swim": {k: swim.STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
             "tfdm": {k: swim.TFDM_STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
             "stdds": {k: swim.STDDS_STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
+            "tbfm": {k: swim.TBFM_STATE.get(k) for k in ("status", "error", "rate", "matched", "last_message")},
         }
     data["backup"] = backup_brief()
     return data

@@ -3214,6 +3214,12 @@
       ["Landing estimate from", sw.eta_src === "tower" ? `${leg.arr} tower (TFDM)` : sw.eta_src === "FAA" ? "FAA (TFMS)" : ""],
       ["EDCT", sw.edct && !sw.edct.at ? "assigned (per the departure tower; time not received yet)" : sw.edct ? [`${hm(sw.edct.at, tzA)}`, sw.edct.prev && `was ${hm(sw.edct.prev, tzA)}`, sw.edct.for && `${sw.edct.for} program`,
         sw.edct.cta && `arrival slot ${hm(sw.edct.cta, tzB)}`].filter(Boolean).join(" · ") : ""],
+      ["Metering (TBFM)", sw.tbfm ? [sw.tbfm.ctm && `release ${hm(Date.parse(sw.tbfm.ctm) / 1000, tzA)}`,
+        sw.tbfm.etm && `EDCT ${hm(Date.parse(sw.tbfm.etm) / 1000, tzA)}`, sw.tbfm.mfx && `meter fix ${sw.tbfm.mfx}`,
+        (sw.tbfm.trw || sw.tbfm.rwy) && `runway ${sw.tbfm.trw || sw.tbfm.rwy}`,
+        sw.tbfm.sta && /T/.test(sw.tbfm.sta) && `scheduled landing ${hm(Date.parse(sw.tbfm.sta) / 1000, tzB)}`,
+        sw.tbfm.at && `updated ${ago(sw.tbfm.at)}`].filter(Boolean).join(" · ") : ""],
+      ["EDCT from", sw.edct_src === "TBFM" ? "TBFM (metering)" : sw.edct_src === "flight plan" ? "the refiled flight plan (a slot swap)" : sw.edct_src === "clearance" ? "the datalink clearance" : ""],
       ["Clearance (datalink)", sw.pdc ? [sw.pdc.cleared_to && `cleared to ${sw.pdc.cleared_to}`, sw.pdc.departure && `via ${sw.pdc.departure}`,
         sw.pdc.altitude && (/^\d+$/.test(sw.pdc.altitude) ? `maintain ${sw.pdc.altitude}` : sw.pdc.altitude),
         sw.pdc.expect_alt ? `expect FL${sw.pdc.expect_alt}` : sw.pdc.fl && `FL${sw.pdc.fl}`, sw.pdc.dep_freq && `departure ${sw.pdc.dep_freq}`,
@@ -3591,7 +3597,7 @@
         <b>${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE.swim.status] || STATE.swim.status)}</b>
         ${STATE.swim.status === "connected" ? ` · ${nm(STATE.swim.rate || 0)} messages a minute · ${STATE.swim.matched || 0} for your flights` : ""}
         ${STATE.swim.error ? `<p class="err" style="margin:6px 0 0">${esc(STATE.swim.error)}</p>` : ""}
-        ${[["tfdm", "TFDM", "for your flights"], ["stdds", "STDDS", "for your airports"]].map(([k, name, what]) => STATE[k] && STATE[k].status !== "off" ? `<p style="margin:8px 0 0"><b>${name}: ${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE[k].status] || STATE[k].status)}</b>${STATE[k].status === "connected" ? ` · ${nm(STATE[k].rate || 0)} a minute · ${STATE[k].matched || 0} ${what}` : ""}</p>
+        ${[["tfdm", "TFDM", "for your flights"], ["tbfm", "TBFM", "for your flights"], ["stdds", "STDDS", "for your airports"]].map(([k, name, what]) => STATE[k] && STATE[k].status !== "off" ? `<p style="margin:8px 0 0"><b>${name}: ${esc({ connected: "Connected", connecting: "Connecting…", error: "Not connected" }[STATE[k].status] || STATE[k].status)}</b>${STATE[k].status === "connected" ? ` · ${nm(STATE[k].rate || 0)} a minute · ${STATE[k].matched || 0} ${what}` : ""}</p>
         ${STATE[k].error ? `<p class="err" style="margin:6px 0 0">${esc(STATE[k].error)}</p>` : ""}` : "").join("")}
         <p class="faint" style="margin:8px 0 0">TFMS: the FAA's flight plans, amendments, takeoffs and landings, and the times United itself files. TFDM: tower data (runways, predicted delays, landing estimates) at airports that have it. STDDS: live surface positions, shown on a flight's map while it's on the ground.</p>
         <p style="margin:10px 0 0"><a class="btn" href="api/swim/samples.zip" download>Download sample messages</a></p>

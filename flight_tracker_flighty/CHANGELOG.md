@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.0
+- New optional FAA SWIM feed: TBFM (Time Based Flow Management, the metering system). Set the TBFM subscription's queue, VPN (TBFM) and its own password in the add-on options (TBFM section; the username and URL default to the TFMS one and ems2). For your flights it reads TBFM's departure release time, the EDCT TBFM holds (which follows airline slot swaps the public flight-data feed doesn't carry), the meter fix, runway and scheduled runway times. Shown under Flight Details as Metering (TBFM), and the EDCT row says where the EDCT came from (TBFM, the refiled flight plan, the datalink clearance, or the FAA's assignment).
+- TBFM messages for your flights are kept in Settings → SWIM samples, so the reader can be tuned to what the feed actually sends.
+
 ## 4.30.5
 - One color scheme everywhere, the same as the iPhone app: green early or on time (under 5 min late), amber 5-29 min late, orange 30+, and red only for cancelled or diverted flights. The status banner follows it too (a late flight's banner is amber or orange, not red).
 - Your inbound's dashed line on the map starts at the airplane once it's moving (only what's left to fly), instead of drawing the whole route behind it.
