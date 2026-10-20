@@ -697,7 +697,8 @@ def save_yours(force=False):
             EDCT_TRAIL[cs] = [m for m in EDCT_TRAIL[cs] if m.get("at", 0) > cut]
             if not EDCT_TRAIL[cs]:
                 del EDCT_TRAIL[cs]
-        data = json.dumps({"by_type": YOURS_BY_TYPE, "trail": EDCT_TRAIL})
+        evs = {cs: [e for e in EVENTS.get(cs, []) if (e.get("got") or 0) > cut] for cs in WATCH if EVENTS.get(cs)}
+        data = json.dumps({"by_type": YOURS_BY_TYPE, "trail": EDCT_TRAIL, "events": evs})
         _yours_dirty[0] = False
     try:
         tmp = YOURS_PATH + ".tmp"
@@ -721,6 +722,10 @@ def load_yours(path):
         YOURS_BY_TYPE[t] = (list(lst) + YOURS_BY_TYPE.get(t, []))[-4:]
     for cs, lst in (d.get("trail") or {}).items():
         EDCT_TRAIL[cs] = (list(lst) + EDCT_TRAIL.get(cs, []))[-10:]
+    # the parsed SWIM events for your flights survive a restart (the samples zip and the leg's facts)
+    for cs, lst in (d.get("events") or {}).items():
+        have = {(e.get("type"), e.get("at"), e.get("src")) for e in EVENTS.get(cs, [])}
+        EVENTS[cs] = ([e for e in lst if (e.get("type"), e.get("at"), e.get("src")) not in have] + EVENTS.get(cs, []))[-KEEP:]
 
 
 def _keep(ev):
@@ -893,6 +898,12 @@ def handle_tbfm(xml_text):
             ev["got"] = time.time()
             _keep(ev)
             _news(ev, force=bool(ev.get("edct")))
+            if ev.get("edct"):
+                with LOCK:
+                    trail = EDCT_TRAIL.setdefault(ev["acid"], [])
+                    trail.append({"at": time.time(), "type": "TBFM", "xml": head[:250000]})
+                    del trail[:-10]
+                _yours_dirty[0] = True
     if hit:
         TBFM_STATE["matched"] += 1
         MATCHED_RAW.append({"at": time.time(), "xml": head, "feed": "TBFM"})

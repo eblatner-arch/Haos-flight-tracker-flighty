@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.6
+- EDCT evidence survives restarts: every TBFM record that carries an EDCT for one of your flights is saved on the EDCT trail (kept on disk, in the SWIM samples under your_flights/edct_trail), and the parsed SWIM events for your flights are saved too, so a restart no longer wipes what showed where an EDCT change came from. Before, the TBFM message with the EDCT was pushed out of the samples by the many updates that follow it within minutes.
+
 ## 4.31.5
 - The lookup log names where an EDCT change came from: TBFM (metering), the refiled flight plan, the datalink clearance, or the FAA. Confirmed live: TBFM's per-flight record carries the current EDCT (`etm`, with `est` EDC), slot swaps included. UA1100 LAX-SAN moved from the FAA's first slot 8:30 PM to United's 9:15 PM as soon as TBFM created the flight's record, about an hour before takeoff.
 
