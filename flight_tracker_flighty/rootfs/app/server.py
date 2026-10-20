@@ -1004,7 +1004,8 @@ def swim_check(L, f, planned):
                 bits.append(f"{dep} tower: departure clearance {hm(tw['clearance'], tza)}" + (f", gate {tw['gate']}" if tw.get("gate") else ""))
         if sw.get("edct_new"):
             prev = f" (was {alerting.hhmm(sw['edct_prev'], tza)})" if sw.get("edct_prev") else ""
-            bits.append(f"FAA: EDCT {alerting.hhmm(sw['edct'], tza)}{prev}"
+            who = {"TBFM": "TBFM (metering)", "flight plan": "Refiled flight plan", "clearance": "Datalink clearance"}.get(sw.get("edct_src"), "FAA")
+            bits.append(f"{who}: EDCT {alerting.hhmm(sw['edct'], tza)}{prev}"
                         + (f" for {sw['edct_for']}" if sw.get("edct_for") else ""))
         if any(x.get("route") for x in fresh) and sw.get("route_changed", 0) > seen_at:
             bits.append(f"ATC: new route {sw.get('route')}")

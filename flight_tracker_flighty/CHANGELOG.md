@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.5
+- The lookup log names where an EDCT change came from: TBFM (metering), the refiled flight plan, the datalink clearance, or the FAA. Confirmed live: TBFM's per-flight record carries the current EDCT (`etm`, with `est` EDC), slot swaps included. UA1100 LAX-SAN moved from the FAA's first slot 8:30 PM to United's 9:15 PM as soon as TBFM created the flight's record, about an hour before takeoff.
+
 ## 4.31.4
 - Took out 4.31.3's "slot has probably moved" flag until there's more data on how slot changes show up. Everything else stays (the refiled flight plan rule, TBFM).
 
