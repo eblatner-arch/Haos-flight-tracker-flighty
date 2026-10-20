@@ -820,35 +820,43 @@ def _tbfm_time(v, ref=None):
 
 
 def parse_tbfm(xml_text):
-    """TBFM messages -> [{acid, dep, arr, type, src: 'TBFM', at, igtd, tbfm: {field: value}, edct}]."""
+    """TBFM metering messages -> [{acid, dep, arr, type, src: 'TBFM', at, igtd, tbfm: {field: value}, edct}].
+    Shape (tbfmmeteringpublication 1.1): <env><tma msgTime><air aid dap apt airType ...> with groups of
+    fields under it (<flt>, <eta> with mfx / eta_mfx / eta_dfx / eta_sfx, scheduled times, ...): every
+    field anywhere under a flight's <air> is read."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return []
-    ref = (_re.search(r'(?:timestamp|msgTime|time)="([^"]+)"', xml_text[:3000], _re.I) or [None, None])[1]
     out = []
-    for el in root.iter():
-        kids = {}
-        for c in list(el):
-            n = _local(c.tag)
-            t = (c.text or "").strip()
-            if t and not list(c) and n not in kids:
-                kids[n] = t
-        for k, v in el.attrib.items():
-            kids.setdefault(_local(k), v)
-        aid = (kids.get("aid") or kids.get("acid") or "").upper()
-        if not aid or not (kids.get("apt") or kids.get("dap")):
+    for tma in root.iter():
+        if _local(tma.tag) != "tma":
             continue
-        typ = el.attrib.get("airType") or el.attrib.get("type") or _local(el.tag)
-        f = {}
-        for k, v in kids.items():
-            if _TBFM_TIMEY.search(k):
-                f[k] = _tbfm_time(v, ref) or v
-            elif k in ("mfx", "rwy", "trw", "gat", "cfg", "scn", "tra", "fps", "acs", "dfx", "dfix", "typ", "tbfmid", "apreq", "sus"):
-                f[k] = v
-        out.append({"acid": aid, "dep": _apt(kids.get("dap") or kids.get("orig") or ""), "arr": _apt(kids.get("apt") or kids.get("dest") or ""),
-                    "type": f"TBFM {typ}", "src": "TBFM", "at": ref, "igtd": None, "tbfm": f,
-                    "edct": f.get("etm") if isinstance(f.get("etm"), str) and "T" in f.get("etm", "") else None})
+        at = tma.get("msgTime")
+        for el in tma:
+            if _local(el.tag) != "air":
+                continue
+            kids = {_local(k): v for k, v in el.attrib.items()}
+            for c in el.iter():
+                if c is el or list(c):
+                    continue
+                t = (c.text or "").strip()
+                n = _local(c.tag)
+                if t and n not in kids:
+                    kids[n] = t
+            aid = (kids.get("aid") or "").upper()
+            if not aid:
+                continue
+            f = {}
+            for k, v in kids.items():
+                if _TBFM_TIMEY.search(k):
+                    f[k] = _tbfm_time(v, at) or v
+                elif k in ("mfx", "dfx", "sfx", "rwy", "trw", "gat", "cfg", "scn", "tra", "fps", "acs", "typ", "tmaId", "apreq", "sus", "airType"):
+                    f[k] = v
+            etm = f.get("etm")
+            out.append({"acid": aid, "dep": _apt(kids.get("dap") or ""), "arr": _apt(kids.get("apt") or ""),
+                        "type": f"TBFM {kids.get('airType') or 'air'}", "src": "TBFM", "at": at, "igtd": None, "tbfm": f,
+                        "edct": etm if isinstance(etm, str) and "T" in etm else None})
     return out
 
 
@@ -866,6 +874,14 @@ def handle_tbfm(xml_text):
             lst = SAMPLES.setdefault("TBFM_" + t, [])
             if len(lst) < 3:
                 lst.append(head)
+        # one example of each record layout (its type and the groups of fields it carries), so the
+        # scheduled times, release times and EDCTs show up in the samples, not only amendments
+        m = _re.search(r'airType="(\w+)"', head[:3000])
+        if m:
+            groups = sorted(set(_re.findall(r"<(\w+)>\s*<", head[:20000])) - {"tma", "air", "env"})
+            key = f"TBFM_{m.group(1)}_{'-'.join(groups)[:60] or 'plain'}"
+            if key not in SAMPLES and sum(1 for k in SAMPLES if k.startswith("TBFM_")) < 60:
+                SAMPLES[key] = [head]
     except Exception:
         pass
     if not WATCH or not any(cs in xml_text for cs in WATCH):

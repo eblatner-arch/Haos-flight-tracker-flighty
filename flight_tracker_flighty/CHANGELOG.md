@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.31.1
+- TBFM reader matched to the real feed (tbfmmeteringpublication 1.1: `<tma>` messages with an `<air aid dap apt airType>` record per flight and its fields in groups like `<flt>` and `<eta>`): every field under a flight's record is read now, not only the top level, so meter-fix times and the rest come through.
+- SWIM samples keep one example of each TBFM record layout, so scheduled times, release times and EDCT records can be checked as they appear.
+- Flight Details → Metering shows the meter fix time (scheduled when metered, else estimated) and the scheduled runway time.
+
 ## 4.31.0
 - New optional FAA SWIM feed: TBFM (Time Based Flow Management, the metering system). Set the TBFM subscription's queue, VPN (TBFM) and its own password in the add-on options (TBFM section; the username and URL default to the TFMS one and ems2). For your flights it reads TBFM's departure release time, the EDCT TBFM holds (which follows airline slot swaps the public flight-data feed doesn't carry), the meter fix, runway and scheduled runway times. Shown under Flight Details as Metering (TBFM), and the EDCT row says where the EDCT came from (TBFM, the refiled flight plan, the datalink clearance, or the FAA's assignment).
 - TBFM messages for your flights are kept in Settings → SWIM samples, so the reader can be tuned to what the feed actually sends.
