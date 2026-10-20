@@ -892,6 +892,24 @@ def swim_check(L, f, planned):
         sw.pop("edct_tfms", None)
         sw.pop("edct_new", None)
         saw(L, "FAA SWIM", None, f"{ef} delay program cancelled: the EDCT no longer applies")
+    # The tower's own system (TFDM) plans the takeoff well before the EDCT, after the EDCT came in: the
+    # flight was released from the program (a revision, a slot swap, an exemption) and the new time
+    # never reached this feed. TFDM builds EDCTs into its takeoff plan, so it wouldn't plan one this
+    # early for a flight still holding a slot. (UA1577 SFO-SAN: EDCT 8:27 PM from the morning's GDP,
+    # tower planning 7:07 PM, off at 7:10.)
+    if sw.get("edct") and (sw.get("tfdm_at") or 0) > (sw.get("edct_at") or 0):
+        tdd = sw.get("tfdm_dep") or {}
+        rdt = tdd.get("runwayDepartureTime") or {}
+        plan = [_ts(rdt.get(k)) for k in ("target", "estimated", "earliest") if isinstance(rdt.get(k), str)]
+        plan = [p for p in plan if p]
+        if plan and min(plan) < sw["edct"] - 15 * 60 and tdd.get("smpExemptionReason") != "EDCT":
+            tza_ = alerting.tz_for(L.get("dep"), f.get("origin") or {})
+            saw(L, "FAA SWIM", None, f"Tower plans takeoff {alerting.hhmm(min(plan), tza_)}, well before the "
+                f"{alerting.hhmm(sw['edct'], tza_)} EDCT: released from the program, the EDCT no longer applies")
+            sw["edct_prev"] = sw.pop("edct")
+            sw.pop("edct_tfms", None)
+            sw.pop("edct_new", None)
+            sw["edct_released"] = time.time()
     if fresh:
         out["new"] = True
         sw["seen"] = L["swim_seen"] = max(e.get("got") or 0 for e in fresh)

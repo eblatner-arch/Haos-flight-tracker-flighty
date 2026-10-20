@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.30.3
+- A stale EDCT is dropped when the tower's own system (TFDM) plans the takeoff well before it (15+ min), after the EDCT came in: the flight was released from the program (a revision, a slot swap, an exemption) and the new time never reached this feed, often because it was sent while the add-on was restarting (the FAA feed has no replay). TFDM builds EDCTs into its plan, so it doesn't plan an early takeoff for a flight still holding a slot. The lookup log says when this happens. (UA1577 SFO-SAN kept the morning's 8:27 PM slot while the tower planned 7:07 and it left at 7:10.)
+
 ## 4.30.2
 - The flight list now carries each flight's EDCT, so the iPhone app's flight page opens with it in the banner instead of switching to it a moment later.
 
