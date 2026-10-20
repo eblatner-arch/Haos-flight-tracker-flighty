@@ -111,10 +111,11 @@ def delete(fid):
     with LOCK:
         gone = _DATA["flights"].pop(fid, None)
     if gone:
-        try:
-            os.remove(_track_path(fid))
-        except FileNotFoundError:
-            pass
+        for p in (_track_path(fid), _log_path(fid)):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
         save()
     return bool(gone)
 
@@ -129,6 +130,38 @@ def track(fid):
             return json.load(f)
     except Exception:
         return []
+
+
+def _log_path(fid):
+    return os.path.join(_DIR or ".", "logs", "".join(c for c in fid if c.isalnum() or c in "-_") + ".json")
+
+
+def lookup_log(fid):
+    """The flight's Lookup Log as it was when it finished (oldest first)."""
+    try:
+        with open(_log_path(fid)) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def has_log(fid):
+    return os.path.exists(_log_path(fid))
+
+
+def save_log(fid, entries):
+    """Keep the Lookup Log with the flight: merged with what's saved, one entry per lookup time."""
+    if not _DIR or not entries:
+        return
+    by = {(e.get("at"), json.dumps(e.get("sources"))): e for e in lookup_log(fid)}
+    for e in entries:
+        by[(e.get("at"), json.dumps(e.get("sources")))] = e
+    out = sorted(by.values(), key=lambda e: e.get("at") or 0)[-400:]
+    os.makedirs(os.path.dirname(_log_path(fid)), exist_ok=True)
+    tmp = _log_path(fid) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(out, f, default=str)
+    os.replace(tmp, _log_path(fid))
 
 
 def _save_track(fid, pts):
@@ -560,10 +593,11 @@ def clear(source=None):
         for fid in gone:
             _DATA["flights"].pop(fid, None)
     for fid in gone:
-        try:
-            os.remove(_track_path(fid))
-        except FileNotFoundError:
-            pass
+        for p in (_track_path(fid), _log_path(fid)):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
     save()
     return len(gone)
 

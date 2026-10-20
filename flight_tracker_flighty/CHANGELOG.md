@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.9
+- Passport: a finished flight keeps its Lookup Log. It's saved with the flight when it goes into History (data/logs/<id>.json, merged on each re-save) and shown on its History page in the web app and the iPhone app. Flights already in History get theirs on the next check while their leg is still on the board; older ones never had one saved. Deleting a flight or clearing History removes its log too.
+
 ## 4.31.8
 - SWIM samples: every ground delay program / ground stop message (revisions, cancels, purges) for the airports your flights depart, land at or hold an EDCT for is now kept (last 20 per airport, 36 h, survives restarts) and saved in the samples zip under your_flights/programs/. This is to see what a program did at the minute an EDCT was removed (UA442 was released by the SAN GDP mid-taxi). Data only; no EDCT rules changed.
 

@@ -2954,12 +2954,20 @@ def archive_finished(now):
         if ph not in ("arrived", "cancelled", "diverted") and not finished(L, now):
             continue
         if (L.get("archived_at") or 0) >= (L.get("updated") or 0):
+            # flights saved before the Lookup Log was kept with them: add it while the leg's still here
+            if L.get("history_id") and L.get("history") and not history.has_log(L["history_id"]):
+                try:
+                    history.save_log(L["history_id"], list(L["history"]))
+                except Exception as e:
+                    log.info("History: couldn't save the lookup log of %s: %s", L.get("display"), e)
             continue
         try:
             rec = history.from_leg(L, kind)
             if not rec["date"]:
                 continue
             history.upsert(rec, pts=f.get("track"))
+            if L.get("history"):
+                history.save_log(rec["id"], list(L["history"]))
             with LOCK:
                 live = STATE["legs"].get(L["id"])
                 if live is not None:
@@ -3791,6 +3799,7 @@ def api_history_flight(fid):
             o = history.get(out[k])
             out[k + "_label"] = f"{o.get('display')} {o.get('dep')}→{o.get('diverted_to') or o.get('arr')}" if o else ""
     out["track"] = history.track(fid)
+    out["history"] = list(reversed(history.lookup_log(fid)))   # newest first, like a live flight's
     out["dep_ap"], out["arr_ap"] = airports.get(r.get("dep")), airports.get(r.get("diverted_to") or r.get("arr"))
     same = [x for x in all_ if x.get("dep") == r.get("dep") and x.get("arr") == r.get("arr")]
     st = history.stats(same, lk)

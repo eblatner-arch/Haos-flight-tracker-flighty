@@ -1091,6 +1091,7 @@
           ${f.route ? `<div class="k">Filed route</div><div class="mono small">${esc(f.route)}</div>` : ""}
           <div class="k">Source</div><div>${f.source === "flighty" ? "Flighty import" : "Tracked here"}${f.has_track ? " · flown track saved" : ""}</div>
         </div></div>
+        ${lookupLog(f.history || [], 0)}
         <div class="actions">${!f.has_track && bfToken(f) ? `<button class="btn" id="h-bf">Copy for track backfill</button>` : ""}<button class="btn danger" id="h-del">Delete from History</button></div>
         ${!f.has_track && bfToken(f) ? `<p class="small faint" style="margin:8px 0 0">No flown track yet. Copy, then in GitHub run Backfill tracks with this pasted in the flights box, and import its tracks download here.</p>` : ""}
       </section>`;
