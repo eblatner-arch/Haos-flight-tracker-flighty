@@ -1500,9 +1500,9 @@ def samples_zip():
             for i, x in enumerate(lst, 1):
                 z.writestr(f"your_flights/by_type/{_re.sub(r'[^A-Za-z0-9_]+', '_', t)}_{i}.xml", x)
         for cs, lst in list(EDCT_TRAIL.items()):
-            for m in list(lst):
+            for j, m in enumerate(list(lst), 1):
                 stamp = time.strftime("%H%M%SZ", time.gmtime(m.get("at") or 0))
-                z.writestr(f"your_flights/edct_trail/{_re.sub(r'[^A-Za-z0-9_]+', '_', cs)}_{stamp}_"
+                z.writestr(f"your_flights/edct_trail/{_re.sub(r'[^A-Za-z0-9_]+', '_', cs)}_{j:02d}_{stamp}_"
                            f"{_re.sub(r'[^A-Za-z0-9_]+', '_', m.get('type') or 'unknown')}.xml", m["xml"])
         for i, m in enumerate(PDC_RAW, 1):
             z.writestr(f"your_flights/clearance_{i:02d}.xml", m["xml"])

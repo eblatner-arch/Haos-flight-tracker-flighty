@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.7
+- SWIM samples: EDCT trail files are numbered, so two records in the same second no longer collide (the zip asked to overwrite on unzip).
+
 ## 4.31.6
 - EDCT evidence survives restarts: every TBFM record that carries an EDCT for one of your flights is saved on the EDCT trail (kept on disk, in the SWIM samples under your_flights/edct_trail), and the parsed SWIM events for your flights are saved too, so a restart no longer wipes what showed where an EDCT change came from. Before, the TBFM message with the EDCT was pushed out of the samples by the many updates that follow it within minutes.
 
