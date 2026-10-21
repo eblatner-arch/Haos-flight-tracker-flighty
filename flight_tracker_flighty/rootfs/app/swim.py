@@ -361,6 +361,9 @@ def _edct_any_shape(root, ref):
 # it and is remembered for a while, so the slower NAS page can't bring it back.
 NAS = {}
 NAS_CANCELLED = {}
+# (airport, kind) -> the impacting condition in words, from the ATCSCC advisory's text ("IMPACTING
+# CONDITION: RWY-TAXI / CONSTRUCTION"); the flow message itself only says "RWY"
+ADV_REASON = {}
 ON_NAS = None
 
 
@@ -425,13 +428,54 @@ def _flow(xml_text):
             det = ", ".join(x for x in (f"avg {round(float(avg))} min" if avg else "", f"max {mx} min" if mx else "",
                                         f"expected avg {round(float(ant_avg))} min" if ant_avg else "") if x)
             NAS[k] = {"airport": arpt, "kind": kind, "label": "Ground stop" if kind == "gs" else "Ground delay program",
-                      "reason": (f.get("impactingCondition") or "").title(), "detail": det,
+                      "reason": ADV_REASON.get(k) or (f.get("impactingCondition") or "").title(), "detail": det,
                       "start": _iso_epoch(st), "end": _iso_epoch(en),
                       "prob": (f.get("probabilityOfExtension") or "").title(), "center": f.get("center") or "",
                       "scope": scope, "avg": avg, "max": mx, "source": "FAA SWIM", "at": time.time(),
                       "key": f"{arpt}|{kind}|swim|{st or ''}"}
             NAS_CANCELLED.pop(k, None)
             _nas_changed(arpt)
+
+
+def reason_words(cond):
+    """'RWY-TAXI / CONSTRUCTION' -> 'Runway/taxiway construction'; 'WEATHER / THUNDERSTORMS' ->
+    'Thunderstorms'; 'VOLUME / VOLUME' -> 'Volume'."""
+    w = {"RWY-TAXI": "runway/taxiway", "RWY": "runway", "TAXI": "taxiway", "WX": "weather", "EQUIP": "equipment",
+         "VOL": "volume", "TM INITIATIVES": "traffic management", "OTHER": ""}
+    parts = [p.strip() for p in (cond or "").upper().split("/")]
+    parts = [w.get(p, p.lower()) for p in parts if p]
+    if not parts:
+        return ""
+    a, b = parts[0], parts[1] if len(parts) > 1 else ""
+    if not b or b == a or b in a:
+        out = a
+    elif a in ("weather", "") or a in b:
+        out = b
+    else:
+        out = f"{a} {b}"
+    return out[:1].upper() + out[1:]
+
+
+def _advisory(xml_text):
+    """An ATCSCC advisory for a ground stop or delay program: keep its impacting condition in words."""
+    m = _re.search(r"<(?:\w+:)?advisoryText>([^<]+)<", xml_text)
+    t = " ".join(((m and m.group(1)) or "").split()).upper()
+    if not t or "CNX" in t[:300] or "CANCEL" in t[:300]:
+        return
+    kind = "gs" if "GROUND STOP" in t[:400] else "gdp" if "GROUND DELAY PROGRAM" in t[:400] else None
+    el = _re.search(r"CTL ELEMENT: ?([A-Z0-9]{3,4})", t)
+    cond = _re.search(r"IMPACTING CONDITION: ?(.+?)(?= (?:COMMENTS|PROBABILITY|PROGRAM|FLT INCL|DEP|DELAY|MAXIMUM|AVERAGE|ADL|"
+                      r"ARRIVALS|CUMULATIVE|PREVIOUS|NEW|CURRENT|EXPECTED|ASSOCIATED|GS PERIOD|EVENT)\b[A-Z ]*:| \d{6}-\d{6}|$)", t)
+    if not kind or not el or not cond:
+        return
+    words = reason_words(cond.group(1))
+    if not words:
+        return
+    k = (el.group(1), kind)
+    ADV_REASON[k] = words
+    if k in NAS and NAS[k].get("reason") != words:
+        NAS[k]["reason"] = words
+        _nas_changed(k[0])
 
 
 def _iso_epoch(iso):
@@ -506,6 +550,11 @@ def handle(xml_text):
             log.debug("SWIM EDCT: %s", e)
     elif "CONTROLLED" in xml_text or "EDCT" in xml_text:
         _edct_sample(xml_text)
+    if 'msgType="GADV"' in head:
+        try:
+            _advisory(xml_text)
+        except Exception as e:
+            log.debug("SWIM advisory: %s", e)
     if "fiMessage" in head and ('msgType="GS"' in head or 'msgType="GDP"' in head or 'msgType="AFP"' in head):
         try:
             _program_keep(xml_text)

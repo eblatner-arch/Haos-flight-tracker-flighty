@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.14
+- Ground stops and delay programs: the reason now comes from the ATCSCC advisory's "IMPACTING CONDITION" in words ("RWY-TAXI / CONSTRUCTION" → "Runway/taxiway construction", "WEATHER / THUNDERSTORMS" → "Thunderstorms") instead of the flow message's bare code ("RWY"). It shows on the program card, in its alerts and in the EDCT banner; until the advisory arrives the code is used as before.
+
 ## 4.31.13
 - Flight banner: when a ground stop is holding your departure, the EDCT line says "held by a ground stop" (not the delay program behind it) and the banner is red like the ground stop card. FAA reason codes read as words (Rwy → runway, Wx → weather, Vol → volume).
 
