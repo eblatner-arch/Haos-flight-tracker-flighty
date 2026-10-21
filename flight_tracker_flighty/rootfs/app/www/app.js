@@ -1358,13 +1358,16 @@
     const fl = leg.flight || {}, e = (fl.swim || {}).edct;
     if (e && e.at && !T.offA && (ph === "scheduled" || ph === "taxi_out" || !ph)) {
       const offS = ((fl.times || {}).off || {}).scheduled, late = offS ? Math.round((e.at - offS) / 60) : null;
-      const prog = (leg.nas || []).find((n) => (n.kind === "gdp" || n.kind === "gs") && n.airport === (e.for || leg.arr)) ||
-        (leg.nas || []).find((n) => n.kind === "gdp" || n.kind === "gs");
-      const why = prog && prog.reason ? ` for ${prog.reason.toLowerCase()}` : "";
+      // a ground stop outranks the delay program behind it (it's what's holding you now): named, and red like its card
+      const to = e.for || leg.arr, nas = leg.nas || [];
+      const prog = nas.find((n) => n.kind === "gs" && n.airport === to) || nas.find((n) => n.kind === "gdp" && n.airport === to) ||
+        nas.find((n) => n.kind === "gs") || nas.find((n) => n.kind === "gdp");
+      const rsn = prog && prog.reason ? ({ rwy: "runway", wx: "weather", vol: "volume", equip: "equipment", tm: "traffic management" }[prog.reason.toLowerCase()] || prog.reason.toLowerCase()) : "";
+      const why = rsn ? ` for ${rsn}` : "";
       const gateLine = ph === "taxi_out" ? "" : !T.outKnown ? "" : dm >= 5 ? `Gate ${fdur(dm * 60)} late. ` : "Gate on time. ";
       sub = `${gateLine}Takeoff slot (EDCT) ${hm(e.at, leg.dep_ap.tz)}${late != null && late >= 1 ? `, ${fdur(late * 60)} late` : ""}. ` +
         `Departures to ${e.for || leg.arr} are held${prog && prog.kind === "gs" ? " by a ground stop" : " by a ground delay program"}${why}.`;
-      if (cls !== "red") cls = "amber";
+      cls = prog && prog.kind === "gs" ? "red" : cls === "red" ? "red" : "amber";
     }
     // the FAA's delay trend at an airport you're headed into
     const trend = (leg.nas || []).find((n) => n.kind === "delay" && (n.airport === leg.arr || (ph === "scheduled" && n.airport === leg.dep)));

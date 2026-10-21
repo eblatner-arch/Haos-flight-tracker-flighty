@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.13
+- Flight banner: when a ground stop is holding your departure, the EDCT line says "held by a ground stop" (not the delay program behind it) and the banner is red like the ground stop card. FAA reason codes read as words (Rwy → runway, Wx → weather, Vol → volume).
+
 ## 4.31.12
 - EDCT: a TBFM (metering) EDCT earlier than the end of a ground stop that holds your departure is no longer used. UA2763 EWR-BOS on 21 Oct: the FAA moved it to 20:01 when the BOS ground stop (until 20:00) began, but TBFM's first message for it at 19:37 still carried the old delay-program slot 19:40, and the add-on switched to that. The FAA's EDCT is kept and the Lookup Log says why TBFM's was set aside.
 
