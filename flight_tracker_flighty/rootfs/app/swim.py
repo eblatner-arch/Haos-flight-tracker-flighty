@@ -452,6 +452,22 @@ def _nas_changed(arpt):
             pass
 
 
+def _around(xml_text, cs, cap=250000):
+    """The message as is when it fits; else its head and ~8 KB around each mention of the callsign
+    (a delay program's flight list runs past a megabyte, and the flight's own record is in the middle)."""
+    if len(xml_text) <= cap:
+        return xml_text
+    parts, last = [xml_text[:20000]], 20000
+    for m in _re.finditer(_re.escape(cs) + r"\b", xml_text):
+        a, b = max(last, m.start() - 4000), m.end() + 4000
+        if a < b:
+            parts.append(f"\n<!-- … {a - last} characters left out … -->\n" + xml_text[a:b])
+            last = b
+        if sum(len(x) for x in parts) > cap:
+            break
+    return "".join(parts)[:cap]
+
+
 def handle(xml_text):
     """Keep the events for watched callsigns."""
     STATE["messages"] += 1
@@ -474,7 +490,7 @@ def handle(xml_text):
                 if edctish:
                     for cs in [c for c in WATCH if c in xml_text]:
                         trail = EDCT_TRAIL.setdefault(cs, [])
-                        trail.append({"at": time.time(), "type": t, "xml": xml_text[:250000]})
+                        trail.append({"at": time.time(), "type": t, "xml": _around(xml_text, cs)})
                         del trail[:-10]
             _yours_dirty[0] = True
     if "controlledDepartureTime" in xml_text or 'etdType="CONTROLLED"' in xml_text:
@@ -711,10 +727,20 @@ def _program_keep(xml_text):
     t = (_TYPE_RE.findall(xml_text[:4000]) or ["flow"])[0]
     m = _re.search(r"<(?:\w+:)?tmiStatus>\s*(\w+)", xml_text)
     body = _re.search(r"fiMessage\b[^>]*>\s*<(?:\w+:)?(\w+)", xml_text)   # the message body: gdpAdvisory, gsCancel …
+    # TFMS re-sends a program's advisory every 15 min unchanged: count those on the entry already kept,
+    # so the 20 kept are the changes (proposed, actual, revisions, cancel), not 5 hours of repeats
+    sig = _re.sub(r"<(?:\w+:)?(updateTime|adlTime|issueTime|sourceTimeStamp)>[^<]*<", "<", xml_text)
+    sig = _re.sub(r'(?:sourceTimeStamp|TimeStamp|msgTime)="[^"]*"', "", sig)
+    import hashlib
+    sig = hashlib.md5(sig.encode()).hexdigest()
     with LOCK:
         for a in hit:
             lst = PROGRAM_TRAIL.setdefault(a, [])
-            lst.append({"at": time.time(), "type": t, "status": m.group(1) if m else None,
+            if lst and lst[-1].get("sig") == sig:
+                lst[-1]["repeats"] = lst[-1].get("repeats", 0) + 1
+                lst[-1]["last"] = time.time()
+                continue
+            lst.append({"at": time.time(), "type": t, "status": m.group(1) if m else None, "sig": sig,
                         "kind": body.group(1) if body else None, "xml": xml_text[:250000]})
             del lst[:-20]
     _yours_dirty[0] = True
@@ -1186,6 +1212,15 @@ def parse_pdc(text):
         m = _re.search(rx, t)
         return m.group(1) if m else None
     route = g(r"\b([A-Z]{4}\.[A-Z0-9./]+\.[A-Z]{4})\s*$")
+    # a route change by datalink: 'MODIFIED RTE … KDEN.BAYLR6.TEHRU..PLNDL.Q86.TTRUE.LUCKI1.KSAN BAYLR6.TEHRU'
+    # or 'REVISED RTE KDEN*.SMMUR2.DAAYE..ZUN…LUCKI1.KSAN REVISED DPP SMMUR2.DAAYE … REVISED DEPFREQ 128.45'
+    rc = g(r"\b(MODIFIED|REVISED) RTE\b")
+    rc_dep = None
+    if rc:
+        rts = _re.findall(r"\b([A-Z]{4}\*?\.[A-Z0-9./*]+\.[A-Z]{4})\b", t)
+        if rts:
+            route = rts[-1].replace("*", "")
+        rc_dep = g(r"REVISED DPP ([A-Z0-9]+\.[A-Z0-9]+)") or g(r"\.[A-Z]{4} ([A-Z]+\d[A-Z]?\.[A-Z0-9]+) ")
     s_route, s_dest, s_edct = _strip_route(t)
     note = _re.fullmatch(r"[A-Z0-9]+ \d{1,3} (?:Y C \.(N[0-9][0-9A-Z]{0,4})? P\d{4}|(N[0-9][0-9A-Z]{0,4}) [A-Z0-9]{4})(?: G([A-Z0-9]{1,5}))?", t)
     alt = g(r"MAINT(?:AIN)? (\d+) ?FT")
@@ -1193,20 +1228,22 @@ def parse_pdc(text):
         "tail": g(r"/AN (N?[A-Z0-9-]+)") or (note and (note.group(1) or note.group(2))),
         "gate": note and note.group(3),
         "response": g(r"PILOT RESPONSE - ([A-Z ]+?)(?: \d{3}|$)"),
+        "route_change": rc and rc.lower(),
         "cleared_to": g(r"CLEARED TO ([A-Z0-9]{4}) (?:ARPT|AIRPORT)") or s_dest
+                      or (rc and route and route.split(".")[-1])
                       or g(r"\.([A-Z]{4})\s*$") or g(r"CLEARED TO ([A-Z0-9]{3,4})"),
-        "departure": g(r"CLEARED TO [A-Z0-9]{3,4}(?: AIRPORT)? ([A-Z0-9]+[0-9][A-Z0-9]*(?:\.[A-Z0-9]+)?)")
+        "departure": rc_dep or g(r"CLEARED TO [A-Z0-9]{3,4}(?: AIRPORT)? ([A-Z0-9]+[0-9][A-Z0-9]*(?:\.[A-Z0-9]+)?)")
                      or " ".join(x for x in (g(r"CLEARED ([A-Z]+\d[A-Z]?) DEPARTURE"), g(r"DEPARTURE ([A-Z0-9]+) TRSN")) if x)
                      or g(r"CLEARED TO [A-Z0-9]{3,5} VIA [A-Z0-9 ]*?\b([A-Z]+\d\.[A-Z0-9]+)") or None,
         "altitude": alt or ("climb via SID" if _re.search(r"CL(?:IM)?B VIA SID", t) else None),
         "expect_alt": g(r"\bEXP (\d{3}) "),
-        "dep_freq": g(r"DEP FREQ ([\d.]+)") or g(r"DPFRQ ([\d.]+)")
+        "dep_freq": g(r"DEP FREQ ([\d.]+)") or g(r"DPFRQ ([\d.]+)") or g(r"REVISED DEPFREQ ([\d.]+)")
                     or ("see SID" if _re.search(r"(?:DPFRQ|DEP FREQ) SEE SID", t) else None),
         "runway": g(r"(?:EXPECT|XPCT|DEP) RWY (\S+)"),
         "fl": g(r"\bFL(\d{3})\b") or g(r"\bP\d{4} \S+ (\d{3}) "),
         "edct": g(r"EDCT (\d{4})") or s_edct,
         "route": route_text(route) if route else s_route,
-        "text": t if "CLEAR" in t else None}
+        "text": t if "CLEAR" in t or rc else None}
     return {k: v for k, v in out.items() if v}
 
 LIVE = {}   # callsign -> source key -> latest position from FAA radar (center, approach, surface)
@@ -1531,7 +1568,8 @@ def samples_zip():
                                                "edct_trail": {k: [{"at": m.get("at"), "type": m.get("type")} for m in v]
                                                               for k, v in list(EDCT_TRAIL.items())},
                                                "program_trail": {k: [{"at": m.get("at"), "type": m.get("type"), "status": m.get("status"),
-                                                                      "kind": m.get("kind")} for m in v]
+                                                                      "kind": m.get("kind"), "repeats": m.get("repeats"),
+                                                                      "last": m.get("last")} for m in v]
                                                                  for k, v in list(PROGRAM_TRAIL.items())}},
                                               indent=1, default=str))
         for t, lst in SAMPLES.items():

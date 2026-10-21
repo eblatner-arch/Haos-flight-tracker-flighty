@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.31.11
+- Datalink clearances: route changes are now read. A "MODIFIED RTE" or "REVISED RTE" clearance (e.g. UA2309 DEN rerouted SMMUR2.DAAYE…J2 before departure) gives the new route, departure procedure, departure frequency and destination, and the Lookup Log says "revised route …". Before, these came through with only the tail and altitude.
+- SWIM samples: a delay program's advisory that TFMS re-sends every 15 min unchanged is counted on the entry already kept (repeats, last) instead of filling the 20 slots, so the trail keeps the program's actual changes.
+- SWIM samples: a delay program's flight list (FADT) larger than 250 KB is saved as its head plus the part around your flight, so your flight's own EDCT record isn't cut off (UA597's was).
+
 ## 4.31.10
 - Google Drive backup: History flights' Lookup Logs are now in the backup zip (logs/) along with history.json and the tracks, and Restore brings them back. Adding a log to a flight already in History triggers a backup.
 

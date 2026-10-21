@@ -980,7 +980,8 @@ def swim_check(L, f, planned):
                     bits.append(f"{ap_} surface radar: {w}{' ' + e['runway'] if e.get('runway') and e['event'] in ('on', 'off') else ''} {hm(e['at'], tz_)}")
             pd = x.get("pdc")
             if pd:
-                parts = [("cleared_to", pd.get("cleared_to") and f"cleared to {pd['cleared_to']}"),
+                parts = [("route_change", pd.get("route_change") and pd.get("route") and f"{pd['route_change']} route {pd['route']}"),
+                         ("cleared_to", pd.get("cleared_to") and f"cleared to {pd['cleared_to']}"),
                          ("departure", pd.get("departure") and f"via {pd['departure']}"),
                          ("altitude", pd.get("altitude") and (pd["altitude"] if not pd["altitude"].isdigit() else f"maintain {pd['altitude']}")),
                          ("expect_alt", pd.get("expect_alt") and f"expect FL{pd['expect_alt']}"),
