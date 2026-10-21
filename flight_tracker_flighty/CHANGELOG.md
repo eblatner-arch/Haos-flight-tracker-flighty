@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.12
+- EDCT: a TBFM (metering) EDCT earlier than the end of a ground stop that holds your departure is no longer used. UA2763 EWR-BOS on 21 Oct: the FAA moved it to 20:01 when the BOS ground stop (until 20:00) began, but TBFM's first message for it at 19:37 still carried the old delay-program slot 19:40, and the add-on switched to that. The FAA's EDCT is kept and the Lookup Log says why TBFM's was set aside.
+
 ## 4.31.11
 - Datalink clearances: route changes are now read. A "MODIFIED RTE" or "REVISED RTE" clearance (e.g. UA2309 DEN rerouted SMMUR2.DAAYE…J2 before departure) gives the new route, departure procedure, departure frequency and destination, and the Lookup Log says "revised route …". Before, these came through with only the tail and altitude.
 - SWIM samples: a delay program's advisory that TFMS re-sends every 15 min unchanged is counted on the entry already kept (repeats, last) instead of filling the 20 slots, so the trail keeps the program's actual changes.

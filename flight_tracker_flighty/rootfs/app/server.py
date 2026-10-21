@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import aeroapi
 import airports
 import alerts as alerting
+import artcc
 import flightaware as fa
 import gdrive
 import faa
@@ -762,6 +763,16 @@ def _hhmm_near(hhmm, ref):
     return min((d - 86400, d, d + 86400), key=lambda x: abs(x - ref))
 
 
+def _gs_holding(dep, arr, now):
+    """The ground stop at `arr` in effect now that includes departures from `dep`, if any."""
+    item = swim.NAS.get((_iata(arr) or "", "gs")) or swim.NAS.get(((arr or "").upper(), "gs"))
+    if not item or not item.get("end") or item["end"] <= now or (item.get("start") or 0) > now:
+        return None
+    if artcc.in_scope(item, _iata(dep)) is False:
+        return None
+    return item
+
+
 def _swim_take(sw, ev):
     """Fold one event into the leg's saved SWIM facts (newest wins, field by field)."""
     got = ev.get("got") or time.time()
@@ -771,6 +782,14 @@ def _swim_take(sw, ev):
         sw["tbfm"] = {**(sw.get("tbfm") or {}), **(ev.get("tbfm") or {}), "at": got}
         e = _ts(ev.get("edct"))
         if e and e != sw.get("edct") and got > (sw.get("edct_at") or 0):
+            # a ground stop holds this departure until its end: a TBFM EDCT before that can't be flown.
+            # TBFM keeps repeating the program slot it had (UA2763 EWR-BOS 21 Oct: the GDP slot 19:40
+            # after the BOS ground stop had moved it to 20:01 at its end) - keep the FAA's
+            gs = _gs_holding(ev.get("dep"), ev.get("arr"), time.time())
+            if gs and e < gs["end"]:
+                if sw.get("tbfm_ignored", {}).get("edct") != e:
+                    sw["tbfm_ignored"] = {"edct": e, "at": got, "gs_end": gs["end"], "airport": gs.get("airport"), "new": True}
+                return
             sw["edct_prev"] = sw.get("edct")
             sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_src"] = e, got, True, "TBFM"
             sw["edct_for"] = sw.get("edct_for") or _iata(ev.get("arr"))
@@ -1003,6 +1022,10 @@ def swim_check(L, f, planned):
             tw = x.get("tower")
             if tw and tw.get("clearance"):
                 bits.append(f"{dep} tower: departure clearance {hm(tw['clearance'], tza)}" + (f", gate {tw['gate']}" if tw.get("gate") else ""))
+        ig = sw.get("tbfm_ignored") or {}
+        if ig.pop("new", False):
+            bits.append(f"TBFM (metering): EDCT {alerting.hhmm(ig['edct'], tza)} not used, the {ig.get('airport') or ''} "
+                        f"ground stop holds departures until {alerting.hhmm(ig['gs_end'], tza)}")
         if sw.get("edct_new"):
             prev = f" (was {alerting.hhmm(sw['edct_prev'], tza)})" if sw.get("edct_prev") else ""
             who = {"TBFM": "TBFM (metering)", "flight plan": "Refiled flight plan", "clearance": "Datalink clearance"}.get(sw.get("edct_src"), "FAA")
