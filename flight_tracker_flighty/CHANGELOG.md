@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.17
+- EDCT ground-stop check: only when the stop is known to include your departure (its scope names your airport or center). A stop whose scope can't be read no longer sets a TBFM EDCT aside.
+
 ## 4.31.16
 - EDCT ground-stop check: also uses the NAS status page's ground stops, so it works right after a restart (the SWIM list is empty until the FAA re-sends the stop, ~15 min).
 

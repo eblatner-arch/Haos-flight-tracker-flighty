@@ -784,7 +784,7 @@ def _gs_holding(dep, arr, now):
         item = next((n for n in list(STATE.get("nas") or []) if n.get("kind") == "gs" and n.get("airport") == a), None)
     if not item or not item.get("end") or item["end"] <= now or (item.get("start") or 0) > now:
         return None
-    if artcc.in_scope(item, _iata(dep)) is False:
+    if artcc.in_scope(item, _iata(dep)) is not True:   # only when the stop is known to include you
         return None
     return item
 
