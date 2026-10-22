@@ -474,7 +474,17 @@ def evaluate(leg, cfg, now, nas_items, rules=None, wx=None):
         ext = nt.get("nas_ext") or {}
         live = dict(nt.get("nas_live") or {})
         cur = {}
-        for n in nas_for(leg, nas_items):
+        progs = list(nas_for(leg, nas_items))
+        # A ground stop outranks the delay program at the same airport: while one holds your flight
+        # (or may), the program's push waits, and goes out once the stop is over (if it still applies).
+        # A stop gone for under 5 min may be the FAA re-issuing it (an extension is a cancel and a new
+        # stop seconds later), so the program still waits.
+        gs_now = {n["airport"] for n in progs if n["kind"] == "gs"
+                  and not all(i.get("hit") is False for i in (n.get("impact") or [{"hit": None}]))}
+        gs_recent = {k.split("|")[0] for k, t in live.items() if k.endswith("|gs") and k.count("|") == 1 and now - t < 300}
+        for n in progs:
+            if n["kind"] == "gdp" and n["airport"] in (gs_now | gs_recent):
+                continue
             if n["kind"] in ("gs", "gdp") and n.get("here") == "dep" and n["airport"] != arr:
                 # A program at your departure airport only holds flights coming *in*: it matters only
                 # through an inbound that hasn't taken off yet and is (or may be) inside its scope.

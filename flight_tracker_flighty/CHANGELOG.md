@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.18
+- Alerts: a ground stop outranks the delay program at the same airport. While a stop holds your flight (or may), the program's alert waits; once the stop is over (and 5 min have passed, since the FAA extends a stop by cancelling and re-issuing it), the program alerts if it still applies. No more two alerts for one airport when you add a flight.
+- Adding a flight picked from a lookup: its page fills in at once from that AeroAPI answer (times, gates, airplane) instead of showing a placeholder until the tracker's first full check, which now runs next.
+
 ## 4.31.17
 - EDCT ground-stop check: only when the stop is known to include your departure (its scope names your airport or center). A stop whose scope can't be read no longer sets a TBFM EDCT aside.
 

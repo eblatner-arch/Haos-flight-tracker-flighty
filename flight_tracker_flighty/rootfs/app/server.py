@@ -1506,6 +1506,22 @@ def add_picked(body):
     o, d = f.get("origin") or {}, f.get("destination") or {}
     lid = add_manual(ident, o.get("iata") or o.get("icao"), d.get("iata") or d.get("icao"), date, body.get("kind") or "manual")
     PRESEED[lid] = json.loads(json.dumps(f))
+    # show what the lookup already knows right away (times, gates, airplane), instead of a placeholder
+    # until the tracker's first full check gets to it; that check runs next, ahead of the others
+    with LOCK:
+        L = STATE["legs"].get(lid)
+        if L is not None and not L.get("flight"):
+            t = f.get("times") or {}
+            L["flight"], L["source"] = json.loads(json.dumps(f)), "AeroAPI"
+            so, si = (t.get("out") or {}).get("scheduled"), (t.get("in") or {}).get("scheduled")
+            if so:
+                L["sched_out"] = so
+            if si:
+                L["sched_in"] = si
+            L["next_check"] = 0
+    REFRESH_Q.put(lid)
+    WAKE.set()
+    bump()
     return lid
 
 
