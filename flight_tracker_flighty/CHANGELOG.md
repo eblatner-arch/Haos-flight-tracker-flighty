@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.20
+- Fixed "The network connection was lost" in the iPhone app after Ask AeroAPI (and Refresh): the add-on answered without reading the request's body, so the connection ended in a reset even though the action had gone through. Every POST's body is now read first.
+
 ## 4.31.19
 - "Ask AeroAPI now": a repeat of the same check within a minute (the iPhone app retries once when its connection drops) gets the first answer instead of a second paid query.
 

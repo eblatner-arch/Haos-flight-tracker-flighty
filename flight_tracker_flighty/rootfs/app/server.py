@@ -4169,8 +4169,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self):
         try:
-            n = int(self.headers.get("Content-Length") or 0)
-            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+            raw = self._small if getattr(self, "_small", None) is not None else self._body()
+            return json.loads(raw or b"{}")
         except Exception:
             return {}
 
@@ -4203,6 +4203,8 @@ class Handler(BaseHTTPRequestHandler):
         return {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
 
     def _body(self, limit=20 * 1024 * 1024):
+        if getattr(self, "_small", None) is not None:
+            return self._small
         n = int(self.headers.get("Content-Length") or 0)
         if n > limit:
             raise ValueError("File too big")
@@ -4211,6 +4213,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._leaflet()
         path = self.path.split("?", 1)[0]
+        # read a small body up front, whether or not the endpoint uses it: answering and closing with
+        # the request's body still unread makes the connection end in a reset, which the iPhone reports
+        # as "The network connection was lost" even though the action went through
+        self._small = None
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if 0 < n <= 1024 * 1024:
+            self._small = self.rfile.read(n)
+        elif n == 0:
+            self._small = b""
         if path == "/api/history/import":
             try:
                 name = self.headers.get("X-Filename") or "import.xlsx"
