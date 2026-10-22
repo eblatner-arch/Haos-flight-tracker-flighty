@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.15
+- EDCT: a flight already showing a TBFM EDCT that falls inside a ground stop holding it goes back to the FAA's own EDCT on TBFM's next message (4.31.12 only stopped new ones; UA2763 kept the stale 19:40 it had taken before). The Lookup Log notes it.
+
 ## 4.31.14
 - Ground stops and delay programs: the reason now comes from the ATCSCC advisory's "IMPACTING CONDITION" in words ("RWY-TAXI / CONSTRUCTION" → "Runway/taxiway construction", "WEATHER / THUNDERSTORMS" → "Thunderstorms") instead of the flow message's bare code ("RWY"). It shows on the program card, in its alerts and in the EDCT banner; until the advisory arrives the code is used as before.
 

@@ -763,6 +763,17 @@ def _hhmm_near(hhmm, ref):
     return min((d - 86400, d, d + 86400), key=lambda x: abs(x - ref))
 
 
+def _tfms_edct(acid, dep):
+    """The FAA's latest EDCT for this flight from the delay-program data (kept for every flight)."""
+    best = None
+    for x in swim.EDCTS.get((acid or "").upper(), []):
+        if dep and _iata(x.get("dep")) != _iata(dep):
+            continue
+        if not best or (x.get("got") or 0) > (best.get("got") or 0):
+            best = x
+    return _ts(best.get("edct")) if best else None
+
+
 def _gs_holding(dep, arr, now):
     """The ground stop at `arr` in effect now that includes departures from `dep`, if any."""
     item = swim.NAS.get((_iata(arr) or "", "gs")) or swim.NAS.get(((arr or "").upper(), "gs"))
@@ -781,11 +792,19 @@ def _swim_take(sw, ev):
         # and its EDCT when it's newer than the one held (TBFM carries the current one, slot swaps included)
         sw["tbfm"] = {**(sw.get("tbfm") or {}), **(ev.get("tbfm") or {}), "at": got}
         e = _ts(ev.get("edct"))
+        # a ground stop holds this departure until its end: a TBFM EDCT before that can't be flown.
+        # TBFM keeps repeating the program slot it had (UA2763 EWR-BOS 21 Oct: the GDP slot 19:40, for
+        # half an hour and past that time, after the BOS ground stop had moved it to 20:01 then 21:01)
+        gs = _gs_holding(ev.get("dep"), ev.get("arr"), time.time())
+        if gs and sw.get("edct_src") == "TBFM" and sw.get("edct") and sw["edct"] < gs["end"]:
+            # one taken from TBFM before this rule (or before the stop): back to the FAA's own
+            f = _tfms_edct(ev.get("acid"), ev.get("dep"))
+            if f and f != sw["edct"]:
+                sw["tbfm_ignored"] = {"edct": sw["edct"], "at": got, "gs_end": gs["end"], "airport": gs.get("airport"), "new": True}
+                sw["edct_prev"] = sw["edct"]
+                sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_tfms"] = f, got, True, True
+                sw.pop("edct_src", None)
         if e and e != sw.get("edct") and got > (sw.get("edct_at") or 0):
-            # a ground stop holds this departure until its end: a TBFM EDCT before that can't be flown.
-            # TBFM keeps repeating the program slot it had (UA2763 EWR-BOS 21 Oct: the GDP slot 19:40
-            # after the BOS ground stop had moved it to 20:01 at its end) - keep the FAA's
-            gs = _gs_holding(ev.get("dep"), ev.get("arr"), time.time())
             if gs and e < gs["end"]:
                 if sw.get("tbfm_ignored", {}).get("edct") != e:
                     sw["tbfm_ignored"] = {"edct": e, "at": got, "gs_end": gs["end"], "airport": gs.get("airport"), "new": True}
