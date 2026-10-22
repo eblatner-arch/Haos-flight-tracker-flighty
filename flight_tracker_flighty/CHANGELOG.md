@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.16
+- EDCT ground-stop check: also uses the NAS status page's ground stops, so it works right after a restart (the SWIM list is empty until the FAA re-sends the stop, ~15 min).
+
 ## 4.31.15
 - EDCT: a flight already showing a TBFM EDCT that falls inside a ground stop holding it goes back to the FAA's own EDCT on TBFM's next message (4.31.12 only stopped new ones; UA2763 kept the stale 19:40 it had taken before). The Lookup Log notes it.
 

@@ -776,7 +776,12 @@ def _tfms_edct(acid, dep):
 
 def _gs_holding(dep, arr, now):
     """The ground stop at `arr` in effect now that includes departures from `dep`, if any."""
-    item = swim.NAS.get((_iata(arr) or "", "gs")) or swim.NAS.get(((arr or "").upper(), "gs"))
+    a = _iata(arr) or (arr or "").upper()
+    item = swim.NAS.get((a, "gs")) or swim.NAS.get(((arr or "").upper(), "gs"))
+    if not item:
+        # SWIM's own list starts empty after a restart until the FAA re-sends the stop (every ~15 min):
+        # the merged list (with the NAS status page) has it meanwhile
+        item = next((n for n in list(STATE.get("nas") or []) if n.get("kind") == "gs" and n.get("airport") == a), None)
     if not item or not item.get("end") or item["end"] <= now or (item.get("start") or 0) > now:
         return None
     if artcc.in_scope(item, _iata(dep)) is False:
