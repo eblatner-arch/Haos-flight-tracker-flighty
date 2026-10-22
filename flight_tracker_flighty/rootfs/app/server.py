@@ -1266,6 +1266,9 @@ def route_end(route):
     return (ap.get("iata") or None) if ap and ap.get("icao") == last else None
 
 
+MANUAL_AERO = {}   # leg id -> (when, answer) of the last "ask AeroAPI now"
+
+
 def manual_aero(lid):
     """Settings-free 'ask AeroAPI now' for one flight (counts against the monthly budget like any call,
     but not the per-flight limit)."""
@@ -1277,6 +1280,11 @@ def manual_aero(lid):
             return 404, {"error": "not found"}
         L = json.loads(json.dumps(L))
     now = time.time()
+    # the phone retries once when its connection drops mid-request: the answer from a check made in
+    # the last minute is that answer, not a second paid query
+    last = MANUAL_AERO.get(lid)
+    if last and now - last[0] < 60:
+        return last[1]
     a = L.setdefault("aero", {})
     limit = int(CFG.get("aeroapi_max_per_leg") or 6)
     a["calls"] = min(a.get("calls", 0), limit - 1)  # a manual check always gets through
@@ -1298,7 +1306,9 @@ def manual_aero(lid):
     REFRESH_Q.put(lid)  # fold it into a full check right away
     WAKE.set()
     bump()
-    return 200, {"ok": True, "status": got.get("status_text"), "tail": got.get("tail")}
+    out = (200, {"ok": True, "status": got.get("status_text"), "tail": got.get("tail")})
+    MANUAL_AERO[lid] = (time.time(), out)
+    return out
 
 
 def history_lookup(browser, L, ident, lid):
