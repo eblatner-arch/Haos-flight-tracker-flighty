@@ -20,7 +20,7 @@ STATE = {"status": "off", "error": None, "connected_at": None, "messages": 0, "m
 WATCH = set()        # callsigns to keep (UAL2608 …), set by the server each cycle
 EVENTS = {}          # callsign -> [event, …] newest last
 LOCK = threading.Lock()
-KEEP = 40            # events per callsign
+KEEP = 120           # events per callsign (TBFM sends dozens of amendments around takeoff)
 SAMPLES = {}         # message type -> a few raw messages, to check the parser against the real feed
 MATCHED_RAW = []     # the last raw messages that matched your flights
 PDC_RAW = []         # every datalink clearance message that mentions one of your flights (kept apart)
@@ -709,7 +709,15 @@ def _edct_sample(xml_text):
 def _remember_edct(ev):
     with LOCK:
         lst = EDCTS.setdefault(ev["acid"], [])
-        lst[:] = [e for e in lst if (e.get("dep"), e.get("igtd")) != (ev.get("dep"), ev.get("igtd"))] + [ev]
+        key = (ev.get("dep"), ev.get("igtd"))
+        old = next((e for e in lst if (e.get("dep"), e.get("igtd")) == key), None)
+        if old is not None:
+            # what the FAA said before, and when (the samples show a flight's EDCT history)
+            hist = list(old.get("history") or [])
+            if old.get("edct") != ev.get("edct"):
+                hist.append({"edct": old.get("edct"), "got": old.get("got"), "type": old.get("type")})
+            ev = dict(ev, history=hist[-8:])
+        lst[:] = [e for e in lst if (e.get("dep"), e.get("igtd")) != key] + [ev]
         del lst[:-4]
     _edct_dirty[0] = True
 
@@ -1612,7 +1620,7 @@ def samples_zip():
                                                          "airports": sorted(WATCH_AIRPORTS),
                                                          "targets": {k: len(v) for k, v in SURFACE.items()}},
                                                "events": {k: v for k, v in EVENTS.items()},
-                                               "edcts": {"flights": len(EDCTS), "yours": {k: EDCTS[k] for k in WATCH if k in EDCTS},
+                                               "edcts": {"flights": len(EDCTS), "yours": {k: EDCTS[k] for k in (set(WATCH) | set(EVENTS)) if k in EDCTS},
                                                          "by_program": _edct_counts()},
                                                "edct_trail": {k: [{"at": m.get("at"), "type": m.get("type")} for m in v]
                                                               for k, v in list(EDCT_TRAIL.items())},

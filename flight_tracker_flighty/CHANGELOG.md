@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.21
+- SWIM samples: each flight's FAA EDCT now keeps its history (every earlier value and when it came), and the samples list the EDCTs of every flight with saved events, not only those watched right now (an inbound that has taken off drops out of the watch list).
+- SWIM samples: up to 120 events per flight (was 40): TBFM's amendments around takeoff were pushing out everything before them.
+
 ## 4.31.20
 - Fixed "The network connection was lost" in the iPhone app after Ask AeroAPI (and Refresh): the add-on answered without reading the request's body, so the connection ended in a reset even though the action had gone through. Every POST's body is now read first.
 
