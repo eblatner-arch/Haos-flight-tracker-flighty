@@ -929,11 +929,19 @@ def _swim_take(sw, ev):
         rw = d.get("runwayDepartureTime") or {}
         est, ear = _ts(rw.get("estimated")), _ts(rw.get("earliest"))
         rep = _ts(ev.get("at")) or got
-        if d.get("smpExemptionReason") == "EDCT" and est and ear and est > ear + 60 and est > time.time():
+        # When the two are equal it can still rule the shown EDCT out: a flight the tower holds for its
+        # EDCT is never planned to take off before the window opens, so the tower's EDCT is at most
+        # estimate + 5. A shown EDCT later than that isn't the one the tower has (UA2619 at 8 AM:
+        # tower 11:29 with earliest 11:29, United 11:34, FAA public 12:10): estimate + 5 is the best
+        # reading then. An estimate + 5 later than the shown EDCT says nothing (the airplane can't
+        # make its slot: UA1561 at 8 AM, 2:11 PM against a 12:16 EDCT) and is left alone.
+        if d.get("smpExemptionReason") == "EDCT" and est and ear and est > time.time():
             e = est + 300
             gs = _gs_holding(ev.get("dep"), ev.get("arr"), time.time())
-            if (not gs or e >= gs["end"]) and (not sw.get("edct") or abs(e - sw["edct"]) >= 120) \
-                    and rep > (sw.get("edct_at") or 0):
+            clear = est > ear + 60
+            if (not gs or e >= gs["end"]) and rep > (sw.get("edct_at") or 0) and (
+                    (clear and (not sw.get("edct") or abs(e - sw["edct"]) >= 120))
+                    or (not clear and sw.get("edct") and e < sw["edct"] - 120)):
                 sw["edct_prev"] = sw.get("edct")
                 sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_src"] = e, got, True, "tower"
                 sw["edct_for"] = sw.get("edct_for") or _iata(ev.get("arr"))

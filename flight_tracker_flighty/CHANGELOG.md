@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.26
+- EDCT from the tower system, the equal case: a flight the tower holds for its EDCT is never planned to take off before the window opens, so the tower's EDCT is at most its estimate + 5 min. When the estimate equals the earliest takeoff and the shown EDCT is later than estimate + 5, the shown one can't be the tower's: estimate + 5 is used (UA2619 PHX this morning: tower 11:29 / earliest 11:29, United 11:34, FAA public 12:10). When estimate + 5 is later than the shown EDCT the airplane can't make its slot and nothing changes (UA1561 DEN at 8 AM: 2:11 PM against a 12:16 EDCT).
+
 ## 4.31.25
 - EDCT from the departure tower's system (TFDM): when it holds a flight for an EDCT, its takeoff estimate is the start of the EDCT window (EDCT − 5 min) whenever that's later than the earliest the flight could go, and it has the airline's EDCT, slot swaps included, which the public FAA data doesn't. Checked against United's own EDCTs: UA2619 PHX 11:59 then 11:34 (FAA public 12:10), UA1561 DEN 12:01 (FAA public 12:45), UA442, UA1117 and UA597 equal. Used only when the estimate is clearly later than the earliest possible takeoff (equal means it's just the queue), not inside a ground stop holding the flight, and when it differs from what's shown by 2 min or more. "EDCT from" says "the departure tower's system".
 - The Times card's EDCT row names where the EDCT came from (TBFM, Tower, Datalink, Flight plan, FAA) instead of always "FAA".
