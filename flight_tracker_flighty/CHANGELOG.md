@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.27
+- One alert per ground stop / delay program, not one per flight: a program alert with the same title as one in the last 15 min joins it (Alerts list shows it once with "N of your flights: …") and isn't pushed again. Flights checked within the 20 s push batch still go out as one push naming them all.
+
 ## 4.31.26
 - EDCT from the tower system, the equal case: a flight the tower holds for its EDCT is never planned to take off before the window opens, so the tower's EDCT is at most its estimate + 5 min. When the estimate equals the earliest takeoff and the shown EDCT is later than estimate + 5, the shown one can't be the tower's: estimate + 5 is used (UA2619 PHX this morning: tower 11:29 / earliest 11:29, United 11:34, FAA public 12:10). When estimate + 5 is later than the shown EDCT the airplane can't make its slot and nothing changes (UA1561 DEN at 8 AM: 2:11 PM against a 12:16 EDCT).
 

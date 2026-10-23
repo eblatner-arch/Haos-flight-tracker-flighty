@@ -219,6 +219,35 @@ def sync_rule_cfg():
 ALERT_KEEP = 3000  # notification history (the Flights screen only shows the last few hours)
 
 
+PROGRAM_KEYS = {"nas_gs", "nas_gdp", "nas_closure", "nas_other", "nas_delay"}
+
+
+def _merge_program_alert(a, L, now):
+    """One alert per program, not one per flight: a ground stop or delay program alert with the same
+    title ("SAN: Ground delay program") as one in the last 15 min joins that one (its flights listed
+    once) and isn't pushed again. Flights checked seconds apart are already pushed as one (the batch);
+    this also covers flights whose check came later, and the Alerts list. Call with LOCK held."""
+    if a.get("key") not in PROGRAM_KEYS:
+        return False
+    for b in reversed(STATE["alerts"]):
+        if now - (b.get("at") or 0) > 15 * 60:
+            break
+        if b.get("key") == a["key"] and b.get("title") == a.get("title"):
+            who = f"{L.get('display') or L.get('ident')} {L.get('dep')}→{L.get('arr')}"
+            flights = b.setdefault("flights", [f"{b.get('display') or ''} {b.get('route') or ''}".strip()])
+            if who not in flights:
+                flights.append(who)
+            first = b.get("message") or ""
+            detail = b.get("detail") or (first.split(": ", 1)[1] if ": " in first else first)
+            b["detail"] = detail
+            b["message"] = f"{detail}\n{len(flights)} of your flights: {', '.join(flights)}"
+            b["leg"] = None if len(flights) > 1 else b.get("leg")
+            # within the push batch's wait it still goes to the batch, which sends one push naming
+            # every flight; after that the program's push has gone out
+            return "batch" if now - (b.get("at") or 0) < BATCH_WAIT else True
+    return False
+
+
 def push_event(event, title, message, level="info", leg=None, tag=None, out_time=None):
     """A push that isn't tied to one flight's evaluation (schedule, system)."""
     now = time.time()
@@ -2916,12 +2945,19 @@ def update_leg(browser, lid):
         L["alerts"] = (L.get("alerts") or []) + new_alerts
         L["alerts"] = L["alerts"][-60:]
         STATE["legs"][lid] = L
-        for a in new_alerts:
+        merged = set()
+        for i, a in enumerate(new_alerts):
+            m = _merge_program_alert(a, L, now)
+            if m:
+                if m is True:
+                    merged.add(i)
+                continue
             STATE["alerts"].append({**a, "leg": lid, "display": L.get("display"), "route": f"{L['dep']}→{L['arr']}"})
         STATE["alerts"] = STATE["alerts"][-ALERT_KEEP:]
     bump()
-    for a in new_alerts:
-        notify({**a, "leg": lid})
+    for i, a in enumerate(new_alerts):
+        if i not in merged:
+            notify({**a, "leg": lid})
     log.info("%s %s→%s: %s%s", L.get("display"), L.get("dep"), L.get("arr"),
              alerting.status_label(L, CFG), f" ({L['note']})" if L.get("note") else "")
     # AeroAPI answers in a second; go straight on to the FlightAware pages (comparison and the
