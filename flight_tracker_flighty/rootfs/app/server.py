@@ -657,6 +657,14 @@ def swim_watch(now):
     with LOCK:
         for L in STATE["legs"].values():
             if L.get("ident") and watched(L, now):
+                if not L.get("atc_found") and not (L.get("flight") or {}).get("atc_ident"):
+                    try:
+                        cs = find_atc_callsign(L)
+                    except Exception:
+                        cs = None
+                    if cs:
+                        L["atc_found"] = cs
+                        log.info("%s: the FAA has it as %s (same airports and first departure time)", L.get("display"), cs)
                 keep.update(swim_idents(L))
                 inb = L.get("inbound") or {}
                 if inb.get("ident"):
@@ -735,11 +743,37 @@ def swim_idents(L):
     report when the airline filed it under another one (UA1835 SFO-DEN on 22 Oct had no FAA data at all
     under UAL1835 while its late SAN-SFO leg was still flying under that number)."""
     out = []
-    for x in (L.get("ident"), ((L.get("flight") or {}).get("atc_ident")), (L.get("aero") or {}).get("atc_ident")):
+    for x in (L.get("ident"), ((L.get("flight") or {}).get("atc_ident")), (L.get("aero") or {}).get("atc_ident"),
+              L.get("atc_found")):
         x = (x or "").upper().replace(" ", "")
         if x and re.fullmatch(r"[A-Z0-9]{3,8}", x) and x not in out:
             out.append(x)
     return out
+
+
+def find_atc_callsign(L):
+    """A flight in a delay program under another callsign: the FAA's EDCT list (kept for every flight)
+    has the same airline, the same two airports and the same first planned departure, under a callsign
+    that isn't its flight number (UA1835 SFO-DEN flew as UAL8235, in the DEN program's list)."""
+    own = (L.get("ident") or "").upper()
+    m = re.match(r"([A-Z]{3})\d", own)
+    so = L.get("sched_out") or 0
+    if not m or not so:
+        return None
+    dep, arr = _iata(L.get("dep")), _iata(L.get("arr"))
+    if any(_iata(e.get("dep")) == dep and abs((_ts(e.get("igtd")) or 0) - so) <= 3600 for e in swim.EDCTS.get(own, [])):
+        return None   # the FAA has it under its own number
+    hits = set()
+    with swim.LOCK:
+        items = list(swim.EDCTS.items())
+    for acid, lst in items:
+        if acid == own or not acid.startswith(m.group(1)):
+            continue
+        for e in lst:
+            t = _ts(e.get("igtd"))
+            if t and abs(t - so) <= 15 * 60 and _iata(e.get("dep")) == dep and _iata(e.get("arr")) == arr:
+                hits.add(acid)
+    return hits.pop() if len(hits) == 1 else None   # only when it's unambiguous
 
 
 def swim_events_for(L, f):

@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.23
+- A flight in a delay program under another radio callsign is found from the FAA's EDCT list itself: same airline, same airports, same first planned departure (within 15 min), and only when exactly one matches. UA1835 SFO-DEN flew as UAL8235 (it's in the DEN program's flight list under that), so its EDCT and everything else the FAA sends now reach it even when FlightAware/AeroAPI don't report the ATC callsign.
+
 ## 4.31.22
 - FAA SWIM follows a flight's ATC callsign too, when FlightAware or AeroAPI report one different from its flight number. UA1835 SFO-DEN on 22 Oct had no FAA data at all under UAL1835 (only its late SAN-SFO leg and the next day's flight), so no EDCT, clearance or surface data reached it. The Lookup Log says when a flight is followed under another callsign.
 
