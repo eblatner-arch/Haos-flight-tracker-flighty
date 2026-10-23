@@ -163,6 +163,9 @@ def normalize(f):
         "fa_id": _first(f.get("flightId"), f.get("fa_flight_id"), f.get("id")),
         "ident": _first(f.get("ident"), f.get("displayIdent")),
         "display_ident": _first(f.get("displayIdent"), f.get("iataIdent"), f.get("ident")),
+        # the callsign ATC knows it by, when the airline filed it under another (a late earlier leg
+        # with the same number still flying): the FAA's data is under this one
+        "atc_ident": _first(f.get("atcIdent"), f.get("atc_ident")),
         "status_text": _first(f.get("flightStatus"), f.get("status")),
         "cancelled": bool(f.get("cancelled")),
         "diverted": bool(f.get("diverted")),

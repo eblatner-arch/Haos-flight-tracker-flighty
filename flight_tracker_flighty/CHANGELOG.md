@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.22
+- FAA SWIM follows a flight's ATC callsign too, when FlightAware or AeroAPI report one different from its flight number. UA1835 SFO-DEN on 22 Oct had no FAA data at all under UAL1835 (only its late SAN-SFO leg and the next day's flight), so no EDCT, clearance or surface data reached it. The Lookup Log says when a flight is followed under another callsign.
+
 ## 4.31.21
 - SWIM samples: each flight's FAA EDCT now keeps its history (every earlier value and when it came), and the samples list the EDCTs of every flight with saved events, not only those watched right now (an inbound that has taken off drops out of the watch list).
 - SWIM samples: up to 120 events per flight (was 40): TBFM's amendments around takeoff were pushing out everything before them.

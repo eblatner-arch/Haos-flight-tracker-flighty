@@ -657,7 +657,7 @@ def swim_watch(now):
     with LOCK:
         for L in STATE["legs"].values():
             if L.get("ident") and watched(L, now):
-                keep.add(L["ident"].upper())
+                keep.update(swim_idents(L))
                 inb = L.get("inbound") or {}
                 if inb.get("ident"):
                     keep.add(inb["ident"].upper())
@@ -702,7 +702,7 @@ def swim_news(now):
     out = set()
     with LOCK:
         for L in STATE["legs"].values():
-            idents = {(L.get("ident") or "").upper(), ((L.get("inbound") or {}).get("ident") or "").upper()} | \
+            idents = set(swim_idents(L)) | {((L.get("inbound") or {}).get("ident") or "").upper()} | \
                      {(r.get("ident") or "").upper() for r in (L.get("rotation") or []) if r}
             if acids & idents and watched(L, now) and now - (L.get("swim_forced") or 0) >= 20:
                 L["swim_forced"] = now
@@ -730,6 +730,18 @@ def _airline_src(ev):
     return len(src) == 3 and src.isalpha() and src != "TFM"
 
 
+def swim_idents(L):
+    """The callsigns the FAA may know this leg by: its own, and the ATC callsign FlightAware or AeroAPI
+    report when the airline filed it under another one (UA1835 SFO-DEN on 22 Oct had no FAA data at all
+    under UAL1835 while its late SAN-SFO leg was still flying under that number)."""
+    out = []
+    for x in (L.get("ident"), ((L.get("flight") or {}).get("atc_ident")), (L.get("aero") or {}).get("atc_ident")):
+        x = (x or "").upper().replace(" ", "")
+        if x and re.fullmatch(r"[A-Z0-9]{3,8}", x) and x not in out:
+            out.append(x)
+    return out
+
+
 def swim_events_for(L, f):
     """This leg's SWIM events (TFMS and TFDM): same callsign, same departure airport, and the FAA's
     first planned departure (igtd) close enough to this leg's schedule. The FAA's automatic
@@ -739,7 +751,7 @@ def swim_events_for(L, f):
     dep = _iata(L.get("dep"))
     so = (f.get("times") or {}).get("out", {}).get("scheduled") or L.get("sched_out") or 0
     mine = []
-    for ev in swim.events(L["ident"]):
+    for ev in [e for cs in swim_idents(L) for e in swim.events(cs)]:
         if _iata(ev.get("dep")) != dep or ev.get("trigger") == "UPDATE_DEPARTURE_TIMEOUT":
             continue
         t = _ts(ev.get("igtd"))
@@ -940,6 +952,10 @@ def swim_check(L, f, planned):
         return out
     mine = swim_events_for(L, f)
     sw = L.setdefault("swim", {})
+    ids = swim_idents(L)
+    if len(ids) > 1 and sw.get("atc_logged") != ids[1]:
+        sw["atc_logged"] = ids[1]
+        saw(L, "FAA SWIM", None, f"ATC callsign {ids[1]}: the FAA's data for this flight is under it, not {ids[0]}")
     pd = sw.get("pdc")
     if pd and pd.get("text") and pd.get("v") != 3:
         # saved before the parser knew this tower's format: read the saved text again
@@ -1906,7 +1922,8 @@ def aero_call(L, now, reason, retry_h=None, observed_inbound=None, observed_tail
         a.update(at=now, calls=a.get("calls", 0) + 1, reason=reason, found=bool(flight), error=None)
         if flight:
             a.update(tail=flight.get("tail") or a.get("tail"), inbound_id=flight.get("inbound_fa_id"),
-                     fa_id=flight.get("fa_id"), aircraft_type=flight.get("aircraft_type"))
+                     fa_id=flight.get("fa_id"), aircraft_type=flight.get("aircraft_type"),
+                     atc_ident=flight.get("atc_ident") or a.get("atc_ident"))
         log.info("AeroAPI %s (%s): %s", L.get("display"), reason,
                  f"tail {flight.get('tail') or 'not assigned'}, inbound {flight.get('inbound_fa_id') or 'none'}"
                  if flight else "flight not found")
@@ -2649,7 +2666,8 @@ def update_leg(browser, lid):
             a = L.setdefault("aero", {})
             a.update(at=now, calls=a.get("calls", 0) + 1, reason="flight lookup", found=True, error=None,
                      tail=first.get("tail") or a.get("tail"), inbound_id=first.get("inbound_fa_id"),
-                     fa_id=first.get("fa_id"), aircraft_type=first.get("aircraft_type"))
+                     fa_id=first.get("fa_id"), aircraft_type=first.get("aircraft_type"),
+                     atc_ident=first.get("atc_ident") or a.get("atc_ident"))
             L["fa_id"] = first.get("fa_id") or L.get("fa_id")
         elif first_lookup_due(L, now):
             first = aero_call(L, now, "first lookup")

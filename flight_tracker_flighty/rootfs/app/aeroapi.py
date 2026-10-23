@@ -44,6 +44,7 @@ def normalize(f):
         "fa_id": f.get("fa_flight_id"),
         "ident": f.get("ident_icao") or f.get("ident"),
         "display_ident": f.get("ident_iata") or f.get("ident"),
+        "atc_ident": f.get("atc_ident") or None,
         "status_text": f.get("status"),
         "cancelled": bool(f.get("cancelled")),
         "diverted": bool(f.get("diverted")),
