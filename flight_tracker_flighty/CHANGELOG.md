@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.28
+- EDCT alerts say where the EDCT came from when it isn't the FAA's program data (the departure tower's system, TBFM, the datalink clearance, the refiled flight plan).
+
 ## 4.31.27
 - One alert per ground stop / delay program, not one per flight: a program alert with the same title as one in the last 15 min joins it (Alerts list shows it once with "N of your flights: …") and isn't pushed again. Flights checked within the 20 s push batch still go out as one push naming them all.
 

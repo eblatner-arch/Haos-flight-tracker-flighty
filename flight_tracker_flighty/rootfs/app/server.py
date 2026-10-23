@@ -1181,7 +1181,10 @@ def swim_check(L, f, planned):
         prev = f" (was {alerting.hhmm(sw['edct_prev'], tza)})" if sw.get("edct_prev") else ""
         push_event("edct", f"{L.get('display') or L['ident']} EDCT {alerting.hhmm(sw['edct'], tza)}{prev}",
                    f"{L.get('dep')}→{L.get('arr')}: expect departure clearance {alerting.hhmm(sw['edct'], tza)}"
-                   + (f" ({sw['edct_for']} program)" if sw.get("edct_for") else "") + late,
+                   + (f" ({sw['edct_for']} program)" if sw.get("edct_for") else "") + late
+                   + {"tower": " · from the departure tower's system", "TBFM": " · from TBFM (metering)",
+                      "clearance": " · from the datalink clearance", "flight plan": " · from the refiled flight plan"
+                      }.get(sw.get("edct_src") or "", ""),
                    level="warn", leg=L, tag=f"edct-{L.get('id')}")
     if not sw.get("seen"):
         L.pop("swim", None)
