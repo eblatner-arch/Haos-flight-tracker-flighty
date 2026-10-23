@@ -918,6 +918,25 @@ def _swim_take(sw, ev):
         if arr_rwy.get("estimated") and (td.get("arr") or {}).get("runwayArrivalTime"):
             sw["tfdm_eta"], sw["tfdm_eta_at"] = _ts(arr_rwy["estimated"]), got
             sw["tfdm_eta_rep"] = _ts(ev.get("at")) or got   # when the tower system worked it out
+        # The tower system's takeoff estimate for a flight it holds for an EDCT is the start of the
+        # EDCT window (EDCT - 5 min) whenever that's later than the flight could otherwise go. It has
+        # the EDCT the airline has, slot swaps included, which the public FAA data doesn't: UA2619 PHX
+        # 23 Oct estimate 11:54 then 11:29 = United's 11:59 then 11:34 (FAA public: 12:10); UA1561 DEN
+        # 12:01 = United (FAA public 12:45); UA442, UA1117, UA597 the same as the EDCT. Only when the
+        # estimate is clearly later than the earliest possible takeoff: when they're equal, the
+        # estimate is just the queue (UA2763 in the BOS ground stop, UA2619 at 7:30).
+        d = td.get("dep") or {}
+        rw = d.get("runwayDepartureTime") or {}
+        est, ear = _ts(rw.get("estimated")), _ts(rw.get("earliest"))
+        rep = _ts(ev.get("at")) or got
+        if d.get("smpExemptionReason") == "EDCT" and est and ear and est > ear + 60 and est > time.time():
+            e = est + 300
+            gs = _gs_holding(ev.get("dep"), ev.get("arr"), time.time())
+            if (not gs or e >= gs["end"]) and (not sw.get("edct") or abs(e - sw["edct"]) >= 120) \
+                    and rep > (sw.get("edct_at") or 0):
+                sw["edct_prev"] = sw.get("edct")
+                sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_src"] = e, got, True, "tower"
+                sw["edct_for"] = sw.get("edct_for") or _iata(ev.get("arr"))
         return
     airline = _airline_src(ev)
     if ev.get("off") and not airline:
@@ -1102,7 +1121,8 @@ def swim_check(L, f, planned):
                         f"ground stop holds departures until {alerting.hhmm(ig['gs_end'], tza)}")
         if sw.get("edct_new"):
             prev = f" (was {alerting.hhmm(sw['edct_prev'], tza)})" if sw.get("edct_prev") else ""
-            who = {"TBFM": "TBFM (metering)", "flight plan": "Refiled flight plan", "clearance": "Datalink clearance"}.get(sw.get("edct_src"), "FAA")
+            who = {"TBFM": "TBFM (metering)", "flight plan": "Refiled flight plan", "clearance": "Datalink clearance",
+                   "tower": "Tower system (TFDM)"}.get(sw.get("edct_src"), "FAA")
             bits.append(f"{who}: EDCT {alerting.hhmm(sw['edct'], tza)}{prev}"
                         + (f" for {sw['edct_for']}" if sw.get("edct_for") else ""))
         if any(x.get("route") for x in fresh) and sw.get("route_changed", 0) > seen_at:

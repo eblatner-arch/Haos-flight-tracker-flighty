@@ -1548,7 +1548,7 @@
     const t = f.times, src = f.time_src || {}, tzA = leg.dep_ap.tz, tzB = leg.arr_ap.tz;
     const sw = f.swim || {};
     const edct = sw.edct && sw.edct.at && !(t.off && t.off.actual)
-      ? `<div class="ts-row"><span class="ts-l">EDCT</span><b class="ts-v amber">${hm(sw.edct.at, tzA)}</b><span class="ts-s">FAA${sw.edct.for ? ` · ${esc(sw.edct.for)} program` : ""}</span></div>` : "";
+      ? `<div class="ts-row"><span class="ts-l">EDCT</span><b class="ts-v amber">${hm(sw.edct.at, tzA)}</b><span class="ts-s">${({ TBFM: "TBFM", tower: "Tower (TFDM)", clearance: "Datalink", "flight plan": "Flight plan" })[sw.edct_src] || "FAA"}${sw.edct.for ? ` · ${esc(sw.edct.for)} program` : ""}</span></div>` : "";
     const rows = [["Gate out", "out", tzA], ["Takeoff", "off", tzA], ["Landing", "on", tzB], ["Gate in", "in", tzB]].map(([lbl, k, tz]) => {
       const x = t[k] || {}, kind = x.actual ? "Actual" : x.estimated ? "Estimate" : x.scheduled ? "Scheduled" : "";
       const v = x.actual || x.estimated || x.scheduled;
@@ -3227,7 +3227,7 @@
           sw.tbfm.mfx && `meter fix ${sw.tbfm.mfx}${T("sta_sfx", tzB) ? ` at ${T("sta_sfx", tzB)}` : T("eta_mfx", tzB) ? ` ~${T("eta_mfx", tzB)}` : ""}`,
           (sw.tbfm.trw || sw.tbfm.drw) && `runway ${(sw.tbfm.trw || sw.tbfm.drw).replace(/^\w+_/, "")}`,
           sw.tbfm.at && `updated ${ago(sw.tbfm.at)}`].filter(Boolean).join(" · "); })()].join("") : ""],
-      ["EDCT from", sw.edct_src === "TBFM" ? "TBFM (metering)" : sw.edct_src === "flight plan" ? "the refiled flight plan (a slot swap)" : sw.edct_src === "clearance" ? "the datalink clearance" : ""],
+      ["EDCT from", sw.edct_src === "TBFM" ? "TBFM (metering)" : sw.edct_src === "flight plan" ? "the refiled flight plan (a slot swap)" : sw.edct_src === "clearance" ? "the datalink clearance" : sw.edct_src === "tower" ? "the departure tower's system (its takeoff estimate + 5 min)" : ""],
       ["Clearance (datalink)", sw.pdc ? [sw.pdc.cleared_to && `cleared to ${sw.pdc.cleared_to}`, sw.pdc.departure && `via ${sw.pdc.departure}`,
         sw.pdc.altitude && (/^\d+$/.test(sw.pdc.altitude) ? `maintain ${sw.pdc.altitude}` : sw.pdc.altitude),
         sw.pdc.expect_alt ? `expect FL${sw.pdc.expect_alt}` : sw.pdc.fl && `FL${sw.pdc.fl}`, sw.pdc.dep_freq && `departure ${sw.pdc.dep_freq}`,

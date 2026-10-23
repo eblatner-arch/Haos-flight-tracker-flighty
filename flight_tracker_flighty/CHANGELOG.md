@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.25
+- EDCT from the departure tower's system (TFDM): when it holds a flight for an EDCT, its takeoff estimate is the start of the EDCT window (EDCT − 5 min) whenever that's later than the earliest the flight could go, and it has the airline's EDCT, slot swaps included, which the public FAA data doesn't. Checked against United's own EDCTs: UA2619 PHX 11:59 then 11:34 (FAA public 12:10), UA1561 DEN 12:01 (FAA public 12:45), UA442, UA1117 and UA597 equal. Used only when the estimate is clearly later than the earliest possible takeoff (equal means it's just the queue), not inside a ground stop holding the flight, and when it differs from what's shown by 2 min or more. "EDCT from" says "the departure tower's system".
+- The Times card's EDCT row names where the EDCT came from (TBFM, Tower, Datalink, Flight plan, FAA) instead of always "FAA".
+
 ## 4.31.24
 - FlightAware page checks follow the settings again. An update from FAA SWIM (no page load) set the next page check 20 s out, so the FAA's steady news for a flight (TBFM, the tower, programs re-sent every 15 min) meant a page load every couple of minutes. SWIM updates now leave the schedule alone; only a takeoff, landing or diversion still brings the next page check forward.
 
