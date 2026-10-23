@@ -2692,6 +2692,8 @@ def update_leg(browser, lid):
     first = None
     fast = lid in SWIM_FAST
     SWIM_FAST.discard(lid)
+    prev_next = L.get("next_check") or 0
+    ph_before = fa.phase(L.get("flight"), now) if L.get("flight") else None
     try:
         pre = PRESEED.pop(lid, None)
         if pre:
@@ -2848,8 +2850,15 @@ def update_leg(browser, lid):
     except Exception as e:
         log.error("%s: %s", L.get("display") or lid, e)
         L["error"] = str(e).splitlines()[0][:300]
-    L["next_check"] = now + (90 if source_is_aero(L) and watched(L, now) and not L.get("compared")
-                             else 20 if fast else poll_seconds(L, now))
+    if fast and L.get("flight") and fa.phase(L["flight"], now) == ph_before:
+        # a SWIM update (no page load) doesn't move the page-check schedule: before, it set the next
+        # page check 20 s out, so the FAA's steady news (TBFM, the tower, programs re-sent every 15 min)
+        # meant a FlightAware page load every couple of minutes whatever the settings said. A takeoff,
+        # landing or diversion still gets its page check right after (below).
+        L["next_check"] = max(prev_next, now + 20)
+    else:
+        L["next_check"] = now + (20 if fast else 90 if source_is_aero(L) and watched(L, now) and not L.get("compared")
+                                 else poll_seconds(L, now))
     if L.get("source") and L["source"] != "AeroAPI":
         L["compared"] = True
 
