@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.29
+- A flight you add for a date more than ~2 days out (past AeroAPI's flight data) gets its scheduled times from the airline's published timetable (AeroAPI /schedules, one query, within the monthly budget) instead of showing 12:00–12:00 until the regular lookups can see it. Tried when added and then twice a day until found; shows in the AeroAPI call log as "timetable".
+
 ## 4.31.28
 - EDCT alerts say where the EDCT came from when it isn't the FAA's program data (the departure tower's system, TBFM, the datalink clearance, the refiled flight plan).
 

@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
@@ -1543,6 +1543,8 @@ def add_manual(ident, dep, arr, date, kind="manual"):
             STATE["manual"].append({"ident": ident, "dep": dep, "arr": arr, "date": date, "added": time.time(),
                                     "kind": _kind({"kind": kind})})
     sync_extras()
+    # a date past AeroAPI's two-day flight data: its timetable times now, not midday
+    threading.Thread(target=lambda: future_schedules(time.time()), daemon=True, name="timetable").start()
     return lid
 
 
@@ -1759,6 +1761,65 @@ def shot_usage():
         return len(files), sum(os.path.getsize(p) for p in files)
     except Exception:
         return 0, 0
+
+
+def future_schedules(now):
+    """A flight you added for a date past AeroAPI's flight data (two days out) shows midday until the
+    tracker can look it up. The airline's published timetable (AeroAPI /schedules, one query) has its
+    scheduled times months ahead: fill them in, once, within the monthly budget."""
+    if not aero_on():
+        return
+    with LOCK:
+        todo = [dict(L) for L in STATE["legs"].values()
+                if L.get("extra") and L.get("date") and not L.get("flight") and not L.get("sched_known")
+                and now - (L.get("sched_tried") or 0) > 12 * HOUR and L.get("airline") and L.get("flight_no")]
+    for L in todo[:5]:
+        try:
+            d = datetime.strptime(L["date"], "%Y-%m-%d")
+        except ValueError:
+            continue
+        if not (now + 36 * HOUR < d.replace(tzinfo=timezone.utc).timestamp() < now + 360 * 86400):
+            continue   # near enough for the regular lookups, or too far for the timetable
+        cost = float(CFG.get("aeroapi_cost_per_query") or 0.005)
+        _, spent = aero_month(now)
+        if spent + cost > float(CFG.get("aeroapi_monthly_budget") or 0) + 1e-9:
+            return
+        nxt = (d + timedelta(days=1)).strftime("%Y-%m-%d")
+        dep_i, arr_i = airports.icao(L["dep"]), airports.icao(L["arr"])
+        rec = {"at": now, "leg": L.get("display"), "leg_id": L["id"], "reason": "timetable", "billed": True, "pages": 1}
+        found = None
+        try:
+            rows, pages = aeroapi.schedules(CFG["aeroapi_key"].strip(), L["airline"], L["flight_no"], dep_i or L["dep"],
+                                            arr_i or L["arr"], L["date"], nxt)
+            codes = lambda xs: {(c or "").upper() for c in xs}
+            for x in rows:
+                if not x.get("scheduled_out"):
+                    continue
+                if {L["dep"].upper(), (dep_i or "").upper()} & codes(x["origin"]) and \
+                        {L["arr"].upper(), (arr_i or "").upper()} & codes(x["destination"]) and \
+                        history.local_date(x["scheduled_out"], L["dep"]) == L["date"]:
+                    found = x
+                    break
+            rec.update(pages=pages, ok=True, found=bool(found))
+        except Exception as e:
+            msg = str(e).splitlines()[0][:200]
+            rec.update(ok=False, error=msg, billed="rejected" not in msg and "rate limit" not in msg and "schedules:" not in msg)
+        with LOCK:
+            STATE["aero_calls"] = [c for c in STATE["aero_calls"] if c["at"] > now - 40 * 86400] + [rec]
+            cur = STATE["legs"].get(L["id"])
+            if cur is None:
+                continue
+            cur["sched_tried"] = now
+            if found:
+                cur["sched_out"], cur["sched_known"] = found["scheduled_out"], True
+                cur["sched_in"] = found.get("scheduled_in") or cur.get("sched_in")
+                cur["sched_src"] = "airline timetable (AeroAPI)"
+                if found.get("aircraft_type"):
+                    cur["sched_type"] = found["aircraft_type"]
+                log.info("%s %s→%s: timetable %s", cur.get("display"), cur["dep"], cur["arr"],
+                         datetime.fromtimestamp(found["scheduled_out"], timezone.utc).strftime("%Y-%m-%d %H:%MZ"))
+        if found:
+            mark_dirty()
 
 
 def expire_manual(now):
@@ -3321,6 +3382,10 @@ def worker():
                 reload_schedule(force="all" in forced or "schedule" in forced)
                 check_schedule_stale(now)
                 expire_manual(now)
+                try:
+                    future_schedules(now)
+                except Exception as e:
+                    log.warning("Timetable lookup: %s", e)
                 clean_screenshots(now)
                 sync_extras()
                 last_sched = now

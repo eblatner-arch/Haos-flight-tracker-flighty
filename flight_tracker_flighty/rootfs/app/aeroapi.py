@@ -77,3 +77,33 @@ def query(key, ident, start, end):
     r.raise_for_status()
     data = r.json() or {}
     return [normalize(raw) for raw in data.get("flights") or []], max(1, int(data.get("num_pages") or 1))
+
+
+def schedules(key, airline, number, origin, destination, day_start, day_end):
+    """The airline's published timetable for one flight number on a date (AeroAPI /schedules, which
+    reaches months ahead, unlike /flights' two days). day_start/day_end are 'YYYY-MM-DD'.
+    Returns ([{ident, origin, destination, scheduled_out, scheduled_in, aircraft_type}], pages billed)."""
+    params = {"airline": airline, "flight_number": int(number), "max_pages": 1,
+              "include_codeshares": "false", "include_regional": "true"}
+    if origin:
+        params["origin"] = origin
+    if destination:
+        params["destination"] = destination
+    r = requests.get(f"{BASE}/schedules/{day_start}/{day_end}", headers={"x-apikey": key, "Accept": "application/json"},
+                     params=params, timeout=20)
+    if r.status_code in (401, 403):
+        raise RuntimeError("AeroAPI rejected the key (check aeroapi_key)")
+    if r.status_code == 429:
+        raise RuntimeError("AeroAPI rate limit hit; will retry later")
+    if r.status_code == 400:
+        raise RuntimeError("AeroAPI schedules: " + (r.text or "bad request")[:160])
+    r.raise_for_status()
+    data = r.json() or {}
+    out = []
+    for x in data.get("scheduled") or []:
+        out.append({"ident": x.get("ident_icao") or x.get("ident"),
+                    "origin": [x.get(k) for k in ("origin", "origin_icao", "origin_iata", "origin_lid") if x.get(k)],
+                    "destination": [x.get(k) for k in ("destination", "destination_icao", "destination_iata", "destination_lid") if x.get(k)],
+                    "scheduled_out": _ts(x.get("scheduled_out")), "scheduled_in": _ts(x.get("scheduled_in")),
+                    "aircraft_type": x.get("aircraft_type")})
+    return out, max(1, int(data.get("num_pages") or 1))
