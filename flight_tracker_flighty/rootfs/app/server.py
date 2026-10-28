@@ -3115,7 +3115,12 @@ def inbound_adsb(now):
                        seen=[{"src": f"{who if live else 'Transponder'} · inbound {inb.get('display_ident') or inb['ident']} {route}",
                               "tail": (seen or "").upper() or None,
                               "note": None if seen else (err or "not seen by FAA radar or ADS-B")}])
-            if seen and have and seen.upper() != have:
+            # a different airplane on the inbound than the page has: check the page now, once per new
+            # airplane (then every 20 min while they still differ). Before, it was every ADS-B check,
+            # so a page that kept the old tail meant a page load a minute (UA82 EWR-DEL, 27 Oct)
+            mm = cur.get("adsb_mismatch") or {}
+            if seen and have and seen.upper() != have and (mm.get("tail") != seen.upper() or now - (mm.get("at") or 0) > 20 * 60):
+                cur["adsb_mismatch"] = {"tail": seen.upper(), "at": now}
                 log.info("%s: inbound %s is %s on ADS-B, we had %s; checking now", L.get("display"), inb["ident"], seen, have)
                 REFRESH_Q.put(L["id"])
                 WAKE.set()

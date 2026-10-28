@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.31
+- When ADS-B shows a different airplane on your inbound than the flight's page has, the page is checked once for that airplane (then every 20 min while they still differ), not after every ADS-B check: a page that kept the old tail meant a FlightAware page load about once a minute.
+
 ## 4.31.30
 - Lighter FlightAware page checks: the browser no longer fetches pictures, video, fonts or the page's ad/analytics scripts (most of the page's work, none of it needed for the flight data), and once the flight data is read the page closes at once instead of running on 2.5 s for a screenshot. A screenshot is still taken when the page has no flight data (for the Gemini fallback), so "Latest Screenshot" only appears then.
 
