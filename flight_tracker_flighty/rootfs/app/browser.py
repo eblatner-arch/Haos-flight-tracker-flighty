@@ -119,9 +119,36 @@ class Browser:
             self.profile_dir,
             headless=False,  # on Xvfb, so the noVNC viewer can show it
             viewport={"width": 1366, "height": 900},
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-gpu",
+                  "--mute-audio", "--disable-background-networking", "--disable-extensions"],
         )
+        # What the tracker reads is the page's flight data (trackpollBootstrap, set by the page itself);
+        # pictures, video, fonts and the ad/analytics scripts are most of the work the page does and
+        # none of it is needed: they're never fetched. The light page is what the screenshot fallback
+        # reads too (text, which is all Gemini needs).
+        self._ctx.route("**/*", self._filter)
         log.info("Browser started")
+
+    _BLOCK_TYPES = {"image", "media", "font"}
+    _BLOCK_HOSTS = re.compile(
+        r"(doubleclick|googlesyndication|googletagservices|googletagmanager|google-analytics|googleadservices|"
+        r"adservice\.google|amazon-adsystem|adnxs|criteo|taboola|outbrain|facebook|fbcdn|scorecardresearch|"
+        r"quantserve|quantcount|pubmatic|rubiconproject|openx|casalemedia|moatads|chartbeat|hotjar|"
+        r"adsrvr|bidswitch|33across|sharethrough|teads|yieldmo|indexww|lijit|sovrn|media\.net|"
+        r"smartadserver|onetrust|cookielaw|newrelic|nr-data|segment\.(io|com)|optimizely|tiqcdn|"
+        r"adsafeprotected|doubleverify|imasdk|prebid|aniview|connatix|primis|ex\.co|playwire)", re.I)
+
+    def _filter(self, route):
+        try:
+            req = route.request
+            if req.resource_type in self._BLOCK_TYPES or self._BLOCK_HOSTS.search(req.url.split("/")[2] if "//" in req.url else ""):
+                return route.abort()
+            return route.continue_()
+        except Exception:
+            try:
+                route.continue_()
+            except Exception:
+                pass
 
     def reset(self):
         try:
@@ -151,6 +178,10 @@ class Browser:
                             boot = json.loads(raw)
                             break
                         page.wait_for_timeout(1000)
+                    if boot:
+                        # the flight data is all that's read: close the page now instead of letting it
+                        # run on for a screenshot nobody needs
+                        return boot, None
                     page.wait_for_timeout(2500)
                     path = os.path.join(self.shot_dir, f"{shot_name}.png")
                     try:

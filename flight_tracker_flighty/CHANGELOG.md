@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.30
+- Lighter FlightAware page checks: the browser no longer fetches pictures, video, fonts or the page's ad/analytics scripts (most of the page's work, none of it needed for the flight data), and once the flight data is read the page closes at once instead of running on 2.5 s for a screenshot. A screenshot is still taken when the page has no flight data (for the Gemini fallback), so "Latest Screenshot" only appears then.
+
 ## 4.31.29
 - A flight you add for a date more than ~2 days out (past AeroAPI's flight data) gets its scheduled times from the airline's published timetable (AeroAPI /schedules, one query, within the monthly budget) instead of showing 12:00–12:00 until the regular lookups can see it. Tried when added and then twice a day until found; shows in the AeroAPI call log as "timetable".
 
