@@ -2223,6 +2223,63 @@ def update_rotation(browser, L, now):
         rot.append(nxt)
         cur = nxt
     L["rotation"] = rot
+    try:
+        _rotation_by_tail(browser, L, now)
+    except Exception as e:
+        log.info("%s rotation by tail: %s", L.get("display"), e)
+
+
+def _same_ap(a, b):
+    a, b = a or {}, b or {}
+    return bool({(a.get("iata") or "").upper(), (a.get("icao") or "").upper()[-3:]} - {""} &
+                {(b.get("iata") or "").upper(), (b.get("icao") or "").upper()[-3:]} - {""})
+
+
+def _rotation_by_tail(browser, L, now):
+    """FlightAware links each flight to the one before it, and after an airplane swap a link can
+    still point at the old airplane's flight (UA1892 EWR-AUS still showed UA1395 PBI-EWR before it,
+    United had UA1399, 6 Nov). When a leg of your airplane links to a leg flown by another airplane,
+    the rest of the day is taken from your airplane's own flight list on FlightAware (its
+    registration page): its flight landing where the later one leaves, before it leaves."""
+    tail = ((L.get("flight") or {}).get("tail") or "").upper()
+    rot = L.get("rotation") or []
+    if not tail or len(rot) < 2:
+        return
+    tl = lambda h: ((h or {}).get("tail") or "").upper()
+    k = next((i for i in range(1, len(rot)) if rot[i] and tl(rot[i]) and tl(rot[i]) != tail and tl(rot[i - 1]) == tail), None)
+    if k is None:
+        return
+    cache = L.get("rot_tail") or {}
+    if cache.get("tail") == tail and now - (cache.get("at") or 0) < ROTATION_REFRESH and cache.get("legs") is not None:
+        acts = cache["legs"]
+    else:
+        boot, _ = load(browser, fa.ident_url(tail), f"{L['id']}-tail", L, f"airplane {tail}'s flights")
+        c, act = fa.flights_from_bootstrap(boot)
+        acts = [x for x in ([c] if c else []) + act if x and x.get("fa_id")]
+        for x in acts:
+            _fill_airports(x)
+        L["rot_tail"] = {"tail": tail, "at": now, "legs": acts}
+    out, later = rot[:k], rot[k - 1]
+    while len(out) < ROTATION_MAX:
+        t_out = fa.best_time(later["times"], "out") or fa.best_time(later["times"], "off")
+        if not t_out:
+            break
+        cands = [x for x in acts if x.get("fa_id") != later.get("fa_id") and _same_ap(x.get("destination"), later.get("origin"))
+                 and (fa.best_time(x["times"], "in") or fa.best_time(x["times"], "on") or 0) <= t_out + 1800
+                 and (fa.best_time(x["times"], "in") or fa.best_time(x["times"], "on") or 0) > t_out - 36 * HOUR]
+        if not cands:
+            break
+        prev = max(cands, key=lambda x: fa.best_time(x["times"], "in") or fa.best_time(x["times"], "on") or 0)
+        prev = dict(prev, fetched=now)
+        out.append(prev)
+        if fa.phase(prev, now) in DONE + ("taxi_out", "airborne", "landed"):
+            break
+        later = prev
+    if len(out) > k:
+        log.info("%s: %s's leg before %s is %s by its own flight list (FlightAware linked %s)", L.get("display"), tail,
+                 rot[k - 1].get("display_ident") or rot[k - 1].get("ident"), out[k].get("display_ident") or out[k].get("ident"),
+                 rot[k].get("display_ident") or rot[k].get("ident"))
+        L["rotation"] = out
 
 
 def live_src(live):
@@ -2421,6 +2478,16 @@ def walk_chain(browser, L, now):
         name = cur.get("display_ident") or cur.get("ident") or "?"
         hops.append({"ident": name, "route": route, "phase": ph,
                      "out": fa.best_time(cur["times"], "out"), "in": fa.best_time(cur["times"], "in")})
+        if found is None and ph == "scheduled" and i > 0:
+            # an earlier leg's datalink clearance names the airplane ~30-60 min before it leaves,
+            # hours before your own flight (the inbound's own is handled with it, below)
+            pt = leg_pdc_tail(cur)
+            if pt:
+                if L.get("chain_pdc_logged") != f"{name}:{pt['tail']}":   # once per airplane, not every check
+                    L["chain_pdc_logged"] = f"{name}:{pt['tail']}"
+                    saw(L, f"FAA datalink clearance · {name} {route}", pt["tail"], None)
+                found = {"tail": pt["tail"], "kind": "chain", "at": pt["at"], "root": (L.get("flight") or {}).get("inbound_fa_id"),
+                         "source": f"{name} {route} datalink clearance"}
         if found is None and ph in ("taxi_out", "airborne", "landed") and cur.get("ident"):
             try:
                 live = pick_live(cur["ident"], cur)
@@ -2435,6 +2502,25 @@ def walk_chain(browser, L, now):
                          "source": f"{'inbound ' if i == 0 else ''}{name} {route} in flight"}
     L["chain"] = hops
     return found
+
+
+def leg_pdc_tail(h):
+    """The airplane named in a flight's datalink clearance at its departure airport, if one came
+    for this departure (any leg of your airplane's day)."""
+    if not h or not h.get("ident"):
+        return None
+    org = _iata((h.get("origin") or {}).get("iata") or (h.get("origin") or {}).get("icao"))
+    so = fa.best_time(h.get("times") or {}, "out") or 0
+    best = None
+    for ev in swim.events(h["ident"]):
+        pd = ev.get("pdc") or {}
+        tail = (pd.get("tail") or "").upper().strip()
+        if not tail or _iata(ev.get("dep")) != org:
+            continue
+        issued = _ts(pd.get("at")) or ev.get("got") or 0
+        if so and so - 4 * HOUR <= issued <= so + 2 * HOUR and (not best or issued >= best["at"]):
+            best = {"tail": ("N" + tail) if tail[0].isdigit() else tail, "at": issued}
+    return best
 
 
 def inbound_pdc(L, f):

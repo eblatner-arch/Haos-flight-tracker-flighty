@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.32
+- Airplane's day (rotation): FlightAware links each flight to the one before it, and after an airplane swap a link can still point at the old airplane's flight (UA1892 EWR-AUS kept UA1395 PBI-EWR before it; United had UA1399, 6 Nov). When a leg of your airplane links to a leg flown by another airplane, the rest of the day comes from your airplane's own flight list on FlightAware (its registration page): its flight landing where the later one leaves, before it leaves. One extra page load, reused for 10 min.
+- Airplane swaps seen sooner: the datalink clearance of any earlier leg of your airplane's day (not just your inbound's) names the airplane, ~30-60 min before that leg leaves, hours before your own flight.
+
 ## 4.31.31
 - When ADS-B shows a different airplane on your inbound than the flight's page has, the page is checked once for that airplane (then every 20 min while they still differ), not after every ADS-B check: a page that kept the old tail meant a FlightAware page load about once a minute.
 
