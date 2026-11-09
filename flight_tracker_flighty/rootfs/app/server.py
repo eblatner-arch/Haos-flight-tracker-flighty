@@ -2216,7 +2216,10 @@ def update_rotation(browser, L, now):
             break  # this leg has arrived, or the airplane is on it now: nothing earlier matters
         prev_id = cur["inbound_fa_id"]
         cached = old.get(prev_id)
-        if cached and (final(cached, now) or now - (cached.get("fetched") or 0) < ROTATION_REFRESH):
+        mine = own_flight_copy(prev_id, L, now)
+        if mine:
+            nxt = dict(mine, fetched=now, track=fa.thin(mine.get("track") or [], 300), track_v=2)   # your own flight: no page load
+        elif cached and (final(cached, now) or now - (cached.get("fetched") or 0) < ROTATION_REFRESH):
             nxt = cached
         else:
             try:
@@ -2569,6 +2572,23 @@ def pdc_tail(L, f):
     if not so or not (so - 4 * HOUR <= issued <= so + 2 * HOUR):
         return None
     return {"tail": tail, "kind": "pdc", "at": issued, "source": "FAA datalink clearance"}
+
+
+def own_flight_copy(fa_id, L, now, fresh=20 * 60):
+    """One of your own tracked flights by its FlightAware id, if it was checked recently: a copy of
+    its flight, to stand in for a page load of the same flight (your inbound or an earlier leg of
+    your airplane's day on a turn)."""
+    if not fa_id:
+        return None
+    with LOCK:
+        for other in STATE["legs"].values():
+            if other is L or other.get("id") == L.get("id"):
+                continue
+            fl = other.get("flight") or {}
+            ofa = other.get("fa_id") or fl.get("fa_id")
+            if ofa and fa.same_flight(ofa, fa_id) and fl and now - (other.get("updated") or 0) < fresh:
+                return json.loads(json.dumps(fl))
+    return None
 
 
 def own_inbound(L, f):
@@ -3008,7 +3028,13 @@ def update_leg(browser, lid):
         if f and not f.get("tail") and ti.get("tail") and ti.get("kind") in ("own", "chain") \
                 and (ti.get("kind") == "own" or fa.same_flight(ti.get("root"), f.get("inbound_fa_id"))):
             f["tail"], f["tail_source"] = ti["tail"], ti["source"]
-        if f.get("inbound_fa_id") and ph == "scheduled" and inbound_needs_check(L, f):
+        mine_in = own_flight_copy(f.get("inbound_fa_id"), L, now) if f.get("inbound_fa_id") and ph == "scheduled" else None
+        if mine_in:
+            # the inbound is one of your own flights (a turn): its data is already here, fresh from its
+            # own checks, so no second FlightAware page for the same flight
+            mine_in["checked_for_tail"] = f.get("tail")
+            L["inbound"] = mine_in
+        elif f.get("inbound_fa_id") and ph == "scheduled" and inbound_needs_check(L, f):
             try:
                 boot, _ = load(browser, fa.id_url(f["inbound_fa_id"]), lid + "-inbound", L, "inbound aircraft")
                 inb, _ = fa.flights_from_bootstrap(boot)

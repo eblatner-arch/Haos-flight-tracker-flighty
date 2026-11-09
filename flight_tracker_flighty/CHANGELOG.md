@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.34
+- Turns: when your inbound (or an earlier leg of your airplane's day) is one of your own tracked flights, its data comes from that flight's own checks (if checked in the last 20 min) instead of loading the same FlightAware page a second time.
+
 ## 4.31.33
 - Landing estimate in the air: the arrival tower's estimate is checked against the FAA radar's and TBFM's. When it's more than 15 min from them and the flight is still over 30 min out, theirs is used (UA2652 SMF-ORD 9 Nov: ORD tower 16:43-16:51 while TBFM 15:30, FAA radar 15:31, FlightAware 15:24 and United 15:33). Close in, the tower's still wins. TBFM's runway estimate is a fallback when neither of the others is fresh. A tower estimate more than 12 h out (another day's flight) is never used.
 
