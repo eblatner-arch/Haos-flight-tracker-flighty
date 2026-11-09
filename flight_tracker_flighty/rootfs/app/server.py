@@ -1290,14 +1290,26 @@ def swim_overlay(L, f, now):
     fresh_tfdm = (sw.get("tfdm_eta") and now - (sw.get("tfdm_eta_at") or 0) < 15 * 60
                   and (sw.get("tfdm_eta_rep") or sw.get("tfdm_eta_at") or 0) >= off_a - 60)
     fresh_faa = sw.get("eta") and now - (sw.get("eta_at") or 0) < 30 * 60 and (sw.get("eta_at") or 0) >= off_a - 60
+    tb = sw.get("tbfm") or {}
+    tb_eta = _ts(tb.get("eta_rwy")) if now - (tb.get("at") or 0) < 15 * 60 else None
+    fresh_tb = bool(tb_eta) and (tb.get("at") or 0) >= off_a - 60
+    # The arrival tower's estimate is the best one close in (it has the runway and the sequence), but
+    # far out it can be an hour off: UA2652 SMF-ORD 9 Nov, 3 h from landing, ORD tower 16:43-16:51
+    # while TBFM (ORD metering) 15:30, FAA radar 15:31, FlightAware 15:24 and United 15:33 agreed.
+    # When it's more than 15 min from the others and over 30 min out, theirs is used.
+    if fresh_tfdm:
+        others = [x for x in ((tb_eta if fresh_tb else None), (sw.get("eta") if fresh_faa else None)) if x]
+        if sw["tfdm_eta"] > now + 12 * HOUR or (others and min(abs(sw["tfdm_eta"] - x) for x in others) > 15 * 60
+                                                 and min(others) - now > 30 * 60):
+            fresh_tfdm = False
     eta_src = None
-    if t["off"].get("actual") and not t["on"].get("actual") and (fresh_tfdm or fresh_faa):
-        eta, eta_src = (sw["tfdm_eta"], "tower") if fresh_tfdm else (sw["eta"], "FAA")
+    if t["off"].get("actual") and not t["on"].get("actual") and (fresh_tfdm or fresh_faa or fresh_tb):
+        eta, eta_src = (sw["tfdm_eta"], "tower") if fresh_tfdm else (sw["eta"], "FAA") if fresh_faa else (tb_eta, "TBFM")
         on_e, in_e = t["on"].get("estimated"), t["in"].get("estimated")
         taxi = ((td_arr.get("arrivalTaxiTime") or {}).get("totalEstimatedTaxiInTime") or 0) * 60
         gap = (in_e - on_e) if on_e and in_e else taxi or 8 * 60
         t["on"]["estimated"] = eta
-        who = f"{L.get('arr')} tower" if eta_src == "tower" else "FAA radar"
+        who = f"{L.get('arr')} tower" if eta_src == "tower" else f"{L.get('arr')} metering (TBFM)" if eta_src == "TBFM" else "FAA radar"
         src["on"]["estimated"] = who
         if not t["in"].get("actual"):
             new_in = eta + max(2 * 60, min(45 * 60, gap))

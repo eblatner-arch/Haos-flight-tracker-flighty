@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.33
+- Landing estimate in the air: the arrival tower's estimate is checked against the FAA radar's and TBFM's. When it's more than 15 min from them and the flight is still over 30 min out, theirs is used (UA2652 SMF-ORD 9 Nov: ORD tower 16:43-16:51 while TBFM 15:30, FAA radar 15:31, FlightAware 15:24 and United 15:33). Close in, the tower's still wins. TBFM's runway estimate is a fallback when neither of the others is fresh. A tower estimate more than 12 h out (another day's flight) is never used.
+
 ## 4.31.32
 - Airplane's day (rotation): FlightAware links each flight to the one before it, and after an airplane swap a link can still point at the old airplane's flight (UA1892 EWR-AUS kept UA1395 PBI-EWR before it; United had UA1399, 6 Nov). When a leg of your airplane links to a leg flown by another airplane, the rest of the day comes from your airplane's own flight list on FlightAware (its registration page): its flight landing where the later one leaves, before it leaves. One extra page load, reused for 10 min.
 - Airplane swaps seen sooner: the datalink clearance of any earlier leg of your airplane's day (not just your inbound's) names the airplane, ~30-60 min before that leg leaves, hours before your own flight.
