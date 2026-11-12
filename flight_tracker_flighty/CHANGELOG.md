@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.36
+- TBFM no longer puts a stale EDCT back after an add-on update. 4.31.35 only knew when TBFM's EDCT last changed if it saw the change itself; a repeat of a value held from before the update counted as new (UA2629 12 Nov: 19:15 over the FAA's 19:33). Such a value now counts as old.
+- If TBFM's EDCT is showing and the FAA has revised it since TBFM last changed, the next TBFM message puts the FAA's back.
+
 ## 4.31.35
 - ATC callsign match: no longer picks another flight when yours is late. It only looks for a different callsign when the FAA has nothing under your flight number between your two airports today (EDCT list or any of its messages), instead of judging by the first planned departure time. UA2629 MCO-EWR 12 Nov was filed at 21:10Z, more than an hour off its schedule, so UA776 MCO-EWR (23:15Z) was taken for it and its EDCT (21:45) shown. A wrong match already made is dropped once the FAA's data under your own number shows up.
 - TBFM vs FAA EDCT: a TBFM EDCT only replaces the FAA's when TBFM's own value changed after the FAA's arrived. TBFM re-sends the same EDCT every few minutes, and each repeat was overriding the FAA's newer program revision (UA2629: TBFM 00:15Z all afternoon vs the FAA's 21:27Z revision 01:21Z, flipping back and forth).

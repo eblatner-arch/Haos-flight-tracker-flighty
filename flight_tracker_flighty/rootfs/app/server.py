@@ -859,14 +859,20 @@ def _hhmm_near(hhmm, ref):
     return min((d - 86400, d, d + 86400), key=lambda x: abs(x - ref))
 
 
-def _tfms_edct(acid, dep):
-    """The FAA's latest EDCT for this flight from the delay-program data (kept for every flight)."""
+def _tfms_edct_rec(acid, dep):
+    """The FAA's latest EDCT record for this flight from the delay-program data (kept for every flight)."""
     best = None
     for x in swim.EDCTS.get((acid or "").upper(), []):
         if dep and _iata(x.get("dep")) != _iata(dep):
             continue
         if not best or (x.get("got") or 0) > (best.get("got") or 0):
             best = x
+    return best
+
+
+def _tfms_edct(acid, dep):
+    """The FAA's latest EDCT for this flight from the delay-program data (kept for every flight)."""
+    best = _tfms_edct_rec(acid, dep)
     return _ts(best.get("edct")) if best else None
 
 
@@ -895,8 +901,15 @@ def _swim_take(sw, ev):
         # when TBFM's EDCT last changed: it re-sends the same one every few minutes, and a repeat isn't
         # newer news than an FAA change made since (UA2629 MCO-EWR 12 Nov: TBFM 00:15Z all afternoon,
         # the FAA's 21:27Z program revision 01:21Z; each repeat put 00:15 back)
-        if e and e != _ts((sw.get("tbfm") or {}).get("etm")):
+        prev_etm = _ts((sw.get("tbfm") or {}).get("etm"))
+        if e and e != prev_etm:
             sw["tbfm_etm_since"] = got
+        elif e and sw.get("tbfm_etm_since") is None:
+            # held from before this was tracked (an add-on update mid-flight): its age is unknown, so
+            # it isn't newer than anything (UA2629 12 Nov, 4.31.35 installed 16:40: 00:15Z went back over 00:33Z)
+            sw["tbfm_etm_since"] = 0
+        since = sw.get("tbfm_etm_since")
+        since = got if since is None else since
         sw["tbfm"] = {**(sw.get("tbfm") or {}), **(ev.get("tbfm") or {}), "at": got}
         # a ground stop holds this departure until its end: a TBFM EDCT before that can't be flown.
         # TBFM keeps repeating the program slot it had (UA2763 EWR-BOS 21 Oct: the GDP slot 19:40, for
@@ -910,7 +923,16 @@ def _swim_take(sw, ev):
                 sw["edct_prev"] = sw["edct"]
                 sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_tfms"] = f, got, True, True
                 sw.pop("edct_src", None)
-        if e and e != sw.get("edct") and (sw.get("tbfm_etm_since") or got) > (sw.get("edct_at") or 0):
+        if sw.get("edct_src") == "TBFM" and e and e == sw.get("edct"):
+            # TBFM's EDCT is showing, but the FAA has changed it since TBFM last did: the FAA's is the newer
+            f = _tfms_edct_rec(ev.get("acid"), ev.get("dep"))
+            fe = _ts(f.get("edct")) if f else None
+            if fe and fe != e and (f.get("got") or 0) > since:
+                sw["edct_prev"] = sw["edct"]
+                sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_tfms"] = fe, f.get("got") or got, True, True
+                sw.pop("edct_src", None)
+                return
+        if e and e != sw.get("edct") and since > (sw.get("edct_at") or 0):
             if gs and e < gs["end"]:
                 if sw.get("tbfm_ignored", {}).get("edct") != e:
                     sw["tbfm_ignored"] = {"edct": e, "at": got, "gs_end": gs["end"], "airport": gs.get("airport"), "new": True}
