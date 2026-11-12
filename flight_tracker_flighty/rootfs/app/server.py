@@ -686,6 +686,10 @@ def swim_watch(now):
     with LOCK:
         for L in STATE["legs"].values():
             if L.get("ident") and watched(L, now):
+                if L.get("atc_found") and own_callsign_known(L):
+                    # the FAA has it under its own number after all: the match was another flight
+                    log.info("%s: dropping %s, the FAA has it as %s", L.get("display"), L["atc_found"], L.get("ident"))
+                    L.pop("atc_found", None)
                 if not L.get("atc_found") and not (L.get("flight") or {}).get("atc_ident"):
                     try:
                         cs = find_atc_callsign(L)
@@ -780,6 +784,23 @@ def swim_idents(L):
     return out
 
 
+def own_callsign_known(L):
+    """Does the FAA have this flight under its own number? Its EDCT list has the flight number between
+    the same two airports today, or its own messages (TBFM, the towers, flight plans) name these
+    airports. A late flight's FAA first departure can be hours off the schedule (UA2629 MCO-EWR 12 Nov
+    was filed at 21:10Z), so the time isn't what decides it."""
+    own = (L.get("ident") or "").upper()
+    dep, arr, so = _iata(L.get("dep")), _iata(L.get("arr")), L.get("sched_out") or 0
+    for e in swim.EDCTS.get(own, []):
+        if _iata(e.get("dep")) == dep and (not e.get("arr") or _iata(e.get("arr")) == arr) \
+                and abs((_ts(e.get("igtd")) or so) - so) <= 12 * HOUR:
+            return True
+    for e in swim.events(own):
+        if _iata(e.get("dep")) == dep and _iata(e.get("arr")) == arr:
+            return True
+    return False
+
+
 def find_atc_callsign(L):
     """A flight in a delay program under another callsign: the FAA's EDCT list (kept for every flight)
     has the same airline, the same two airports and the same first planned departure, under a callsign
@@ -790,7 +811,7 @@ def find_atc_callsign(L):
     if not m or not so:
         return None
     dep, arr = _iata(L.get("dep")), _iata(L.get("arr"))
-    if any(_iata(e.get("dep")) == dep and abs((_ts(e.get("igtd")) or 0) - so) <= 3600 for e in swim.EDCTS.get(own, [])):
+    if own_callsign_known(L):
         return None   # the FAA has it under its own number
     hits = set()
     with swim.LOCK:
@@ -870,8 +891,13 @@ def _swim_take(sw, ev):
     if ev.get("src") == "TBFM":
         # metering: keep what TBFM says about the flight (release time, runway times, meter fix),
         # and its EDCT when it's newer than the one held (TBFM carries the current one, slot swaps included)
-        sw["tbfm"] = {**(sw.get("tbfm") or {}), **(ev.get("tbfm") or {}), "at": got}
         e = _ts(ev.get("edct"))
+        # when TBFM's EDCT last changed: it re-sends the same one every few minutes, and a repeat isn't
+        # newer news than an FAA change made since (UA2629 MCO-EWR 12 Nov: TBFM 00:15Z all afternoon,
+        # the FAA's 21:27Z program revision 01:21Z; each repeat put 00:15 back)
+        if e and e != _ts((sw.get("tbfm") or {}).get("etm")):
+            sw["tbfm_etm_since"] = got
+        sw["tbfm"] = {**(sw.get("tbfm") or {}), **(ev.get("tbfm") or {}), "at": got}
         # a ground stop holds this departure until its end: a TBFM EDCT before that can't be flown.
         # TBFM keeps repeating the program slot it had (UA2763 EWR-BOS 21 Oct: the GDP slot 19:40, for
         # half an hour and past that time, after the BOS ground stop had moved it to 20:01 then 21:01)
@@ -884,7 +910,7 @@ def _swim_take(sw, ev):
                 sw["edct_prev"] = sw["edct"]
                 sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_tfms"] = f, got, True, True
                 sw.pop("edct_src", None)
-        if e and e != sw.get("edct") and got > (sw.get("edct_at") or 0):
+        if e and e != sw.get("edct") and (sw.get("tbfm_etm_since") or got) > (sw.get("edct_at") or 0):
             if gs and e < gs["end"]:
                 if sw.get("tbfm_ignored", {}).get("edct") != e:
                     sw["tbfm_ignored"] = {"edct": e, "at": got, "gs_end": gs["end"], "airport": gs.get("airport"), "new": True}

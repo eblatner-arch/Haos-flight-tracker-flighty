@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.35
+- ATC callsign match: no longer picks another flight when yours is late. It only looks for a different callsign when the FAA has nothing under your flight number between your two airports today (EDCT list or any of its messages), instead of judging by the first planned departure time. UA2629 MCO-EWR 12 Nov was filed at 21:10Z, more than an hour off its schedule, so UA776 MCO-EWR (23:15Z) was taken for it and its EDCT (21:45) shown. A wrong match already made is dropped once the FAA's data under your own number shows up.
+- TBFM vs FAA EDCT: a TBFM EDCT only replaces the FAA's when TBFM's own value changed after the FAA's arrived. TBFM re-sends the same EDCT every few minutes, and each repeat was overriding the FAA's newer program revision (UA2629: TBFM 00:15Z all afternoon vs the FAA's 21:27Z revision 01:21Z, flipping back and forth).
+
 ## 4.31.34
 - Turns: when your inbound (or an earlier leg of your airplane's day) is one of your own tracked flights, its data comes from that flight's own checks (if checked in the last 20 min) instead of loading the same FlightAware page a second time.
 
