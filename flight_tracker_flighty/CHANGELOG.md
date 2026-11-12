@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.31.37
+- Datalink clearance EDCT: ignored when it's one the FAA assigned earlier and has since changed. A DCL that reached us late carried the old EDCT and went over the FAA's newer one (UA2629 MCO-EWR 12 Nov). A clearance EDCT the FAA never had (an airline slot swap) still applies.
+- An old clearance EDCT already showing goes back to the FAA's on the next SWIM message for the flight.
+
 ## 4.31.36
 - TBFM no longer puts a stale EDCT back after an add-on update. 4.31.35 only knew when TBFM's EDCT last changed if it saw the change itself; a repeat of a value held from before the update counted as new (UA2629 12 Nov: 19:15 over the FAA's 19:33). Such a value now counts as old.
 - If TBFM's EDCT is showing and the FAA has revised it since TBFM last changed, the next TBFM message puts the FAA's back.

@@ -870,6 +870,17 @@ def _tfms_edct_rec(acid, dep):
     return best
 
 
+def _stale_clearance_edct(ev, e):
+    """True when a clearance's EDCT is one the FAA assigned earlier and has since replaced."""
+    f = _tfms_edct_rec(ev.get("acid"), ev.get("dep"))
+    if not f:
+        return False
+    cur = _ts(f.get("edct"))
+    if not cur or cur == e:
+        return False
+    return any(_ts(h.get("edct")) == e for h in f.get("history") or [])
+
+
 def _tfms_edct(acid, dep):
     """The FAA's latest EDCT for this flight from the delay-program data (kept for every flight)."""
     best = _tfms_edct_rec(acid, dep)
@@ -894,6 +905,13 @@ def _gs_holding(dep, arr, now):
 def _swim_take(sw, ev):
     """Fold one event into the leg's saved SWIM facts (newest wins, field by field)."""
     got = ev.get("got") or time.time()
+    if sw.get("edct_src") == "clearance" and sw.get("edct") and ev.get("acid") and _stale_clearance_edct(ev, sw["edct"]):
+        # a late clearance's old EDCT already showing (taken before this rule): back to the FAA's
+        f = _tfms_edct(ev.get("acid"), ev.get("dep"))
+        sw["clearance_ignored"] = {"edct": sw["edct"], "at": got, "faa": f}
+        sw["edct_prev"] = sw["edct"]
+        sw["edct"], sw["edct_at"], sw["edct_new"], sw["edct_tfms"] = f, got, True, True
+        sw.pop("edct_src", None)
     if ev.get("src") == "TBFM":
         # metering: keep what TBFM says about the flight (release time, runway times, meter fix),
         # and its EDCT when it's newer than the one held (TBFM carries the current one, slot swaps included)
@@ -971,6 +989,12 @@ def _swim_take(sw, ev):
             sw["pdc"] = {**(sw.get("pdc") or {}), **ev["pdc"], "got": got, "v": 3}
             e = _hhmm_near(ev["pdc"].get("edct"), _ts(ev["pdc"].get("at")) or got)
             newer = (_ts(ev["pdc"].get("at")) or got) > (sw.get("edct_at") or 0)
+            if e and e != sw.get("edct") and _stale_clearance_edct(ev, e):
+                # an EDCT the FAA had earlier and has since changed: the clearance was built (or reached
+                # us) late (UA2629 MCO-EWR 12 Nov: the DCL's old EDCT went over the FAA's newer one)
+                if (sw.get("clearance_ignored") or {}).get("edct") != e:
+                    sw["clearance_ignored"] = {"edct": e, "at": got, "faa": sw.get("edct")}
+                e = None
             if e and e != sw.get("edct") and (not sw.get("edct_tfms") or newer):
                 # the EDCT printed in the clearance, when the FAA's own assignment didn't reach us
                 sw["edct_prev"] = sw.get("edct")
