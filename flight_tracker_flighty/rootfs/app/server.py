@@ -844,8 +844,39 @@ def swim_events_for(L, f):
         # it to be well before this leg's scheduled time.
         if t and so and not (so - 18 * HOUR <= t <= so + 6 * HOUR):
             continue
+        if not t and so and _event_latest(ev) < so - 4 * HOUR:
+            # no igtd (TBFM, surface radar, clearances): judged by the times it carries. The same flight
+            # number and route the day before, running late past midnight, isn't this one (UA2662
+            # MCO-EWR 12 Nov, EDCT 23:53, landed 01:35, showed on the 13 Nov 19:34 leg)
+            continue
         mine.append(ev)
     return mine
+
+
+_ISO_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d")
+
+
+def _event_latest(ev):
+    """The latest flight time a SWIM message carries (EDCT, runway, surface or clearance times),
+    else when it came in."""
+    best = 0
+    def walk(x, depth=0):
+        nonlocal best
+        if depth > 5:
+            return
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k not in ("got",):
+                    walk(v, depth + 1)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, depth + 1)
+        elif isinstance(x, str) and _ISO_RE.match(x):
+            t = _ts(x)
+            if t and t > best:
+                best = t
+    walk({k: v for k, v in ev.items() if k not in ("got", "igtd")})
+    return best or ev.get("got") or 0
 
 
 def _hhmm_near(hhmm, ref):
@@ -865,6 +896,8 @@ def _tfms_edct_rec(acid, dep):
     for x in swim.EDCTS.get((acid or "").upper(), []):
         if dep and _iata(x.get("dep")) != _iata(dep):
             continue
+        if (_ts(x.get("edct")) or 0) < time.time() - 6 * HOUR:
+            continue   # an earlier day's flight with this number
         if not best or (x.get("got") or 0) > (best.get("got") or 0):
             best = x
     return best
@@ -1114,6 +1147,14 @@ def swim_check(L, f, planned):
         return out
     mine = swim_events_for(L, f)
     sw = L.setdefault("swim", {})
+    so = (f.get("times") or {}).get("out", {}).get("scheduled") or L.get("sched_out") or 0
+    old = [t for t in ((sw.get("surf_arr") or {}).get("landed"), (sw.get("surf_dep") or {}).get("took_off"),
+                       _ts(sw.get("on")) if isinstance(sw.get("on"), str) else sw.get("on"), sw.get("edct")) if t]
+    if so and old and min(old) < so - 4 * HOUR:
+        # facts from the day before's flight with this number (taken before the filter above): read again
+        L["swim"] = sw = {}
+        L["swim_seen"] = 0
+        saw(L, "FAA SWIM", None, "Cleared FAA data from an earlier flight with this number")
     ids = swim_idents(L)
     if len(ids) > 1 and sw.get("atc_logged") != ids[1]:
         sw["atc_logged"] = ids[1]

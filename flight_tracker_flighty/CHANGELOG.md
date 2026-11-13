@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.31.38
+- Same flight number the day before: FAA messages without a first planned departure (TBFM, surface radar, datalink clearances) are now matched to a leg by the times they carry. Last night's late UA2662 MCO-EWR (TBFM EDCT 23:53, landed 01:35) had been applied to tonight's 19:34 UA2662, showing its EDCT, its landing and "Taxiing to the gate".
+- A leg already holding such data has its SWIM facts cleared and read again from the matching messages.
+- The FAA EDCT lookup skips EDCTs more than 6 hours past (an earlier day's flight).
+
 ## 4.31.37
 - Datalink clearance EDCT: ignored when it's one the FAA assigned earlier and has since changed. A DCL that reached us late carried the old EDCT and went over the FAA's newer one (UA2629 MCO-EWR 12 Nov). A clearance EDCT the FAA never had (an airline slot swap) still applies.
 - An old clearance EDCT already showing goes back to the FAA's on the next SWIM message for the flight.
