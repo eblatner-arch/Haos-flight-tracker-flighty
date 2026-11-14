@@ -2,7 +2,7 @@
 
 ## 4.31.39
 - Schedule: duty, reserve and standby blocks are no longer read as flights. When a trip's flights cancel, the schedule adds "DUTY EWR 13Nov 14:27 - EWR 13Nov 20:00", which showed as an EWR to EWR flight "Boarding". Titles starting DUTY, SBY, RSV, RES, STBY, RESERVE, TRAINING, SIM, OFF, HOTEL, LAYOVER, RON, REPORT or RELEASE, and any same-airport entry without a flight number, are skipped.
-- Ones already added are removed on the next schedule read, even if they've started.
+- Ones already added are removed when the add-on starts (it now reads the schedule fresh on start), even if they've started.
 
 ## 4.31.38
 - Same flight number the day before: FAA messages without a first planned departure (TBFM, surface radar, datalink clearances) are now matched to a leg by the times they carry. Last night's late UA2662 MCO-EWR (TBFM EDCT 23:53, landed 01:35) had been applied to tonight's 19:34 UA2662, showing its EDCT, its landing and "Taxiing to the gate".

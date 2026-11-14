@@ -3621,7 +3621,7 @@ def worker():
             forced |= swim_news(now)
             forced |= nas_news(now)
             if now - last_sched > 300 or "all" in forced or "schedule" in forced:
-                reload_schedule(force="all" in forced or "schedule" in forced)
+                reload_schedule(force="all" in forced or "schedule" in forced or not last_sched)  # read fresh after an update
                 check_schedule_stale(now)
                 expire_manual(now)
                 try:
