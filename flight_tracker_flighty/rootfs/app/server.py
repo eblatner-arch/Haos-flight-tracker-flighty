@@ -627,8 +627,11 @@ def reload_schedule(force=False):
             L = cur[lid]
             if L.get("extra"):
                 continue
-            if lid not in seen and (L["sched_out"] > now or not L.get("ident")):
-                del cur[lid]  # dropped from the schedule (or no longer read as a flight: a duty block)
+            flew = fa.phase(L.get("flight"), now) in ("taxi_out", "airborne", "landed", "arrived", "diverted") if L.get("flight") else False
+            if lid not in seen and (L["sched_out"] > now or not L.get("ident") or not flew):
+                # dropped from the schedule: gone unless it flew (a cancelled flight taken off the
+                # schedule after its time, UA1268 13 Nov), or no longer read as a flight (a duty block)
+                del cur[lid]
             elif L["sched_in"] < now - 36 * HOUR:
                 del cur[lid]
         matched = {L["id"] for L in legs}

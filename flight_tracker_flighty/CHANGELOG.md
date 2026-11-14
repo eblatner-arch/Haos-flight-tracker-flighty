@@ -1,5 +1,8 @@
 # Changelog
 
+## 4.31.40
+- A flight taken off the schedule is removed even after its departure time, unless it left the gate. Before, only flights still in the future were removed, so a cancelled flight dropped from the schedule late (UA1268 EWR-MCO 13 Nov) stayed on My Flights.
+
 ## 4.31.39
 - Schedule: duty, reserve and standby blocks are no longer read as flights. When a trip's flights cancel, the schedule adds "DUTY EWR 13Nov 14:27 - EWR 13Nov 20:00", which showed as an EWR to EWR flight "Boarding". Titles starting DUTY, SBY, RSV, RES, STBY, RESERVE, TRAINING, SIM, OFF, HOTEL, LAYOVER, RON, REPORT or RELEASE, and any same-airport entry without a flight number, are skipped.
 - Ones already added are removed when the add-on starts (it now reads the schedule fresh on start), even if they've started.
