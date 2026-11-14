@@ -24,6 +24,7 @@ TIMED_FLIGHT_RE = (r"(?:\b(?:[A-Z]{2,3}\s?)?(?P<flt>\d{1,4})[A-Z]?\s+)?\b(?P<dep
 DEADHEAD_RE = re.compile(r"\b(?:DH|DHD|DEADHEAD|DEAD\s?HEAD)\b", re.I)
 # An airline code directly in front of the flight number: "UA2204", "UAL 2204", "B6 123"
 AIRLINE_RE = r"\b(?P<al>[A-Z]{3}|[A-Z]{2}|[A-Z]\d|\d[A-Z])\s?{flt}\b"
+NOT_FLIGHT_RE = re.compile(r"\s*(?:DUTY|SBY|RSV|RES|STBY|STANDBY|RESERVE|TRAINING|TRNG|SIM|OFF|HOTEL|LAYOVER|RON|REPORT|RELEASE)\b", re.I)
 NOT_AIRLINES = {"DH", "DHD", "CA", "FO", "RON", "SBY", "RSV", "TRIP"}
 
 # IATA -> ICAO for carriers a US crewmember is likely to ride or fly.
@@ -129,6 +130,10 @@ def legs_from_events(events, cfg):
             continue
         gd = m.groupdict()
         flt = (gd.get("flt") or "").lstrip("0")
+        if NOT_FLIGHT_RE.match(summ) or (not flt and gd.get("dep") == gd.get("arr")):
+            # a duty period, reserve or standby block ("DUTY EWR 13Nov 14:27 - EWR 13Nov 20:00",
+            # added when a trip's flights cancel), not a flight
+            continue
         airline = airline_for(summ, gd.get("flt") or "", cfg.get("airline_icao"))
         found.append({
             "id": e["oid"],

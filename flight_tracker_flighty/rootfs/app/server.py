@@ -627,8 +627,8 @@ def reload_schedule(force=False):
             L = cur[lid]
             if L.get("extra"):
                 continue
-            if lid not in seen and L["sched_out"] > now:
-                del cur[lid]  # dropped from the schedule
+            if lid not in seen and (L["sched_out"] > now or not L.get("ident")):
+                del cur[lid]  # dropped from the schedule (or no longer read as a flight: a duty block)
             elif L["sched_in"] < now - 36 * HOUR:
                 del cur[lid]
         matched = {L["id"] for L in legs}
